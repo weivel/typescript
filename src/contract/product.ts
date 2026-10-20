@@ -27,6 +27,7 @@ export interface AppStartupHook {
   entry: unknown;
   /** The file to write, relative to the app home. */
   file: string;
+  /** The key path to the array the entry joins. */
   path: string[];
 }
 
@@ -47,6 +48,7 @@ export interface AppDescriptor {
    * default rather than inventing one per app.
    */
   accent?: string;
+  /** The subdirectory inside the app home holding its slash commands. */
   commandsSubdir: string;
   detect: AppDetect;
   discovery?: AppDiscovery;
@@ -58,6 +60,7 @@ export interface AppDescriptor {
   label: string;
   /** The plugin this app is reached through. Absent means the app has no loader. */
   loader?: AppLoader;
+  /** The app config file a model catalog is merged into. */
   modelCatalog?: AppModelCatalog;
   /** This app's own npm-plugin mechanism. Absent means it has none. */
   npmPlugins?: AppNpmPlugins;
@@ -70,10 +73,12 @@ export interface AppDescriptor {
    */
   paths?: AppPathNames;
   projects?: AppProjects;
+  /** The port this app's proxy listens on, or 0 when it needs none. */
   proxyPort: number;
   startupHook?: AppStartupHook;
   /** Session-storage formats this app writes, for usage readers. Absent means no usage data. */
   usage?: AppUsage;
+  /** The wire format this app speaks, for example `anthropic`. */
   wireFormat: string;
   /**
    * The command a user types to launch this app through its loader's wrapper.
@@ -110,6 +115,7 @@ export interface HomeDescriptor {
  * cache directly.
  */
 export interface AppModelCatalog {
+  /** Environment variable naming the config file outright. */
   envOverride?: string;
   /** Files to try in order, relative to the app home. */
   files: string[];
@@ -148,6 +154,7 @@ export interface AppPathNames {
  */
 export interface AppLoader {
   id: string;
+  /** Where the loader is cloned from, as `owner/repo` or a full URL. */
   url: string;
 }
 
@@ -160,6 +167,7 @@ export interface AppLoader {
 export interface AppDiscovery {
   /** A curated list to read, as a raw URL. */
   awesomeList?: string;
+  /** A free-text search to run where the topic alone under-reports. */
   searchQuery?: string;
   topic?: string;
 }
@@ -173,6 +181,7 @@ export interface AppDiscovery {
  */
 export interface AppProjects {
   historyFile?: string;
+  /** The file the app writes inside a project's git directory to record the project id. */
   markerFile?: string;
   /** Session databases to try in order, absolute or relative to the app home. */
   sessionDb?: string[];
@@ -187,10 +196,12 @@ export interface AppProjects {
  * category, and no plugin code runs when the catalog is read.
  */
 export interface MarketplaceMatch {
+  /** The catalog kind an entry must be, as the reading host names its kinds. */
   kind?: string;
   topics?: string[];
 }
 
+/** How the repo is published, to npm and as Java release assets. */
 export interface ManifestPublish {
   /** The README is rendered at build time, so the release promotes it rather than testing it. */
   generatedReadme?: boolean;
@@ -209,11 +220,15 @@ export interface ManifestPublish {
   scopedOnly?: boolean;
 }
 
+/** How to tell whether an app is installed. */
 export interface AppDetect {
+  /** The executable a user launches, looked up on the path. */
   binary: string;
+  /** The npm package the app ships as, for a global-install check. */
   pkg: string;
 }
 
+/** One category a plugin adds to a host's catalog of installable things. */
 export interface MarketplaceCategory {
   /** The category's id, unique across every plugin declaring one. */
   id: string;
@@ -222,9 +237,13 @@ export interface MarketplaceCategory {
   match: MarketplaceMatch;
 }
 
+/** Repository metadata, from which the GitHub description and topic set are derived. */
 export interface RepoMeta {
+  /** The single category topic, for example `core-library` or `dashboard`. */
   category: string;
+  /** Domain topics, for example `claude` or `gemini`. */
   domains?: string[];
+  /** The role phrase, capitalized, without the fixed ecosystem suffix. */
   role: string;
   /**
    * The tech topics, for example `typescript`, `java` or `svelte`.
@@ -234,10 +253,13 @@ export interface RepoMeta {
    * TypeScript package is both and describing it as either is wrong.
    */
   tech: string[];
+  /** Topics this repo needs that no other rule derives, for example `github-actions`. */
   topics?: string[];
 }
 
+/** The session-storage formats an app writes, for a usage reader. */
 export interface AppUsage {
+  /** Format ids, each of which a consumer maps to a parser of its own. */
   formats: string[];
 }
 
@@ -245,6 +267,7 @@ export interface ManifestMarketplace {
   categories: MarketplaceCategory[];
 }
 
+/** Where an app keeps its home directory, in the order a resolver tries. */
 export interface AppHome {
   /** Paths to try in order, each with a leading `~` for the user home. */
   candidates: string[];
