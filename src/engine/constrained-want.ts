@@ -1,5 +1,5 @@
 import type { Scheduler } from "../index.js";
-import { satisfies, unknownIn } from "./constraints.js";
+import { budgetFault, satisfies, unknownIn } from "./constraints.js";
 import type { Budget, ConstraintEntry } from "./constraints.js";
 import type { DiagnosticSink } from "./diagnostics.js";
 import { pluginError } from "./errors.js";
@@ -57,12 +57,13 @@ export class ConstrainedWant {
   }
 
   start(): Promise<unknown> {
-    if (!(this.budget.pollMillis > 0)) {
+    const fault = budgetFault(this.budget);
+    if (fault !== undefined) {
       this.fail(
         pluginError(
           this.consumerId,
-          `asked for "${this.requirement.id}" polling every ${this.budget.pollMillis} ms, which never spends its budget`,
-          "build the budget with budget(budgetMillis, pollMillis) and a positive interval",
+          `asked for "${this.requirement.id}" under ${fault}`,
+          "build the budget with budget(budgetMillis, pollMillis)",
         ),
       );
       return this.settled;
