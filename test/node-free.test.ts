@@ -1,3 +1,4 @@
+import { builtinModules } from "node:module";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -5,15 +6,17 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
-const NODE_BUILTINS = ["fs", "path", "os", "process", "child_process", "url", "crypto", "util", "events", "stream"];
+const NODE_BUILTINS = new Set(builtinModules.map((name) => name.replace(/^node:/, "")));
 const NODE_FREE_ENTRIES = ["src/index.ts", "src/engine/index.ts"];
 
 function specifiers(source: string): string[] {
-  return [...source.matchAll(/(?:from|import)\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  const staticForms = /(?:from|import)\s+["']([^"']+)["']/g;
+  const callForms = /(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/g;
+  return [...source.matchAll(staticForms), ...source.matchAll(callForms)].map((match) => match[1]);
 }
 
 function isNodeBuiltin(specifier: string): boolean {
-  return specifier.startsWith("node:") || NODE_BUILTINS.includes(specifier);
+  return specifier.startsWith("node:") || NODE_BUILTINS.has(specifier.split("/")[0]);
 }
 
 function resolveRelative(fromFile: string, specifier: string): string | null {
@@ -46,7 +49,8 @@ function nodeImportsFrom(entry: string): string[] {
     for (const specifier of specifiers(source)) {
       if (specifier.startsWith(".")) {
         const next = resolveRelative(file, specifier);
-        if (next) queue.push(next);
+        if (!next) throw new Error(`${file} imports "${specifier}", which resolves to no file`);
+        queue.push(next);
         continue;
       }
       if (isNodeBuiltin(specifier)) found.add(specifier);
@@ -70,4 +74,40 @@ it("is a graph walk, so a builtin one relative import away is still caught", () 
   const entrySource = readFileSync(join(directory, "entry.ts"), "utf8");
   expect(specifiers(entrySource).filter(isNodeBuiltin)).toEqual([]);
   expect(nodeImportsFrom(join(directory, "entry.ts"))).toEqual(["node:fs"]);
+});
+
+function walkOf(files: Record<string, string>): string[] {
+  const directory = mkdtempSync(join(tmpdir(), "engine-node-free-"));
+  for (const [name, content] of Object.entries(files)) writeFileSync(join(directory, name), content);
+  return nodeImportsFrom(join(directory, "entry.ts"));
+}
+
+it("catches a bare builtin subpath one relative import away", () => {
+  const reached = walkOf({
+    "entry.ts": `export * from "./deep.js";\n`,
+    "deep.ts": `import { readFile } from "fs/promises";\nexport const read = readFile;\n`,
+  });
+  expect(reached).toEqual(["fs/promises"]);
+});
+
+it("catches builtins outside a hand-written list", () => {
+  const reached = walkOf({
+    "entry.ts": `import "http";\nimport "worker_threads";\nimport "path/posix";\nimport "zlib";\n`,
+  });
+  expect(reached).toEqual(["http", "path/posix", "worker_threads", "zlib"]);
+});
+
+it("catches a literal dynamic import and a literal require", () => {
+  const reached = walkOf({
+    "entry.ts": `export const load = () => import("node:fs");\nexport const old = require("os");\n`,
+  });
+  expect(reached).toEqual(["node:fs", "os"]);
+});
+
+it("fails the walk on a relative import it cannot resolve", () => {
+  expect(() => walkOf({ "entry.ts": `export * from "./missing.js";\n` })).toThrow(/entry\.ts.*\.\/missing\.js/);
+});
+
+it("does not mistake a package for a builtin", () => {
+  expect(walkOf({ "entry.ts": `import Ajv from "ajv";\n` })).toEqual([]);
 });
