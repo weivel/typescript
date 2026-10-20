@@ -84,7 +84,8 @@ export function createHost(options: HostOptions): Host {
   return new HostState(options).surface();
 }
 
-const REAL_TIME: Scheduler = {
+/** The default clock: real time through `setTimeout`. */
+export const REAL_TIME: Scheduler = {
   schedule: (task, delayMillis) => {
     const timer = setTimeout(task, delayMillis);
     return () => clearTimeout(timer);
