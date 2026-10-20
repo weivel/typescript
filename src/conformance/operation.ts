@@ -1,4 +1,5 @@
-export type Operation = (given: Record<string, unknown>) => Record<string, unknown>;
+/** An op may settle asynchronously, because an engine answering through a `Promise` cannot be read any sooner. */
+export type Operation = (given: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>;
 
 export type Operations = Readonly<Record<string, Operation>>;
 

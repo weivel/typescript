@@ -11,3 +11,7 @@ export { readRequirement, readOffer } from "./requirements.js";
 export type { ServiceRequirement, ServiceOffer } from "./requirements.js";
 export { order, unitsFromManifests, activationOrder } from "./activation.js";
 export type { ActivationPlan, ActivationUnit, DeclarationKind, Need, Offer } from "./activation.js";
+export { isServiceRevoked, proxyHandles, serviceRevoked, unwrappedHandles } from "./handles.js";
+export type { Handle, Handles, ServiceRevoked } from "./handles.js";
+export { ServiceHub } from "./registry.js";
+export type { ConsumerRegistry, Recorder, ServiceHubOptions, WatchEvent, WatchListener } from "./registry.js";

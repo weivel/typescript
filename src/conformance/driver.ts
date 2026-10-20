@@ -11,13 +11,13 @@ import { operations } from "./operations.js";
  * Dispatch passes `given` only, so a vector's `then` cannot reach an op: the runner judges, the
  * driver answers.
  */
-export function answer(vector: Vector, table: Operations = operations): Outcome {
+export async function answer(vector: Vector, table: Operations = operations): Promise<Outcome> {
   const operation = Object.hasOwn(table, vector.op) ? table[vector.op] : undefined;
   if (operation === undefined) {
     return { id: vector.id, witnessed: false, result: { reason: "not implemented" } };
   }
   try {
-    return { id: vector.id, witnessed: true, result: operation(givenOf(vector)) };
+    return { id: vector.id, witnessed: true, result: await operation(givenOf(vector)) };
   } catch (error) {
     return { id: vector.id, witnessed: true, result: { error: String(error) } };
   }
@@ -33,7 +33,7 @@ export async function serve(input: Readable, output: Writable, table: Operations
   const lines = createInterface({ input, crlfDelay: Infinity });
   for await (const line of lines) {
     if (line.trim() !== "") {
-      output.write(`${JSON.stringify(answer(JSON.parse(line) as Vector, table))}\n`);
+      output.write(`${JSON.stringify(await answer(JSON.parse(line) as Vector, table))}\n`);
     }
   }
 }
