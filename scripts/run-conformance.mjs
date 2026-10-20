@@ -12,7 +12,8 @@ if (!existsSync(join(kit, "node_modules"))) {
   if (install.status !== 0) process.exit(install.status ?? 1);
 }
 
-const driver = `node ${join(repositoryRoot(), "dist", "conformance", "driver.js")}`;
+const command = `node "${join(repositoryRoot(), "dist", "conformance", "driver.js")}"`;
+const driver = process.platform === "win32" ? `"${command.replaceAll('"', '\\"')}"` : command;
 const run = spawnSync(
   npx,
   ["tsx", "runner/src/cli.ts", "run", "--driver", driver, ...process.argv.slice(2)],
