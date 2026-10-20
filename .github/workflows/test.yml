@@ -1,0 +1,22 @@
+name: Test
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  test:
+    uses: intisy/workflows/.github/workflows/test.yml@main
+    with:
+      toolchains: node
+      node_install: npm ci
+      node_build: npm run build
+      node_test: npm test
+      extra_repositories: |
+        weivel/model model
+        weivel/conformance conformance
+        weivel/java java
+    secrets:
+      envPAT: ${{ secrets.PAT }}

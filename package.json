@@ -1,0 +1,39 @@
+{
+  "name": "@weivel/typescript",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The plugin engine, native TypeScript, held to the same conformance kit as every other implementation",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "default": "./dist/engine/index.js"
+    },
+    "./host": {
+      "types": "./dist/host/index.d.ts",
+      "default": "./dist/host/index.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance/driver.d.ts",
+      "default": "./dist/conformance/driver.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/embed-schema.mjs && tsc",
+    "test": "node scripts/embed-schema.mjs && vitest run",
+    "conformance": "node scripts/run-conformance.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "3.2.7"
+  }
+}

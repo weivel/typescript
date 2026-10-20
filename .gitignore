@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.idea/
+src/engine/schema.generated.ts
+
+# Generated on the default branch by the readme job.
+README.md
