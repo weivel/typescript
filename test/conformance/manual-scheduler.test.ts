@@ -22,4 +22,16 @@ describe("ManualScheduler", () => {
     expect(seen).toEqual(["kept"]);
     expect(scheduler.now()).toBe(0);
   });
+
+  it("names the earliest pending due time, and nothing once it has run", () => {
+    const scheduler = new ManualScheduler();
+    expect(scheduler.nextDueMillis()).toBeUndefined();
+    scheduler.schedule(() => {}, 500);
+    const cancel = scheduler.schedule(() => {}, 5);
+    expect(scheduler.nextDueMillis()).toBe(5);
+    cancel();
+    expect(scheduler.nextDueMillis()).toBe(500);
+    scheduler.advanceTo(500);
+    expect(scheduler.nextDueMillis()).toBeUndefined();
+  });
 });

@@ -47,6 +47,11 @@ export class ManualScheduler implements Scheduler {
     this.nowMillis = Math.max(this.nowMillis, millis);
   }
 
+  /** The due time of the earliest pending tick, or undefined when nothing is scheduled. */
+  nextDueMillis(): number | undefined {
+    return this.earliestDueBy(Infinity)?.dueMillis;
+  }
+
   private earliestDueBy(millis: number): Tick | undefined {
     let earliest: Tick | undefined;
     for (const tick of this.pending) {
