@@ -21,5 +21,5 @@ export type { Budget, ConstraintEntry, ServiceProvider } from "./constraints.js"
 export { PluginLedger } from "./ledger.js";
 export type { LedgerError, LedgerRow, PluginStatus } from "./ledger.js";
 export type { PluginRuntime, RuntimeEvents } from "./context.js";
-export { createHost } from "./host.js";
+export { createHost, REAL_TIME } from "./host.js";
 export type { CapabilityRecord, Host, HostLedger, HostOptions } from "./host.js";
