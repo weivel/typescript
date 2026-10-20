@@ -54,9 +54,19 @@ function probeSource(interfaces: JavaInterface[]): string {
     lines.push(
       `type _${name} = [${native}] extends [${java}] ? ([${java}] extends [${native}] ? true : never) : never;`,
       `export const _${name.toLowerCase()}: _${name} = true;`,
+      `type _${name}Keys = [keyof ${native}] extends [keyof ${java}] ? ([keyof ${java}] extends [keyof ${native}] ? true : never) : never;`,
+      `export const _${name.toLowerCase()}keys: _${name}Keys = true;`,
     );
   }
   return lines.join("\n");
+}
+
+function describeDiagnostic(diagnostic: ts.Diagnostic): string {
+  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
+  if (!diagnostic.file || diagnostic.start === undefined) return message;
+  const { line } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+  const subject = diagnostic.file.text.split("\n")[line]?.trim() ?? "";
+  return subject + " :: " + message;
 }
 
 function parityDiagnostics(interfaces: JavaInterface[]): string[] {
@@ -67,7 +77,7 @@ function parityDiagnostics(interfaces: JavaInterface[]): string[] {
     const program = ts.createProgram([probePath], compilerOptions());
     return ts
       .getPreEmitDiagnostics(program)
-      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+      .map(describeDiagnostic);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
