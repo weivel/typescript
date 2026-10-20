@@ -102,6 +102,54 @@ describe("proxyHandles", () => {
   });
 });
 
+describe("proxyHandles transparency", () => {
+  class Widget {
+    static kind = "widget";
+  }
+
+  class Fluent {
+    #count = 0;
+
+    self(): this {
+      return this;
+    }
+
+    increment(): number {
+      this.#count += 1;
+      return this.#count;
+    }
+  }
+
+  it("constructs and recognises a class read through a live handle", () => {
+    const live = proxyHandles(() => {}).around("widgets", { Widget }).get() as { Widget: typeof Widget };
+    const made = new live.Widget();
+    expect(made).toBeInstanceOf(Widget);
+    expect(made instanceof live.Widget).toBe(true);
+    expect(live.Widget.kind).toBe("widget");
+  });
+
+  it("refuses to construct a class read through a revoked handle", () => {
+    const handle = proxyHandles(() => {}).around("widgets", { Widget });
+    const ClassRead = (handle.get() as { Widget: typeof Widget }).Widget;
+    handle.revoke();
+    expect(isServiceRevoked(caught(() => new ClassRead()))).toBe(true);
+  });
+
+  it("keeps a method's own name and length", () => {
+    const live = proxyHandles(() => {}).around("counter", new Counter()).get() as Counter;
+    expect(live.increment.name).toBe(Counter.prototype.increment.name);
+    expect(live.increment.length).toBe(Counter.prototype.increment.length);
+  });
+
+  it("hands back the handle, not the instance, from a method returning this", () => {
+    const handle = proxyHandles(() => {}).around("fluent", new Fluent());
+    const escaped = (handle.get() as Fluent).self();
+    expect(escaped).toBe(handle.get());
+    handle.revoke();
+    expect(isServiceRevoked(caught(() => escaped.increment()))).toBe(true);
+  });
+});
+
 describe("unwrappedHandles", () => {
   it("hands the instance over and reports when it is revoked", () => {
     const reported: string[] = [];

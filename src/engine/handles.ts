@@ -108,18 +108,29 @@ function revocable(serviceId: string, target: object): Handle {
   };
 
   /**
+   * @implNote A Proxy over the method rather than a closure, so a class read through the handle
+   * still constructs, still answers `instanceof`, and keeps its `name`, `length` and statics.
    * @implNote Called on the target, not the proxy, when invoked through the handle or detached,
-   * because a class instance's private fields are not reachable through a Proxy receiver.
+   * because a class instance's private fields are not reachable through a Proxy receiver; a
+   * result that IS the target is handed back as the handle, so a fluent call cannot leak it.
    */
   const guarded = (method: Function): Function => {
     const known = guardedMethods.get(method);
     if (known !== undefined) return known;
-    const wrapper = function (this: unknown, ...args: unknown[]): unknown {
-      refuseWhenRevoked();
-      return Reflect.apply(method, this === proxy || this === undefined ? target : this, args);
-    };
-    guardedMethods.set(method, wrapper);
-    return wrapper;
+    const methodProxy: Function = new Proxy(method, {
+      apply(callable, thisArgument, args) {
+        refuseWhenRevoked();
+        const self = thisArgument === proxy || thisArgument === undefined ? target : thisArgument;
+        const result: unknown = Reflect.apply(callable, self, args);
+        return result === target ? proxy : result;
+      },
+      construct(constructable, args, newTarget) {
+        refuseWhenRevoked();
+        return Reflect.construct(constructable, args, newTarget === methodProxy ? constructable : newTarget);
+      },
+    });
+    guardedMethods.set(method, methodProxy);
+    return methodProxy;
   };
 
   const proxy: object = new Proxy(target, {
