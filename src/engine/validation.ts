@@ -33,9 +33,9 @@ const validateSchema = new Ajv({ strict: true, allErrors: true, verbose: true })
  */
 export function validateManifest(manifest: unknown, wellKnownServices?: readonly string[]): ValidationIssue[] {
   if (!validateSchema(manifest)) {
-    return firstPerPath((validateSchema.errors ?? []).flatMap(issueOf));
+    return firstPerPath(withoutAlternativeNoise(validateSchema.errors ?? []).flatMap(issueOf));
   }
-  return [...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest)];
+  return firstPerPath([...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest)]);
 }
 
 /** Returns the manifest itself, or throws a refusal attributed to its id carrying the first issue's fix. */
@@ -54,12 +54,87 @@ function declaredId(manifest: unknown): string {
   return typeof id === "string" ? id : "manifest";
 }
 
+/**
+ * @implNote An `anyOf` reports its own failure beside the errors of every branch. A branch whose
+ * `type` check failed at the same instance never applied to it, so its errors are noise. When no
+ * branch applies, the `anyOf` error itself is the one to report, carrying the items-level `fix`;
+ * when one does, that branch's own errors name the field that is wrong.
+ */
+function withoutAlternativeNoise(errors: ErrorObject[]): ErrorObject[] {
+  const alternatives = errors.filter((error) => error.keyword === "anyOf");
+  const droppedBranches = alternatives.flatMap((alternative) =>
+    inapplicableBranchPrefixes(alternative, errors).map((prefix) => ({ alternative, prefix })),
+  );
+  return errors.filter((error) => {
+    const droppedAsBranch = droppedBranches.some(
+      ({ alternative, prefix }) => error.schemaPath.startsWith(prefix) && isWithin(error.instancePath, alternative.instancePath),
+    );
+    const droppedAsAlternative = alternatives.includes(error) && hasApplicableBranch(error, errors);
+    return !droppedAsBranch && !droppedAsAlternative;
+  });
+}
+
+function branchCountOf(alternative: ErrorObject): number {
+  return Array.isArray(alternative.schema) ? alternative.schema.length : 0;
+}
+
+function inapplicableBranchPrefixes(alternative: ErrorObject, errors: ErrorObject[]): string[] {
+  const prefixes = Array.from({ length: branchCountOf(alternative) }, (_, branch) => `${alternative.schemaPath}/${branch}/`);
+  return prefixes.filter((prefix) => !isApplicable(prefix, alternative, errors));
+}
+
+function hasApplicableBranch(alternative: ErrorObject, errors: ErrorObject[]): boolean {
+  const prefixes = Array.from({ length: branchCountOf(alternative) }, (_, branch) => `${alternative.schemaPath}/${branch}/`);
+  return prefixes.some((prefix) => isApplicable(prefix, alternative, errors));
+}
+
+function isApplicable(prefix: string, alternative: ErrorObject, errors: ErrorObject[]): boolean {
+  return !errors.some(
+    (error) => error.schemaPath === `${prefix}type` && error.instancePath === alternative.instancePath,
+  );
+}
+
+function isWithin(instancePath: string, ancestorPath: string): boolean {
+  return instancePath === ancestorPath || instancePath.startsWith(`${ancestorPath}/`);
+}
+
 function issueOf(error: ErrorObject): ValidationIssue[] {
   if (error.keyword === "if") {
     return [];
   }
-  const path = pathOf(error);
-  return [{ path, message: `${path}: ${error.message ?? "is invalid"}`, fix: fixOf(error) }];
+  if (error.keyword === "uniqueItems") {
+    return repeatedIndexes(error.data).map((index) => issueAt(`${dottedPath(error.instancePath)}[${index}]`, error));
+  }
+  return [issueAt(pathOf(error), error)];
+}
+
+function issueAt(path: string, error: ErrorObject): ValidationIssue {
+  return { path, message: `${path}: ${error.message ?? "is invalid"}`, fix: fixOf(error) };
+}
+
+function repeatedIndexes(items: unknown): number[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.flatMap((item, index) => (items.slice(0, index).some((earlier) => sameJson(earlier, item)) ? [index] : []));
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) {
+    return false;
+  }
+  if (Array.isArray(left) !== Array.isArray(right)) {
+    return false;
+  }
+  const leftKeys = Object.keys(left);
+  const rightRecord = right as Record<string, unknown>;
+  return (
+    leftKeys.length === Object.keys(right).length &&
+    leftKeys.every((key) => key in rightRecord && sameJson((left as Record<string, unknown>)[key], rightRecord[key]))
+  );
 }
 
 function missingPropertyOf(error: ErrorObject): string {
@@ -71,10 +146,6 @@ function pathOf(error: ErrorObject): string {
   if (error.keyword === "required") {
     const missing = missingPropertyOf(error);
     return base === "" ? missing : `${base}.${missing}`;
-  }
-  if (error.keyword === "uniqueItems") {
-    const { i, j } = error.params as { i: number; j: number };
-    return `${base}[${Math.max(i, j)}]`;
   }
   return base === "" ? "(root)" : base;
 }

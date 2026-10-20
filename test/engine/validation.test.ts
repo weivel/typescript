@@ -42,4 +42,36 @@ describe("manifest validation", () => {
     const manifest = { id: "a", api: 2, services: { consumes: ["x", { id: "x" }] } };
     expect(validateManifest(manifest).map((issue) => issue.path)).toEqual(["services.consumes[1]"]);
   });
+
+  it("reports only the missing id of a consumed service object", () => {
+    const manifest = { id: "a", api: 2, services: { consumes: [{ optional: true }] } };
+    expect(validateManifest(manifest).map((issue) => issue.path)).toEqual(["services.consumes[0].id"]);
+  });
+
+  it("reports only the bad attribute of a provided service object", () => {
+    const manifest = { id: "a", api: 2, services: { provides: [{ id: "a:x", attributes: { speed: "fast" } }] } };
+    expect(validateManifest(manifest).map((issue) => issue.path)).toEqual(["services.provides[0].attributes.speed"]);
+  });
+
+  it("gives a service entry of the wrong type the schema's own fix", () => {
+    const manifest = { id: "a", api: 2, services: { consumes: [5] } };
+    const issues = validateManifest(manifest);
+    expect(issues.map((issue) => issue.path)).toEqual(["services.consumes[0]"]);
+    expect(issues[0]!.fix).toContain("write the service id as a string");
+  });
+
+  it("reports every later occurrence of a repeated item", () => {
+    const paths = (capabilities: string[]) =>
+      validateManifest({ id: "a", api: 2, entry: "x.js", capabilities }).map((issue) => issue.path);
+    expect(paths(["x", "x", "x"])).toEqual(["capabilities[1]", "capabilities[2]"]);
+    expect(paths(["a", "b", "a", "b"])).toEqual(["capabilities[2]", "capabilities[3]"]);
+  });
+
+  it("names a repeated bare service once when both rules refuse it", () => {
+    const manifest = { id: "a", api: 2, services: { provides: ["r", "r"] } };
+    expect(validateManifest(manifest, []).map((issue) => issue.path)).toEqual([
+      "services.provides[0]",
+      "services.provides[1]",
+    ]);
+  });
 });
