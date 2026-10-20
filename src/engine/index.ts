@@ -7,3 +7,7 @@ export { compatibility } from "./compatibility.js";
 export type { HostIdentity, Incompatibility } from "./compatibility.js";
 export { validateManifest, assertManifest } from "./validation.js";
 export type { ValidationIssue } from "./validation.js";
+export { readRequirement, readOffer } from "./requirements.js";
+export type { ServiceRequirement, ServiceOffer } from "./requirements.js";
+export { order, unitsFromManifests, activationOrder } from "./activation.js";
+export type { ActivationPlan, ActivationUnit, DeclarationKind, Need, Offer } from "./activation.js";
