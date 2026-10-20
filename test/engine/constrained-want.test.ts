@@ -55,6 +55,33 @@ describe("budget", () => {
     expect(() => budget(1000, -5)).toThrow();
     expect(budget(1000, 100)).toEqual({ budgetMillis: 1000, pollMillis: 100 });
   });
+
+  it.each([NaN, Infinity, -1])("refuses a length of %s, which is never spent", (length) => {
+    expect(() => budget(length, 1000)).toThrow(RangeError);
+  });
+
+  it.each([NaN, Infinity, -1])("rejects a hand-built budget of %s ms before asking the provider", async (length) => {
+    const { hub, clock } = hubWith();
+    let asked = 0;
+    hub.forConsumer("a").register(
+      "a:store",
+      {
+        attributes: () => {
+          asked++;
+          return { maxReplicas: 1 };
+        },
+        serviceFor: () => "the service",
+      },
+      null,
+    );
+    const settled = track(hub.forConsumer("b").want(REPLICATED, { budgetMillis: length, pollMillis: 1000 }));
+    spend(clock);
+    await turn();
+    expect(settled.state).toBe("rejected");
+    expect(isPluginError(settled.reason)).toBe(true);
+    expect(asked).toBe(0);
+    expect(clock.nextDueMillis()).toBeUndefined();
+  });
 });
 
 describe("a constrained want over a provider whose attributes throw", () => {

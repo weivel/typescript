@@ -31,12 +31,27 @@ export interface ServiceProvider {
   serviceFor(constraints: Record<string, number>): unknown | undefined;
 }
 
-/** @throws when `pollMillis` is not positive, which would spend no budget per poll and re-ask for ever. */
+/** @throws when the budget would never run out, per `budgetFault`. */
 export function budget(budgetMillis: number, pollMillis: number): Budget {
-  if (!(pollMillis > 0)) {
-    throw new RangeError(`a budget polling every ${pollMillis} ms never reaches its deadline: give it a positive interval`);
-  }
+  const fault = budgetFault({ budgetMillis, pollMillis });
+  if (fault !== undefined) throw new RangeError(fault);
   return { budgetMillis, pollMillis };
+}
+
+/**
+ * Why a budget would never run out, or undefined when it will.
+ *
+ * @implNote A number is not Java's `long`: `NaN` and `Infinity` never compare as spent, and a poll
+ * that is not positive spends nothing, so each would re-ask the provider for the life of the process.
+ */
+export function budgetFault({ budgetMillis, pollMillis }: Budget): string | undefined {
+  if (!Number.isFinite(budgetMillis) || budgetMillis < 0) {
+    return `a budget of ${budgetMillis} ms is never spent: give it a finite, non-negative length`;
+  }
+  if (!Number.isFinite(pollMillis) || !(pollMillis > 0)) {
+    return `a budget polling every ${pollMillis} ms never reaches its deadline: give it a positive, finite interval`;
+  }
+  return undefined;
 }
 
 export function isServiceProvider(value: unknown): value is ServiceProvider {
