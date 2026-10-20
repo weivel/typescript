@@ -148,6 +148,37 @@ describe("startPlugins", () => {
     expect(loaded.host.capability("settings").map((record) => record.pluginId)).toEqual(["calm"]);
   });
 
+  it("quarantines a plugin whose activate throws and calls its deactivate", async () => {
+    const stopped: string[] = [];
+    const scan = scanOf({
+      manifest: manifest("angry"),
+      module: { default: { activate: () => { throw new Error("no disk"); }, deactivate: () => { stopped.push("angry"); } } },
+    });
+    const loaded = await startPlugins(options(scan));
+
+    expect(loaded.quarantined.map((error) => error.pluginId)).toEqual(["angry"]);
+    expect(stopped).toEqual(["angry"]);
+  });
+
+  it("quarantines a plugin whose default class throws from its constructor, and the host stays up", async () => {
+    class Unconstructable {
+      constructor() { throw new Error("no constructor today"); }
+      activate(): void {}
+      deactivate(): void {}
+    }
+    const order: string[] = [];
+    const scan = scanOf(
+      { manifest: manifest("broken-class"), module: { default: Unconstructable } },
+      { manifest: manifest("calm"), module: settingsPlugin(order, "calm") },
+    );
+    const loaded = await startPlugins(options(scan));
+
+    expect(loaded.quarantined.map((error) => error.pluginId)).toEqual(["broken-class"]);
+    expect(loaded.quarantined[0].detail).toContain("no constructor today");
+    expect(loaded.quarantined[0].fix).toContain("default class");
+    expect(loaded.started).toEqual(["calm"]);
+  });
+
   it("quarantines a plugin whose activate never settles, without hanging the host", async () => {
     const scan = scanOf({ manifest: manifest("hung"), module: { default: { activate: () => new Promise(() => {}), deactivate: () => {} } } });
     const scheduler = new ManualScheduler();
