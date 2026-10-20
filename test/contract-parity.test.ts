@@ -52,10 +52,8 @@ function probeSource(interfaces: JavaInterface[]): string {
     const native = `Native.${name}${arguments_}`;
     const java = `Java.${name}${arguments_}`;
     lines.push(
-      `type _${name} = [${native}] extends [${java}] ? ([${java}] extends [${native}] ? true : never) : never;`,
+      `type _${name} = (<G>() => G extends ${native} ? 1 : 2) extends (<G>() => G extends ${java} ? 1 : 2) ? true : never;`,
       `export const _${name.toLowerCase()}: _${name} = true;`,
-      `type _${name}Keys = [keyof ${native}] extends [keyof ${java}] ? ([keyof ${java}] extends [keyof ${native}] ? true : never) : never;`,
-      `export const _${name.toLowerCase()}keys: _${name}Keys = true;`,
     );
   }
   return lines.join("\n");
