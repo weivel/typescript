@@ -54,8 +54,13 @@ describe("two hosts in one process", () => {
     expect(second.host.service("host:y")).toBeUndefined();
     first.host.markBroken("a", pluginError("a", "broke", "mend it"));
     context.services.register(context.service("a:late"), {});
-    expect(first.reported.length).toBeGreaterThan(0);
+    expect(first.reported.some((line) => line.includes("a:late"))).toBe(true);
     expect(second.reported).toEqual([]);
+    const later = second.host.contextFor({ id: "b", api: 2 }, runtime());
+    second.host.release("b");
+    later.services.register(later.service("b:late"), {});
+    expect(second.reported.some((line) => line.includes("b:late"))).toBe(true);
+    expect(first.reported.some((line) => line.includes("b:late"))).toBe(false);
   });
 });
 
