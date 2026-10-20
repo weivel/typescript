@@ -17,6 +17,6 @@ jobs:
       extra_repositories: |
         weivel/model model
         weivel/conformance conformance
-        weivel/java java
+        weivel/java java development
     secrets:
       envPAT: ${{ secrets.PAT }}
