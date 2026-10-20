@@ -31,4 +31,15 @@ describe("manifest validation", () => {
   it("attributes a refusal to the manifest when it declares no string id", () => {
     expect(() => assertManifest({ api: 2 })).toThrow(/\[manifest\]/);
   });
+
+  it("skips the bare-id rule without a well-known list and applies it to an empty one", () => {
+    const manifest = { id: "a", api: 2, services: { provides: ["routing"] } };
+    expect(validateManifest(manifest)).toEqual([]);
+    expect(validateManifest(manifest, []).map((issue) => issue.path)).toEqual(["services.provides[0]"]);
+  });
+
+  it("reports a service listed as a string and as an object at the second occurrence", () => {
+    const manifest = { id: "a", api: 2, services: { consumes: ["x", { id: "x" }] } };
+    expect(validateManifest(manifest).map((issue) => issue.path)).toEqual(["services.consumes[1]"]);
+  });
 });
