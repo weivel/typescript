@@ -8,7 +8,6 @@ export interface Scheduler {
   schedule(task: () => void, delayMillis: number): () => void;
 }
 
-/** A scheduler that runs nothing, for a host that wants no deadline to ever fire. */
 export const NEVER: Scheduler = {
   schedule: () => () => {},
 };

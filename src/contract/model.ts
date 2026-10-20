@@ -23,7 +23,6 @@ export interface CapabilityType<T> {
  * minting vocabulary, and the api mints none.
  */
 export interface ManifestConfig {
-  /** Every setting this plugin has, and what it is worth until a home changes it. */
   defaults: Record<string, unknown>;
   /**
    * The file these settings live in, `config/<name>.json`, when that is not the plugin's id.
@@ -55,9 +54,7 @@ export interface PluginContext {
    * dependency this package.
    */
   capability<T>(id: string): CapabilityType<T>;
-  /** This plugin's resolved configuration. */
   readonly config: PluginConfig;
-  /** How this plugin says something happened, and hears that something did. */
   readonly events: Events;
   /**
    * Every app home the host knows about, whether or not each exists on disk.
@@ -67,13 +64,9 @@ export interface PluginContext {
    * plugin is running. `paths` is this plugin's own home; this is every home there is.
    */
   homes(): HomeDescriptor[];
-  /** What this plugin may know about the host. */
   readonly host: HostDescriptor;
-  /** This plugin's logger. */
   readonly log: Logger;
-  /** This plugin's own manifest, as the host validated it. */
   readonly manifest: PluginManifest;
-  /** The storage directories of the home this plugin runs in. */
   readonly paths: PluginPaths;
   /**
    * Supplies the implementation behind a capability the manifest declares.
@@ -88,19 +81,18 @@ export interface PluginContext {
    * linking the library that mints the id.
    *
    * @remarks
-   * The counterpart of `capability(String)` for the ids a manifest states under
+   * The counterpart of `capability` for the ids a manifest states under
    * `services`. Without it a plugin would have to write the key literal itself, which is the
    * plugin minting vocabulary rather than naming an id it already declares.
    */
   service<T>(id: string): ServiceType<T>;
-  /** How this plugin reaches another plugin's API, and offers its own. */
   readonly services: Services;
   /**
    * The typed key for an event topic, so a plugin can publish or subscribe without linking the
    * library that names the topic.
    *
    * @remarks
-   * Same reason as `service(String)`: a topic is an id, and a plugin that had to
+   * Same reason as `service`: a topic is an id, and a plugin that had to
    * build the key by hand would be minting the vocabulary instead of naming it.
    */
   topic<T>(id: string): TopicType<T>;
@@ -117,13 +109,9 @@ export interface PluginContext {
 export interface Services {
   /** What is registered under this id right now, or absent when nothing is. */
   get<T>(type: ServiceType<T>): T | undefined;
-  /** Every service id registered right now. */
   ids(): string[];
-  /** Offers an implementation under this id, until the returned function is called. */
   register<T>(type: ServiceType<T>, implementation: T): () => void;
-  /** Waits for the id to be registered, for a host default the implementation chooses. */
   want<T>(type: ServiceType<T>): Promise<T>;
-  /** Waits for the id to be registered, giving up after the stated time. */
   want<T>(type: ServiceType<T>, options: WantOptions): Promise<T>;
   /**
    * Reports every registration and removal of this id until the returned function is called. The
@@ -145,9 +133,7 @@ export interface Services {
  * cannot disagree about the shape without the compiler saying so.
  */
 export interface Events {
-  /** Says a topic carried this payload, to whoever is listening and to nobody in particular. */
   publish<T>(topic: TopicType<T>, payload: T): void;
-  /** Hears this topic until the returned function is called. */
   subscribe<T>(topic: TopicType<T>, listener: ((value: T) => void)): () => void;
 }
 
@@ -160,15 +146,11 @@ export interface Events {
  * know, and became visible to that gate the moment this interface started emitting TypeScript.
  */
 export interface Store {
-  /** Removes `key`, and does nothing when it holds nothing. */
   delete(key: string): void;
-  /** Whether anything is stored under `key`. */
   exists(key: string): boolean;
   /** The value stored under `key`, or `null` when nothing is stored there. */
   get(key: string): string;
-  /** Every key beginning with `prefix`, in the order the store holds them. */
   listKeys(prefix: string): string[];
-  /** Stores `value` under `key`, replacing whatever was there. */
   put(key: string, value: string): void;
   /**
    * Replaces `key`'s value with what `mutator` returns, reading and writing as one
@@ -185,15 +167,10 @@ export interface Store {
  * lets the command files exist before the plugin has ever activated.
  */
 export interface ManifestCommand {
-  /** The argument shape a picker hints at, such as `list | get <key>`. */
   argumentHint?: string;
-  /** Markdown the model is shown, after any shell output. */
   body?: string;
-  /** What a command picker shows beside the name. */
   description: string;
-  /** The command's name, which is also the file it is written to. */
   name: string;
-  /** A shell line run before the body, which may use $ARGUMENTS and {{BUNDLE}}. */
   shell?: string;
 }
 
@@ -205,15 +182,10 @@ export interface ManifestCommand {
  * directory takes effect everywhere at once.
  */
 export interface PluginPaths {
-  /** Where cached downloads live. */
   cache: string;
-  /** Where configuration files live. */
   config: string;
-  /** The app home directory. */
   home: string;
-  /** Where deployed plugin bundles and their manifest sidecars live. */
   plugin: string;
-  /** Where plugin checkouts live. */
   repos: string;
 }
 
@@ -245,15 +217,10 @@ export interface PluginManifest {
    * this" answerable from the manifest alone, with no consumer naming a plugin.
    */
   app?: AppDescriptor;
-  /** Host-facing abilities this plugin provides at activation, declared statically so a host can answer what it can do without executing it. */
   capabilities?: string[];
-  /** Slash commands this plugin contributes, which a host deploys without importing it. */
   commands?: ManifestCommand[];
-  /** This plugin's settings as it ships them. */
   config?: ManifestConfig;
-  /** Where this plugin keeps state that is not named after it. */
   data?: ManifestData;
-  /** The name a surface shows instead of the id. */
   displayName?: string;
   /** The built module a host imports. Required once `capabilities` is non-empty. */
   entry?: string;
@@ -268,19 +235,13 @@ export interface PluginManifest {
    * learning what any of the ids name.
    */
   icons?: Record<string, string>;
-  /** The plugin's permanent identity, matching its repository name. */
   id: string;
-  /** Which optional lifecycle hooks the entry exports. */
   lifecycle?: ManifestLifecycle;
-  /** What this plugin contributes to a host's catalog of installable things. */
   marketplace?: ManifestMarketplace;
   /** Declared permissions, surfaced at install and in dashboards. Not sandbox-enforced. */
   permissions?: string[];
-  /** How the repo is published to npm. */
   publish?: ManifestPublish;
-  /** Repository metadata. */
   repo?: RepoMeta;
-  /** The inter-plugin contract. */
   services?: ManifestServices;
   /**
    * The applications this artifact is for. Absent means every application.
@@ -302,9 +263,7 @@ export interface PluginManifest {
  * which app it happens to be in.
  */
 export interface HostDescriptor {
-  /** The API major version this host implements. */
   api: number;
-  /** The app id, for example `claude` or `opencode`. */
   app: string;
   /** Surface ids this host renders, for example `tui` or `gui`. An unknown id is ignored. */
   surfaces: string[];
@@ -340,13 +299,9 @@ export interface ManifestServices {
  * throws or hangs is quarantined on its own rather than taking a host or a sibling with it.
  */
 export interface Plugin {
-  /** Supplies the implementation behind every capability the manifest declares. */
   activate(context: PluginContext): void | Promise<void>;
-  /** Releases whatever `activate` took: timers, watchers, child processes. */
   deactivate(): void | Promise<void>;
-  /** Runs once after the first deploy. */
   install?(context: PluginContext): void | Promise<void>;
-  /** Runs on demand from a host, to put a broken installation right. */
   repair?(context: PluginContext): void | Promise<void>;
 }
 
@@ -358,15 +313,10 @@ export interface Plugin {
  * attributed, so a component never opens a log file itself.
  */
 export interface Logger {
-  /** Detail only useful while debugging. */
   debug(message: string): void;
-  /** Something that failed. */
   error(message: string): void;
-  /** Something that failed, with the cause. */
   error(message: string, cause: unknown): void;
-  /** Normal operation. */
   info(message: string): void;
-  /** Something unexpected that did not stop the operation. */
   warn(message: string): void;
 }
 
@@ -383,7 +333,6 @@ export interface ManifestData {
   paths: string[];
 }
 
-/** A service id paired, in the type system, with the contract that id promises. */
 export interface ServiceType<T> {
   /** Never present at run time. It exists so two keys parameterised differently cannot be interchanged. */
   readonly __phantom?: T;
@@ -391,7 +340,6 @@ export interface ServiceType<T> {
   readonly id: string;
 }
 
-/** An event topic paired, in the type system, with the payload it carries. */
 export interface TopicType<T> {
   /** Never present at run time. It exists so two keys parameterised differently cannot be interchanged. */
   readonly __phantom?: T;
@@ -399,15 +347,12 @@ export interface TopicType<T> {
   readonly id: string;
 }
 
-/** How long a plugin is willing to wait for a service that is not registered yet. */
 export interface WantOptions {
   /** Milliseconds to wait before giving up. Absent takes the host's own default. */
   timeoutMs?: number;
 }
 
-/** One plugin's configuration, already resolved by the host. */
 export interface PluginConfig {
-  /** Every setting, defaults merged with what is on disk. */
   all(): Record<string, unknown>;
   /** One setting, absent when it is neither set nor defaulted. */
   get<T>(key: string): T | undefined;
@@ -421,7 +366,6 @@ export interface PluginConfig {
   set(key: string, value: unknown): Promise<void>;
 }
 
-/** One service a plugin asks for, and what its absence or its shortfall costs. */
 export interface ManifestRequirement {
   /**
    * What this plugin needs of the service, keyed by constraint name, compared against what the
@@ -433,7 +377,6 @@ export interface ManifestRequirement {
    * spent. Absent means false, and it never excuses an absence.
    */
   degradable?: boolean;
-  /** The service id this plugin asks for. */
   id: string;
   /**
    * Whether this plugin still starts when nothing provides the service. Absent means true, which
@@ -442,18 +385,12 @@ export interface ManifestRequirement {
   optional?: boolean;
 }
 
-/** One service a plugin registers, with what it claims before it is running to answer for itself. */
 export interface ManifestOffer {
-  /** What this service claims, keyed by attribute name, until the live service reports its own. */
   attributes?: Record<string, number>;
-  /** The service id this plugin registers. */
   id: string;
 }
 
-/** Which optional lifecycle hooks the entry module exports. */
 export interface ManifestLifecycle {
-  /** The entry exports `install(ctx)`, run once after the first deploy. */
   install?: boolean;
-  /** The entry exports `repair(ctx)`, run on demand from a host. */
   repair?: boolean;
 }
