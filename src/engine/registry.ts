@@ -1,8 +1,13 @@
 import type { Scheduler } from "../index.js";
+import { ConstrainedWant } from "./constrained-want.js";
+import type { Offering, WantSeam } from "./constrained-want.js";
+import { isServiceProvider } from "./constraints.js";
+import type { Budget, ConstraintEntry, ServiceProvider } from "./constraints.js";
 import type { DiagnosticSink } from "./diagnostics.js";
 import { pluginError } from "./errors.js";
 import { unwrappedHandles } from "./handles.js";
 import type { Handle, Handles } from "./handles.js";
+import type { ServiceRequirement } from "./requirements.js";
 
 /** Where the host records who provides and who consumes what. */
 export interface Recorder {
@@ -19,10 +24,19 @@ export interface ConsumerRegistry {
   get(id: string): unknown | undefined;
   /** Settles once `id` is registered; with no `timeoutMillis` it never times out (invariant 8). */
   want(id: string, timeoutMillis?: number): Promise<unknown>;
+  /** Re-asks until a provider satisfies the requirement or the budget is spent, then degrades with a report or refuses. */
+  want(requirement: ServiceRequirement, budget: Budget): Promise<unknown>;
   watch(id: string, listener: WatchListener): () => void;
   register(id: string, service: unknown): () => void;
+  /** A registration that answers for itself, claiming `advertised` until its live attributes say otherwise. */
+  register(id: string, provider: ServiceProvider, advertised: Record<string, number> | null): () => void;
   ids(): string[];
 }
+
+/** Whether a consumer's call is refused, because the host has stopped it; the host reports the refusal. */
+export type Fence = (attempt: "want" | "watch" | "registration", serviceId: string) => boolean;
+
+const OPEN: Fence = () => false;
 
 export interface ServiceHubOptions {
   scheduler: Scheduler;
@@ -32,6 +46,8 @@ export interface ServiceHubOptions {
   wellKnown?: readonly string[];
   /** Defaults to `unwrappedHandles`, which reports on revocation what it cannot enforce. */
   handles?: Handles;
+  /** The constraint names this host understands. Absent means none, under which every constraint is unknown. */
+  vocabulary?: readonly ConstraintEntry[];
 }
 
 /**
@@ -45,22 +61,32 @@ const HOST: unique symbol = Symbol("host");
 
 type Owner = string | typeof HOST;
 
+type Attributes = Readonly<Record<string, number>>;
+
+const UNCONSTRAINED: Attributes = Object.freeze({});
+
+function constant(service: unknown): ServiceProvider {
+  return { attributes: () => ({}), serviceFor: () => service };
+}
+
 /**
  * @remarks
- * A registration answers through a function rather than holding the instance, so a provider that
- * serves a differently constrained consumer differently plugs in without the hub changing.
+ * A registration answers through its provider rather than holding the instance, so a provider may
+ * serve a differently constrained consumer differently; a bare instance is wrapped by `constant`.
  */
-type Answer = () => unknown;
-
 class Entry {
   private readonly handed = new Map<unknown, Handle>();
   private withdrawn = false;
+  readonly advertised: Attributes;
 
   constructor(
     readonly owner: Owner,
     readonly serviceId: string,
-    private readonly answer: Answer,
-  ) {}
+    readonly provider: ServiceProvider,
+    advertised: Attributes | null,
+  ) {
+    this.advertised = Object.freeze({ ...(advertised ?? {}) });
+  }
 
   /**
    * @implNote One handle per INSTANCE, not per lookup: withdrawal has to reach every consumer
@@ -70,9 +96,9 @@ class Entry {
    * code and may withdraw the registration while it is being asked; a handle minted then would be
    * revocable by nobody.
    */
-  serve(handles: Handles): unknown {
+  serve(handles: Handles, constraints: Attributes = UNCONSTRAINED): unknown {
     if (this.withdrawn) return undefined;
-    const instance = this.answer();
+    const instance = this.provider.serviceFor({ ...constraints });
     if (instance === undefined || instance === null || this.withdrawn) return undefined;
     const known = this.handed.get(instance);
     if (known !== undefined) return known.get();
@@ -113,6 +139,8 @@ export class ServiceHub {
   private readonly handles: Handles;
   private readonly recorder: Recorder | undefined;
   private readonly wellKnown: readonly string[];
+  private readonly vocabulary: readonly ConstraintEntry[];
+  private readonly constrained = new Map<string, Set<ConstrainedWant>>();
   private readonly entries = new Map<string, Entry>();
   private readonly waiters = new Map<string, Set<Waiter>>();
   private readonly watchers = new Map<string, Set<Watcher>>();
@@ -123,18 +151,40 @@ export class ServiceHub {
     this.diagnostics = options.diagnostics;
     this.recorder = options.recorder;
     this.wellKnown = [...(options.wellKnown ?? [])];
+    this.vocabulary = [...(options.vocabulary ?? [])];
     this.handles = options.handles ?? unwrappedHandles(options.diagnostics);
   }
 
-  forConsumer(pluginId: string): ConsumerRegistry {
+  /**
+   * @implNote The overloads are told apart at run time the way the binding states them: an object
+   * first argument selects the constrained `want`, and a third argument selects the provider form
+   * of `register`, even when it is null.
+   * @implNote The fence is consulted here, at the one place the overloads are dispatched, so a
+   * host fencing a plugin never re-dispatches them. A fenced `register` and `watch` are inert and a
+   * fenced `want` is rejected; `get` stays open, because it installs nothing.
+   */
+  forConsumer(pluginId: string, fence: Fence = OPEN): ConsumerRegistry {
+    const want = (wanted: string | ServiceRequirement, limit?: number | Budget): Promise<unknown> => {
+      const id = typeof wanted === "object" ? wanted.id : wanted;
+      if (fence("want", id)) return refusedWant(pluginId, id);
+      return typeof wanted === "object"
+        ? this.awaitUnderConstraints(pluginId, wanted, limit)
+        : this.awaitService(pluginId, wanted, typeof limit === "number" ? limit : undefined);
+    };
+    const register = (id: string, service: unknown, ...advertised: [Record<string, number> | null] | []): (() => void) => {
+      if (fence("registration", id)) return () => {};
+      return advertised.length === 0
+        ? this.addService(pluginId, id, constant(service), null)
+        : this.addService(pluginId, id, this.providerOf(pluginId, id, service), advertised[0]);
+    };
     return {
       get: (id) => {
         this.recorder?.consumed(pluginId, id);
         return this.get(id);
       },
-      want: (id, timeoutMillis) => this.awaitService(pluginId, id, timeoutMillis),
-      watch: (id, listener) => this.addWatcher(pluginId, id, listener),
-      register: (id, service) => this.addService(pluginId, id, () => service),
+      want,
+      watch: (id, listener) => (fence("watch", id) ? () => {} : this.addWatcher(pluginId, id, listener)),
+      register,
       ids: () => this.ids(),
     };
   }
@@ -149,7 +199,7 @@ export class ServiceHub {
    */
   hostService(id: string, service: unknown): void {
     this.entries.get(id)?.revokeAll();
-    this.entries.set(id, new Entry(HOST, id, () => service));
+    this.entries.set(id, new Entry(HOST, id, constant(service), null));
     this.announceArrival(id);
   }
 
@@ -167,6 +217,8 @@ export class ServiceHub {
    * wants it is still waiting on, so a released plugin is inert.
    */
   release(pluginId: string): void {
+    for (const want of [...(this.constrained.get(pluginId) ?? [])]) want.stop(stoppedWaiting(pluginId, want.serviceId));
+    this.constrained.delete(pluginId);
     for (const stop of [...(this.stopsByConsumer.get(pluginId) ?? [])]) stop();
     this.stopsByConsumer.delete(pluginId);
     for (const entry of [...this.entries.values()]) {
@@ -183,7 +235,16 @@ export class ServiceHub {
     }
   }
 
-  private addService(pluginId: string, id: string, answer: Answer): () => void {
+  private providerOf(pluginId: string, id: string, candidate: unknown): ServiceProvider {
+    if (isServiceProvider(candidate)) return candidate;
+    throw pluginError(
+      pluginId,
+      `registered service "${id}" in the provider form, but what it handed over lacks attributes() or serviceFor()`,
+      "pass a provider with both methods, or register the instance alone with two arguments",
+    );
+  }
+
+  private addService(pluginId: string, id: string, provider: ServiceProvider, advertised: Attributes | null): () => void {
     if (!this.mayRegister(pluginId, id)) {
       const name = id.includes(":") ? id.slice(id.lastIndexOf(":") + 1) : id;
       throw pluginError(
@@ -200,7 +261,7 @@ export class ServiceHub {
         "disable one of the two plugins, or have each register its own namespaced id",
       );
     }
-    const entry = new Entry(pluginId, id, answer);
+    const entry = new Entry(pluginId, id, provider, advertised);
     this.entries.set(id, entry);
     this.recorder?.provided(pluginId, id);
     this.announceArrival(id);
@@ -247,6 +308,45 @@ export class ServiceHub {
         : new Promise<unknown>((resolve, reject) => this.enqueue(pluginId, id, timeoutMillis, resolve, reject));
     asked.catch(() => {});
     return asked;
+  }
+
+  /**
+   * @implNote Tracked per consumer so `release` can end it: its ticks call into providers, and one
+   * left running for a stopped plugin could resolve into a plugin that no longer exists. The no-op
+   * catch is the plain `want`'s, for the same unhandled rejection.
+   */
+  private awaitUnderConstraints(pluginId: string, requirement: ServiceRequirement, limit: number | Budget | undefined): Promise<unknown> {
+    this.recorder?.consumed(pluginId, requirement.id);
+    const budget: Budget = typeof limit === "object" ? limit : { budgetMillis: 0, pollMillis: 0 };
+    const running = this.constrained.get(pluginId) ?? new Set<ConstrainedWant>();
+    this.constrained.set(pluginId, running);
+    const want: ConstrainedWant = new ConstrainedWant(this.wantSeam(), pluginId, requirement, budget, () => {
+      running.delete(want);
+      if (running.size === 0 && this.constrained.get(pluginId) === running) this.constrained.delete(pluginId);
+    });
+    running.add(want);
+    const asked = want.start();
+    asked.catch(() => {});
+    return asked;
+  }
+
+  private wantSeam(): WantSeam {
+    return {
+      scheduler: this.scheduler,
+      diagnostics: this.diagnostics,
+      vocabulary: this.vocabulary,
+      offering: (serviceId) => this.offeringOf(serviceId),
+    };
+  }
+
+  private offeringOf(serviceId: string): Offering | undefined {
+    const entry = this.entries.get(serviceId);
+    if (entry === undefined) return undefined;
+    return {
+      advertised: entry.advertised,
+      attributes: () => entry.provider.attributes(),
+      serve: (constraints) => entry.serve(this.handles, constraints),
+    };
   }
 
   private enqueue(
@@ -316,6 +416,12 @@ export class ServiceHub {
     if (separator <= 0 || separator === serviceId.length - 1) return false;
     return serviceId.slice(0, separator) === pluginId;
   }
+}
+
+function refusedWant(pluginId: string, id: string): Promise<unknown> {
+  const refused = Promise.reject(stoppedWaiting(pluginId, id));
+  refused.catch(() => {});
+  return refused;
 }
 
 function stoppedWaiting(pluginId: string, id: string): Error {

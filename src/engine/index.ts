@@ -15,3 +15,11 @@ export { isServiceRevoked, proxyHandles, serviceRevoked, unwrappedHandles } from
 export type { Handle, Handles, ServiceRevoked } from "./handles.js";
 export { ServiceHub } from "./registry.js";
 export type { ConsumerRegistry, Recorder, ServiceHubOptions, WatchEvent, WatchListener } from "./registry.js";
+export type { Fence } from "./registry.js";
+export { budget } from "./constraints.js";
+export type { Budget, ConstraintEntry, ServiceProvider } from "./constraints.js";
+export { PluginLedger } from "./ledger.js";
+export type { LedgerError, LedgerRow, PluginStatus } from "./ledger.js";
+export type { PluginRuntime, RuntimeEvents } from "./context.js";
+export { createHost } from "./host.js";
+export type { CapabilityRecord, Host, HostLedger, HostOptions } from "./host.js";
