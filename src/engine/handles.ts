@@ -92,6 +92,9 @@ function answeredWhenRevoked(serviceId: string, key: PropertyKey): { value: unkn
  * @implNote A Proxy `get` trap must return the target's own value for a non-configurable,
  * non-writable data property, or the language throws a `TypeError`; a frozen service is made of
  * nothing else.
+ *
+ * A method of a frozen service is therefore returned raw, unguarded, and escapes revocation once a
+ * caller has read it; only a service that is not frozen has its methods guarded.
  */
 function pinnedValue(target: object, key: PropertyKey): { value: unknown } | undefined {
   const own = Reflect.getOwnPropertyDescriptor(target, key);

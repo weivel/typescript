@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { NEVER } from "../src/index.js";
 
 describe("NEVER", () => {
+  it("is frozen, so no caller can swap the clock", () => {
+    expect(Object.isFrozen(NEVER)).toBe(true);
+  });
+
   it("never runs a scheduled task", async () => {
     let ran = false;
     NEVER.schedule(() => {

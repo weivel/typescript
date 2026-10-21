@@ -8,6 +8,6 @@ export interface Scheduler {
   schedule(task: () => void, delayMillis: number): () => void;
 }
 
-export const NEVER: Scheduler = {
+export const NEVER: Scheduler = Object.freeze({
   schedule: () => () => {},
-};
+});
