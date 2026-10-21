@@ -57,14 +57,25 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-/** Fires every pending deadline each time the work has gone quiet, until it settles. */
-async function drive<T>(work: Promise<T>, scheduler: ManualScheduler): Promise<T> {
+/**
+ * Advances the clock to each pending deadline in turn until the work settles.
+ *
+ * @param firstDeadlineMillis - when given, the first deadline the work schedules must fall exactly there
+ */
+async function drive<T>(work: Promise<T>, scheduler: ManualScheduler, firstDeadlineMillis?: number): Promise<T> {
   let settled = false;
   const watched = work.finally(() => { settled = true; });
   watched.catch(() => {});
-  while (!settled) {
+  let checked = firstDeadlineMillis === undefined;
+  for (let turn = 0; !settled; turn++) {
+    if (turn > 20) throw new Error("the work never settled, and no deadline was left to fire");
     await flush();
-    if (!settled) scheduler.fireAll();
+    const due = scheduler.nextDueMillis();
+    if (!checked && !settled) {
+      expect(due).toBe(firstDeadlineMillis);
+      checked = true;
+    }
+    if (!settled && due !== undefined) scheduler.advanceTo(due);
   }
   return watched;
 }
@@ -148,6 +159,17 @@ describe("startPlugins", () => {
     expect(loaded.host.capability("settings").map((record) => record.pluginId)).toEqual(["calm"]);
   });
 
+  it("starts a plugin whose required service is one the host itself supplies", async () => {
+    const scan = scanOf({
+      manifest: manifest("consumer", { capabilities: [], services: { consumes: [{ id: "provider-support", optional: false }] } }),
+      module: { default: { activate: () => {}, deactivate: () => {} } },
+    });
+    const loaded = await startPlugins(options(scan, { services: [{ id: "provider-support", implementation: {} }] }));
+
+    expect(loaded.quarantined).toEqual([]);
+    expect(loaded.started).toEqual(["consumer"]);
+  });
+
   it("quarantines a plugin whose activate throws and calls its deactivate", async () => {
     const stopped: string[] = [];
     const scan = scanOf({
@@ -182,7 +204,7 @@ describe("startPlugins", () => {
   it("quarantines a plugin whose activate never settles, without hanging the host", async () => {
     const scan = scanOf({ manifest: manifest("hung"), module: { default: { activate: () => new Promise(() => {}), deactivate: () => {} } } });
     const scheduler = new ManualScheduler();
-    const loaded = await drive(startPlugins(options(scan, { scheduler, activateTimeoutMs: 20 })), scheduler);
+    const loaded = await drive(startPlugins(options(scan, { scheduler, activateTimeoutMs: 20 })), scheduler, 20);
 
     expect(loaded.started).toEqual([]);
     expect(loaded.quarantined[0].pluginId).toBe("hung");
@@ -431,7 +453,7 @@ describe("startPlugins", () => {
       module: { default: { activate: () => new Promise(() => {}), deactivate: () => { stopped.push("hung"); } } },
     });
     const scheduler = new ManualScheduler();
-    const loaded = await drive(startPlugins(options(scan, { scheduler, activateTimeoutMs: 20 })), scheduler);
+    const loaded = await drive(startPlugins(options(scan, { scheduler, activateTimeoutMs: 20 })), scheduler, 20);
 
     expect(loaded.quarantined[0].detail).toContain("20ms");
     expect(stopped).toEqual(["hung"]);
@@ -451,7 +473,7 @@ describe("startPlugins", () => {
       { manifest: manifest("calm"), module: settingsPlugin([], "calm") },
     );
     const scheduler = new ManualScheduler();
-    const loaded = await drive(startPlugins(options(scan, { scheduler, activateTimeoutMs: 20, deactivateTimeoutMs: 20 })), scheduler);
+    const loaded = await drive(startPlugins(options(scan, { scheduler, activateTimeoutMs: 20, deactivateTimeoutMs: 20 })), scheduler, 20);
 
     expect(loaded.quarantined.map((error) => error.pluginId)).toEqual(["stuck"]);
     expect(loaded.host.ledger.entry("stuck")?.status).toBe("broken");
@@ -475,6 +497,7 @@ describe("startPlugins", () => {
     const loaded = await drive(
       startPlugins(options(scan, { scheduler, activateTimeoutMs: 20, diagnostics: (message: string) => reported.push(message) })),
       scheduler,
+      20,
     );
 
     expect(loaded.quarantined[0].pluginId).toBe("late");
@@ -563,7 +586,7 @@ describe("startPlugins", () => {
     );
     const scheduler = new ManualScheduler();
     const loaded = await startPlugins(options(scan, { scheduler, activateTimeoutMs: 20, deactivateTimeoutMs: 20 }));
-    await drive(loaded.stop(), scheduler);
+    await drive(loaded.stop(), scheduler, 20);
 
     expect(stopped).toEqual(["first"]);
     expect(loaded.host.ledger.entry("hangs")?.status).toBe("broken");
@@ -711,6 +734,16 @@ describe("ledgerRows", () => {
 });
 
 describe("callCapability", () => {
+  it("times a call on the clock the host was started with when handed loaded.scheduler", async () => {
+    const scheduler = new ManualScheduler();
+    const loaded = await startPlugins(options(scanOf({ manifest: manifest("clocked"), module: settingsPlugin([], "clocked") }), { scheduler }));
+    const result = await drive(callCapability("clocked", "screens.read", 30, () => new Promise(() => {}), loaded.scheduler), scheduler, 30);
+
+    expect(loaded.scheduler).toBe(scheduler);
+    expect(result.ok).toBe(false);
+  });
+
+
   it("returns the value a capability produced", async () => {
     const scan = scanOf({ manifest: manifest("quick"), module: settingsPlugin([], "quick") });
     await startPlugins(options(scan));
@@ -723,7 +756,7 @@ describe("callCapability", () => {
     const scan = scanOf({ manifest: manifest("slow"), module: settingsPlugin([], "slow") });
     await startPlugins(options(scan));
     const scheduler = new ManualScheduler();
-    const result = await drive(callCapability("slow", "screens.read", 20, () => new Promise(() => {}), scheduler), scheduler);
+    const result = await drive(callCapability("slow", "screens.read", 20, () => new Promise(() => {}), scheduler), scheduler, 20);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected a failure");
@@ -760,7 +793,7 @@ describe("callCapability", () => {
     const result = await drive(callCapability("late-reject", "screens.read", 10, async () => {
       await deferred;
       throw new Error("rejected after deadline");
-    }, scheduler), scheduler);
+    }, scheduler), scheduler, 10);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected a failure");
