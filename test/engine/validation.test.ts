@@ -75,3 +75,18 @@ describe("manifest validation", () => {
     ]);
   });
 });
+
+describe("the fix for a bare provided id", () => {
+  const manifest = { id: "a", api: 2, services: { provides: ["bare"] } };
+
+  it("names no list when no service is well known", () => {
+    const [issue] = validateManifest(manifest, []);
+    expect(issue.fix).toBe('rename it to "a:<name>"');
+    expect(issue.fix).not.toContain("use one of");
+  });
+
+  it("lists the well-known ids when there are some", () => {
+    const [issue] = validateManifest(manifest, ["log", "clock"]);
+    expect(issue.fix).toBe('rename it to "a:<name>", or use one of: log, clock');
+  });
+});

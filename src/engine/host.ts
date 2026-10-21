@@ -84,11 +84,25 @@ export function createHost(options: HostOptions): Host {
   return new HostState(options).surface();
 }
 
-/** The default clock: real time through `setTimeout`. */
+const MAX_TIMER_DELAY_MILLIS = 2 ** 31 - 1;
+
+/**
+ * The default clock: real time through `setTimeout`.
+ *
+ * @implNote `setTimeout` clamps a delay above 2^31-1 ms, or NaN, to about 1 ms, which would fire a
+ * long deadline almost at once. A non-finite delay therefore schedules nothing, and a long one
+ * chains timers until the whole delay has elapsed.
+ */
 export const REAL_TIME: Scheduler = Object.freeze({
   schedule: (task: () => void, delayMillis: number) => {
-    const timer = setTimeout(task, delayMillis);
-    return () => clearTimeout(timer);
+    if (!Number.isFinite(delayMillis)) return () => {};
+    let current: ReturnType<typeof setTimeout> | undefined;
+    const arm = (remainingMillis: number): void => {
+      const step = Math.min(remainingMillis, MAX_TIMER_DELAY_MILLIS);
+      current = setTimeout(() => (remainingMillis > step ? arm(remainingMillis - step) : task()), step);
+    };
+    arm(delayMillis);
+    return () => clearTimeout(current);
   },
 });
 
