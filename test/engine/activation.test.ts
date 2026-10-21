@@ -96,6 +96,19 @@ describe("order", () => {
     expect(plan.order).toEqual([]);
   });
 
+  it("refuses a mandatory consumer of a cycle member, while the members themselves are not refused", () => {
+    const plan = order(
+      [
+        unit("p", ["p"], [{ id: "q", optional: false }]),
+        unit("q", ["q"], [{ id: "p", optional: false }]),
+        unit("c", [], [{ id: "p", optional: false }]),
+      ],
+      "service",
+    );
+    expect(plan.refusals.map((refusal) => refusal.pluginId)).toEqual(["c"]);
+    expect([...(plan.cycles[0] ?? [])].sort()).toEqual(["p", "q"]);
+  });
+
   it("throws when two units share an id", () => {
     expect(() => order([unit("a", [], []), unit("a", [], [])], "service")).toThrow(/share the id "a"/);
   });
