@@ -162,6 +162,25 @@ function errorFor(pluginId: string, error: unknown, fix: string): PluginError {
   return pluginError(pluginId, detailOf(error), carried);
 }
 
+function refusalBeforeOrdering(host: Host, deployed: DeployedPlugin): PluginError | null {
+  const { manifest, entryPath } = deployed;
+  const unsupported = host.supports(manifest);
+  if (unsupported) return unsupported;
+  if (entryPath) return null;
+  return pluginError(
+    manifest.id,
+    manifest.entry ? "declares an entry but no bundle is deployed beside its manifest" : "declares no entry, so there is nothing to activate",
+    manifest.entry ? "deploy the plugin again so its bundle lands beside the sidecar" : "add \"entry\": \"dist/index.js\" to plugin.json if this plugin has capabilities",
+  );
+}
+
+/** @returns whether the plugin was quarantined, so a refusal knowable now never counts as a provider. */
+function quarantineBeforeOrdering(host: Host, quarantined: PluginError[], deployed: DeployedPlugin): boolean {
+  const refusal = refusalBeforeOrdering(host, deployed);
+  if (refusal) quarantine(host, quarantined, deployed.manifest, refusal);
+  return refusal !== null;
+}
+
 /**
  * Quarantines a plugin before its context ever opened.
  *
@@ -286,8 +305,9 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
     quarantined.push(failure);
   }
 
+  const activatable = scan.loaded.filter((plugin) => !quarantineBeforeOrdering(host, quarantined, plugin));
   const plan = activationOrder(
-    scan.loaded.map((plugin) => plugin.manifest),
+    activatable.map((plugin) => plugin.manifest),
     (options.services ?? []).map((service) => service.id),
   );
   for (const cycle of plan.cycles) {
@@ -310,23 +330,8 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   for (const pluginId of plan.order) {
     const deployed = byId.get(pluginId);
     if (!deployed) continue;
-    const { manifest, entryPath } = deployed;
-
-    const unsupported = host.supports(manifest);
-    if (unsupported) {
-      quarantine(host, quarantined, manifest, unsupported);
-      continue;
-    }
-
-    if (!entryPath) {
-      const error = pluginError(
-        pluginId,
-        manifest.entry ? "declares an entry but no bundle is deployed beside its manifest" : "declares no entry, so there is nothing to activate",
-        manifest.entry ? "deploy the plugin again so its bundle lands beside the sidecar" : "add \"entry\": \"dist/index.js\" to plugin.json if this plugin has capabilities",
-      );
-      quarantine(host, quarantined, manifest, error);
-      continue;
-    }
+    const { manifest } = deployed;
+    const entryPath = deployed.entryPath as string;
 
     let plugin: Plugin | null;
     try {

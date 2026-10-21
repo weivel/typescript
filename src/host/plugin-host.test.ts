@@ -299,6 +299,19 @@ describe("startPlugins", () => {
     expect(order).toEqual(["free"]);
   });
 
+  it("refuses a consumer of a provider already refused as unsupported, without waiting for an activate deadline", async () => {
+    const scan = scanOf(
+      { manifest: manifest("prov", { targets: ["studio"], capabilities: [], services: { provides: ["prov:x"] } }), module: settingsPlugin([], "prov") },
+      { manifest: manifest("cons", { capabilities: [], services: { consumes: [{ id: "prov:x", optional: false }] } }), module: settingsPlugin([], "cons") },
+    );
+    const loaded = await startPlugins(options(scan, { applications: ["forebay"] }));
+
+    const consumer = loaded.quarantined.find((error) => error.pluginId === "cons");
+    expect(loaded.started).toEqual([]);
+    expect(consumer?.detail).toContain('"prov:x"');
+    expect(consumer?.fix).toContain("mark the requirement optional");
+  });
+
   it("quarantines a module whose default export is malformed, ignoring unrelated named exports", async () => {
     const record: string[] = [];
     const scan = scanOf({
