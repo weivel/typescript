@@ -91,6 +91,8 @@ export interface PluginHostOptions {
 
 /** A running host: what started, what did not, and how to shut it down. */
 export interface LoadedHost {
+  /** The clock every deadline of this host comes from; hand it to {@link callCapability} so a call keeps time on the same one. */
+  scheduler: Scheduler;
   /** The engine's host, which owns the capabilities, the services and the ledger. */
   host: Host;
   /** Plugin ids that activated cleanly, in activation order. */
@@ -284,7 +286,10 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
     quarantined.push(failure);
   }
 
-  const plan = activationOrder(scan.loaded.map((plugin) => plugin.manifest));
+  const plan = activationOrder(
+    scan.loaded.map((plugin) => plugin.manifest),
+    (options.services ?? []).map((service) => service.id),
+  );
   for (const cycle of plan.cycles) {
     for (const pluginId of cycle) {
       const manifest = byId.get(pluginId)?.manifest;
@@ -390,6 +395,7 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   let shutdown: Promise<void> | null = null;
   return {
     host,
+    scheduler,
     started,
     quarantined,
     deployed: scan.loaded,
@@ -422,7 +428,8 @@ export type CapabilityCall<T> = { ok: true; value: T } | { ok: false; error: Plu
  * @param label - what was being called, for example `screens.read`, which appears in the error
  * @param timeoutMs - deadline in milliseconds
  * @param call - the async work to perform
- * @param scheduler - the clock the deadline comes from, real time by default
+ * @param scheduler - the clock the deadline comes from, real time by default; pass `loaded.scheduler` so the
+ * call keeps time on the host's own clock
  */
 export async function callCapability<T>(
   pluginId: string,

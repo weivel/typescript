@@ -50,6 +50,27 @@ describe("activationOrder", () => {
   });
 });
 
+describe("activationOrder with host-provided services", () => {
+  it("meets a required need from the host without refusing it or its consumer", () => {
+    const plan = activationOrder(
+      [
+        manifest("needy", { consumes: [{ id: "host:x", optional: false }] }),
+        manifest("downstream", { consumes: [{ id: "needy:y", optional: false }], provides: [] }),
+        manifest("needy-provider", { provides: ["needy:y"], consumes: [{ id: "host:x", optional: false }] }),
+      ],
+      ["host:x"],
+    );
+    expect(plan.refusals).toEqual([]);
+    expect(plan.order).toHaveLength(3);
+    expect(plan.order.indexOf("needy-provider")).toBeLessThan(plan.order.indexOf("downstream"));
+  });
+
+  it("does not list the host among the units to activate", () => {
+    const plan = activationOrder([manifest("only", { consumes: [{ id: "host:x", optional: false }] })], ["host:x"]);
+    expect(plan.order).toEqual(["only"]);
+  });
+});
+
 describe("order", () => {
   it("propagates a refusal to every consumer of a refused provider", () => {
     const plan = order(

@@ -85,12 +85,12 @@ export function createHost(options: HostOptions): Host {
 }
 
 /** The default clock: real time through `setTimeout`. */
-export const REAL_TIME: Scheduler = {
-  schedule: (task, delayMillis) => {
+export const REAL_TIME: Scheduler = Object.freeze({
+  schedule: (task: () => void, delayMillis: number) => {
     const timer = setTimeout(task, delayMillis);
     return () => clearTimeout(timer);
   },
-};
+});
 
 function applicationsOf(options: HostOptions): string[] {
   if (options.applications !== undefined) return [...options.applications];
