@@ -6,7 +6,9 @@ held to the vectors in `weivel/conformance`, exactly as `weivel/java` is.
 ## Layout
 
 - `.` and `./engine`: the contract and the engine. Neither reaches a Node builtin, which a test
-  proves by walking the module graph.
+  proves by walking the module graph. Manifest validation compiles the schema at first use and so
+  needs a host that permits runtime code generation (no CSP without `unsafe-eval`, no Workers-style
+  eval ban); everything else in `./engine` does not.
 - `./host`: the Node host. It may use builtins.
 - `./conformance`: the driver the conformance runner launches.
 - `scripts/`: sibling resolution, schema embedding and the conformance run.

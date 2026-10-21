@@ -1,5 +1,5 @@
 import { Ajv } from "ajv";
-import type { ErrorObject } from "ajv";
+import type { ErrorObject, ValidateFunction } from "ajv";
 import type { PluginManifest } from "../index.js";
 import { pluginError } from "./errors.js";
 import { MANIFEST_SCHEMA } from "./schema.generated.js";
@@ -14,14 +14,22 @@ type ServiceSide = "provides" | "consumes";
 
 const SERVICE_SIDES: readonly ServiceSide[] = ["provides", "consumes"];
 
+let compiledSchema: ValidateFunction | undefined;
+
 /**
- * @implNote Compiled once at load. The compiled function holds no per-call state, so this is not
- * the mutable host state design 7.11 forbids. `fix` is the schema's own keyword, declared so strict
- * mode accepts it and so the failing subschema can hand its fix to the author.
+ * @implNote Compiled on first use and cached, because ajv generates code with `new Function` and a
+ * host that forbids runtime code generation must still be able to load the module. The function
+ * writes `.errors` on every call, so a caller reads it synchronously before the next call; nothing
+ * else is retained, which keeps this clear of the mutable host state design 7.11 forbids. `fix` is
+ * the schema's own keyword, declared so strict mode accepts it and so the failing subschema can
+ * hand its fix to the author.
  */
-const validateSchema = new Ajv({ strict: true, allErrors: true, verbose: true })
-  .addKeyword({ keyword: "fix", schemaType: "string" })
-  .compile(MANIFEST_SCHEMA);
+function validateSchema(): ValidateFunction {
+  compiledSchema ??= new Ajv({ strict: true, allErrors: true, verbose: true })
+    .addKeyword({ keyword: "fix", schemaType: "string" })
+    .compile(MANIFEST_SCHEMA);
+  return compiledSchema;
+}
 
 /**
  * Checks a manifest against the published schema, then against `VALIDATION.md` V1 and V2.
@@ -32,8 +40,9 @@ const validateSchema = new Ajv({ strict: true, allErrors: true, verbose: true })
  * every bare id.
  */
 export function validateManifest(manifest: unknown, wellKnownServices?: readonly string[]): ValidationIssue[] {
-  if (!validateSchema(manifest)) {
-    return firstPerPath(withoutAlternativeNoise(validateSchema.errors ?? []).flatMap(issueOf));
+  const validate = validateSchema();
+  if (!validate(manifest)) {
+    return firstPerPath(withoutAlternativeNoise(validate.errors ?? []).flatMap(issueOf));
   }
   return firstPerPath([...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest)]);
 }
@@ -201,10 +210,15 @@ function bareServiceIssues(manifest: unknown, wellKnownServices: readonly string
       {
         path,
         message: `${path}: "${serviceId}" is neither namespaced by this plugin nor a well-known service id`,
-        fix: `rename it to "${pluginId}:<name>", or use one of: ${wellKnownServices.join(", ")}`,
+        fix: renameFix(pluginId, wellKnownServices),
       },
     ];
   });
+}
+
+function renameFix(pluginId: string, wellKnownServices: readonly string[]): string {
+  const rename = `rename it to "${pluginId}:<name>"`;
+  return wellKnownServices.length === 0 ? rename : `${rename}, or use one of: ${wellKnownServices.join(", ")}`;
 }
 
 function mayRegister(pluginId: string, serviceId: string, wellKnownServices: readonly string[]): boolean {
