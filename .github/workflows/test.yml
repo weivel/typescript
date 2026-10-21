@@ -13,7 +13,7 @@ jobs:
       toolchains: node
       node_install: npm ci
       node_build: npm run build
-      node_test: npm test
+      node_test: npm test && npm run conformance
       extra_repositories: |
         weivel/model model
         weivel/conformance conformance
