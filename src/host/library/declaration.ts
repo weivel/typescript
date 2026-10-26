@@ -8,6 +8,8 @@ export interface LibraryFunction {
   kind: "json";
   argument: object | boolean;
   result: object | boolean;
+  /** The facts of the calling process the function reads, sent beside its argument. Absent means none. */
+  context?: Array<"environment" | "home" | "arguments">;
 }
 
 /** One service a library offers, and the functions it is made of. */
