@@ -32,12 +32,11 @@ export interface AppStartupHook {
 }
 
 /**
- * One app a host loads plugins into, as the app's own project declares it.
+ * One app a host loads plugins into, as a reader resolves it: its declaration with every default filled in.
  *
  * @remarks
  * Everything here is data a consumer reads, never behaviour: an app is added by declaring
- * one of these and nothing else learns its name. A declaration carries only what the app's project
- * knows, so a reader fills what it omits rather than requiring the declaration to be complete.
+ * it and nothing else learns its name.
  */
 export interface AppDescriptor {
   /**
