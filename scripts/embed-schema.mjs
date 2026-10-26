@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { Ajv } from "ajv";
+import ts from "typescript";
 import standaloneCode from "ajv/dist/standalone/index.js";
 import { repositoryRoot, sibling } from "./sibling.mjs";
 
@@ -62,14 +63,41 @@ function validatorModule(schema, idName, validatorName) {
 const MODEL_DEFINITIONS_TARGET = ["src", "host", "library", "model-definitions.generated.ts"];
 
 /**
- * The definitions each model schema publishes, keyed by the file a `$ref` names, so a library type
- * may reference exactly what the model publishes and nothing a hand-kept list claims it does.
+ * Every type the public entry exports, by name.
+ *
+ * @implNote A model definition names a contract type only by its spelling, and types are erased at
+ * run time, so the generator learns which of them the contract really declares from this list,
+ * the way the Java generator asks its class loader.
  */
-function modelDefinitionsModule(schemasByFile) {
+function contractTypeNames() {
+  const entry = join(repositoryRoot(), "src", "index.ts");
+  const program = ts.createProgram([entry], { module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, noEmit: true, skipLibCheck: true, types: [] });
+  const checker = program.getTypeChecker();
+  const source = program.getSourceFile(entry);
+  const module = source && checker.getSymbolAtLocation(source);
+  if (!module) throw new Error(`cannot read the contract's exports from ${entry}`);
+  return checker
+    .getExportsOfModule(module)
+    .map((exported) => (exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported))
+    .filter((symbol) => symbol.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias))
+    .map((symbol) => symbol.name)
+    .sort();
+}
+
+/**
+ * The definitions each model schema publishes, keyed by the file a `$ref` names, so a library type
+ * may reference exactly what the model publishes and nothing a hand-kept list claims it does, and
+ * the contract's type names, so a definition without a contract type is refused rather than imported.
+ */
+function modelDefinitionsModule(schemasByFile, contractTypes) {
   const definitions = Object.fromEntries(
     Object.entries(schemasByFile).map(([schemaFile, schema]) => [schemaFile, Object.keys(schema.definitions ?? {}).sort()]),
   );
-  return `export const MODEL_DEFINITIONS: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(definitions)};\n`;
+  return [
+    `export const MODEL_DEFINITIONS: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(definitions)};`,
+    `export const CONTRACT_TYPES: readonly string[] = ${JSON.stringify(contractTypes)};`,
+    "",
+  ].join("\n");
 }
 
 function writeGenerated(target, source) {
@@ -84,4 +112,4 @@ for (const { schemaFile, target, idName, validatorName } of GENERATED) {
   schemasByFile[schemaFile] = schema;
   writeGenerated(target, validatorModule(schema, idName, validatorName));
 }
-writeGenerated(MODEL_DEFINITIONS_TARGET, modelDefinitionsModule(schemasByFile));
+writeGenerated(MODEL_DEFINITIONS_TARGET, modelDefinitionsModule(schemasByFile, contractTypeNames()));

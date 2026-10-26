@@ -7,11 +7,29 @@ import { repositoryRoot, sibling } from "../../../scripts/sibling.mjs";
 import type { LibraryDeclaration } from "./declaration.js";
 import { parseDeclaration } from "./declaration.js";
 import { generateLibraryTypes } from "./generate-types.js";
-import { MODEL_DEFINITIONS } from "./model-definitions.generated.js";
+import { CONTRACT_TYPES, MODEL_DEFINITIONS } from "./model-definitions.generated.js";
 
 const root = repositoryRoot();
 const publicEntry = join(root, "src", "index.ts");
-const APP_DESCRIPTOR = "https://weivel.github.io/model/plugin.schema.json#/definitions/appDescriptor";
+const PLUGIN_SCHEMA = "https://weivel.github.io/model/plugin.schema.json";
+const APP_DESCRIPTOR = `${PLUGIN_SCHEMA}#/definitions/appDescriptor`;
+const APP_DECLARATION = `${PLUGIN_SCHEMA}#/definitions/appDeclaration`;
+const NESTED_APP_DEFINITIONS = [
+  "appHome",
+  "appDetect",
+  "appLoader",
+  "appPathNames",
+  "appUsage",
+  "appNpmPlugins",
+  "appStartupHook",
+  "appDiscovery",
+  "appProjects",
+  "appModelCatalog",
+];
+
+function contractTypeOf(definition: string): string {
+  return definition.charAt(0).toUpperCase() + definition.slice(1);
+}
 
 function echoDeclaration(): LibraryDeclaration {
   return parseDeclaration(readFileSync(join(sibling("model"), "test", "fixtures", "echo.library.json"), "utf8"));
@@ -120,6 +138,18 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
     expect(compileDiagnostics(generated, consumer)).toEqual([]);
   });
 
+  it("refuses a $ref to appDeclaration, for which the contract declares no type", () => {
+    expect(() => generateLibraryTypes(declarationWithResult({ $ref: APP_DECLARATION }))).toThrow(
+      "result.$ref names appDeclaration in plugin.schema.json, for which the contract declares no type AppDeclaration",
+    );
+  });
+
+  it("maps a $ref to a nested app definition onto the contract's own type", () => {
+    const generated = generateLibraryTypes(declarationWithResult({ $ref: `${PLUGIN_SCHEMA}#/definitions/appHome` }));
+    expect(generated).toContain('import type { AppHome, ServiceType } from "@weivel/typescript";');
+    expect(generated).toContain("get(argument: { [key: string]: unknown }): AppHome;");
+  });
+
   it("refuses a model $ref to a definition the model does not publish, naming it", () => {
     const unpublished = [
       { file: "plugin.schema.json", definition: "pluginContext" },
@@ -217,16 +247,30 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
 });
 
 describe("MODEL_DEFINITIONS", { timeout: 120_000 }, () => {
-  it("maps every definition the model publishes onto a type the contract exports", () => {
+  it("maps the resolved app descriptor and each nested definition onto the type the contract exports", () => {
     const exported = new Set(typeOnlyExportsOfPublicEntry());
-    const missing = Object.entries(MODEL_DEFINITIONS)
-      .flatMap(([file, names]) => names.map((name) => ({ file, type: name.charAt(0).toUpperCase() + name.slice(1) })))
-      .filter(({ type }) => !exported.has(type));
-    expect(missing).toEqual([]);
+    for (const definition of ["appDescriptor", ...NESTED_APP_DEFINITIONS]) {
+      expect(MODEL_DEFINITIONS["plugin.schema.json"], definition).toContain(definition);
+      expect(exported.has(contractTypeOf(definition)), definition).toBe(true);
+    }
+  });
+
+  it("leaves appDeclaration the one published definition without a contract type", () => {
+    const exported = new Set(typeOnlyExportsOfPublicEntry());
+    const withoutType = Object.entries(MODEL_DEFINITIONS)
+      .flatMap(([file, names]) => names.map((name) => ({ file, name })))
+      .filter(({ name }) => !exported.has(contractTypeOf(name)));
+    expect(withoutType).toEqual([{ file: "plugin.schema.json", name: "appDeclaration" }]);
   });
 
   it("is what the model sibling publishes", () => {
     const published = JSON.parse(readFileSync(join(sibling("model"), "plugin.schema.json"), "utf8")) as { definitions?: Record<string, unknown> };
     expect(MODEL_DEFINITIONS["plugin.schema.json"]).toEqual(Object.keys(published.definitions ?? {}).sort());
+  });
+});
+
+describe("CONTRACT_TYPES", { timeout: 120_000 }, () => {
+  it("is every type the public entry exports", () => {
+    expect([...CONTRACT_TYPES]).toEqual(typeOnlyExportsOfPublicEntry());
   });
 });

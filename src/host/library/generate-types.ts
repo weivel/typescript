@@ -1,6 +1,6 @@
 import { pluginError } from "../../engine/index.js";
 import type { LibraryDeclaration, LibraryFunction, LibraryService } from "./declaration.js";
-import { MODEL_DEFINITIONS } from "./model-definitions.generated.js";
+import { CONTRACT_TYPES, MODEL_DEFINITIONS } from "./model-definitions.generated.js";
 
 const PUBLIC_ENTRY = "@weivel/typescript";
 const MODEL_DEFINITION = /^https:\/\/weivel\.github\.io\/model\/([^#/]+)#\/definitions\/([^/]+)$/;
@@ -80,6 +80,9 @@ function referenceType(schema: Schema, path: string, generation: Generation): st
     refuse(generation, `${path}.$ref`, `names ${definition} in ${file}, which weivel/model does not publish`, "reference a definition the model publishes, or declare the shape inline");
   }
   const contractType = pascalCase(definition);
+  if (!CONTRACT_TYPES.includes(contractType)) {
+    refuse(generation, `${path}.$ref`, `names ${definition} in ${file}, for which the contract declares no type ${contractType}`, "add the type to the contract, or declare the shape inline");
+  }
   generation.imports.add(contractType);
   return contractType;
 }
