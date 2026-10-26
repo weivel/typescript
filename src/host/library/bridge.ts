@@ -1,7 +1,9 @@
 import koffi from "koffi";
 import { pluginError } from "../../engine/index.js";
 import type { PluginError } from "../../index.js";
-import type { LibraryDeclaration } from "./declaration.js";
+import { processLibraryContext, withDeclaredContext } from "./context.js";
+import type { LibraryContextProvider } from "./context.js";
+import type { LibraryDeclaration, LibraryFunction } from "./declaration.js";
 import { STRICT_UTF8 } from "./strict-utf8.js";
 
 /** An address inside the library, which the host never dereferences beyond copying a result out. */
@@ -29,6 +31,7 @@ type JsonFunction = (input: Uint8Array, inputLength: number, out: [NativePointer
 interface BoundFunction {
   label: string;
   native: JsonFunction;
+  declared: LibraryFunction;
 }
 
 /**
@@ -67,7 +70,7 @@ function bindDeclared(native: koffi.IKoffiLib, declaration: LibraryDeclaration):
   for (const service of declaration.services) {
     for (const fn of service.functions) {
       const nativeFunction = bindSymbol(native, declaration.id, fn.symbol, JSON_KIND_RESULT, JSON_KIND_PARAMETERS) as JsonFunction;
-      bound.set(fn.symbol, { label: `${service.id}.${fn.name}`, native: nativeFunction });
+      bound.set(fn.symbol, { label: `${service.id}.${fn.name}`, native: nativeFunction, declared: fn });
     }
   }
   return bound;
@@ -151,7 +154,12 @@ function answerOf(libraryId: string, label: string, status: number, bytes: Uint8
  * Every result is copied out of library memory before the library's release function frees it,
  * in a `finally`, so a result that turns out not to be UTF-8 or JSON is still released exactly once.
  */
-export function openLibrary(binaryPath: string, declaration: LibraryDeclaration, seams: BridgeSeams = {}): LoadedLibrary {
+export function openLibrary(
+  binaryPath: string,
+  declaration: LibraryDeclaration,
+  contextProvider: LibraryContextProvider = processLibraryContext,
+  seams: BridgeSeams = {},
+): LoadedLibrary {
   const native = loadBinary(binaryPath, declaration.id);
   let release: ReleaseFunction;
   let functions: Map<string, BoundFunction>;
@@ -174,7 +182,7 @@ export function openLibrary(binaryPath: string, declaration: LibraryDeclaration,
       }
       const out: [NativePointer] = [null];
       const outLength: [number | bigint] = [0];
-      const input = encodeArgument(declaration.id, bound.label, argument);
+      const input = encodeArgument(declaration.id, bound.label, withDeclaredContext(bound.declared, argument, contextProvider));
       const status = bound.native(input, input.length, out, outLength);
       return answerOf(declaration.id, bound.label, status, takeResult(out[0], outLength[0], release));
     },
