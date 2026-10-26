@@ -1,0 +1,236 @@
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { isPluginError } from "../../engine/index.js";
+import type { PluginRuntime } from "../../engine/index.js";
+import type { Plugin, PluginContext, PluginError, PluginManifest } from "../../index.js";
+import { ECHO_PIN } from "../__fixtures__/echo-pin.js";
+import { startPlugins } from "../plugin-host.js";
+import { acquireLibrary, currentPlatformKey, openLibrary, parseDeclaration } from "./index.js";
+import type { LibraryDeclaration, LibraryPin } from "./index.js";
+
+const NETWORK_TIMEOUT_MS = 60000;
+
+type EchoService = Record<"echo" | "fail" | "repeat" | "garbage", (argument: unknown) => unknown>;
+
+function freshCache(): string {
+  return mkdtempSync(join(tmpdir(), "weivel-library-"));
+}
+
+function runtime(): PluginRuntime {
+  return {
+    config: { all: () => ({}), get: () => undefined, set: async () => {} },
+    log: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+    paths: { home: "/home", repos: "/home/repos", plugin: "/home/plugin", cache: "/home/cache", config: "/home/config" },
+    events: { publish: () => {}, subscribe: () => () => {} },
+  };
+}
+
+function manifest(id: string, extra: Partial<PluginManifest> = {}): PluginManifest {
+  return { id, api: 1, entry: "dist/index.js", capabilities: [], ...extra };
+}
+
+function scanOf(...plugins: Array<{ manifest: PluginManifest; module: unknown }>) {
+  return {
+    loaded: plugins.map((plugin) => ({ manifest: plugin.manifest, manifestPath: `/home/plugin/${plugin.manifest.id}.json`, entryPath: `/home/plugin/${plugin.manifest.id}.js` })),
+    failed: [],
+    modules: new Map(plugins.map((plugin) => [`/home/plugin/${plugin.manifest.id}.js`, plugin.module])),
+  };
+}
+
+function echoConsumer(seen: { echo?: EchoService }): { manifest: PluginManifest; module: { default: Plugin } } {
+  return {
+    manifest: manifest("consumer", { services: { consumes: [{ id: "echo", optional: false }] } }),
+    module: {
+      default: {
+        activate: (ctx: PluginContext) => { seen.echo = ctx.services.get(ctx.service("echo")) as EchoService; },
+        deactivate: () => {},
+      },
+    },
+  };
+}
+
+function bystander(): { manifest: PluginManifest; module: { default: Plugin } } {
+  return { manifest: manifest("bystander"), module: { default: { activate: () => {}, deactivate: () => {} } } };
+}
+
+async function startWith(libraries: readonly LibraryPin[], libraryCache: string, ...plugins: Array<{ manifest: PluginManifest; module: unknown }>) {
+  const scan = scanOf(...plugins);
+  return startPlugins({
+    app: "test",
+    pluginDir: "/home/plugin",
+    runtimeFor: () => runtime(),
+    scan,
+    importEntry: async (entryPath: string) => scan.modules.get(entryPath),
+    libraries,
+    libraryCache,
+  });
+}
+
+function refusalOf(work: () => unknown): PluginError {
+  try {
+    work();
+  } catch (error) {
+    if (isPluginError(error)) return error;
+    throw error;
+  }
+  throw new Error("expected a refusal, and the call returned");
+}
+
+async function rejectionOf(work: Promise<unknown>): Promise<PluginError> {
+  try {
+    await work;
+  } catch (error) {
+    if (isPluginError(error)) return error;
+    throw error;
+  }
+  throw new Error("expected a refusal, and the work resolved");
+}
+
+function countingFetch(): { fetchImpl: typeof fetch; urls: string[] } {
+  const urls: string[] = [];
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    urls.push(String(input));
+    return fetch(input, init);
+  }) as typeof fetch;
+  return { fetchImpl, urls };
+}
+
+function withDigit(digest: string): string {
+  return `${digest[0] === "0" ? "1" : "0"}${digest.slice(1)}`;
+}
+
+function withoutPlatform(pin: LibraryPin, platformKey: string): LibraryPin {
+  const sha256 = Object.fromEntries(Object.entries(pin.sha256).filter(([key]) => key !== platformKey));
+  return { ...pin, sha256 };
+}
+
+describe("a C library", () => {
+  let echo: EchoService;
+  let binaryPath: string;
+  let declaration: LibraryDeclaration;
+
+  beforeAll(async () => {
+    const seen: { echo?: EchoService } = {};
+    const cache = freshCache();
+    const loaded = await startWith([ECHO_PIN], cache, echoConsumer(seen));
+    expect(loaded.quarantined).toEqual([]);
+    expect(loaded.started).toEqual(["consumer"]);
+    echo = seen.echo as EchoService;
+    ({ binaryPath, declaration } = await acquireLibrary(ECHO_PIN, cache));
+  }, NETWORK_TIMEOUT_MS);
+
+  it("offers each declared function as a method of its service", () => {
+    expect(echo.echo({ a: [1, 2] })).toEqual({ a: [1, 2] });
+  });
+
+  it("raises a library failure as a refusal carrying its fix", () => {
+    const refusal = refusalOf(() => echo.fail({}));
+    expect(refusal.fix).toBe("call echo instead");
+    expect(refusal.detail).toContain("echo refused on purpose");
+  });
+
+  it("returns a one-mebibyte result intact", () => {
+    const result = echo.repeat({ count: 1048576 }) as string;
+    expect(result.length).toBe(1048576);
+  });
+
+  it("refuses invalid UTF-8 from a library as a refusal, not a parser error", () => {
+    const refusal = refusalOf(() => echo.garbage({}));
+    expect(refusal.pluginId).toBe("echo");
+    expect(refusal.detail).toContain("garbage");
+  });
+
+  it("refuses a binary whose digest differs from its pin", async () => {
+    const cache = freshCache();
+    const platformKey = currentPlatformKey();
+    const pin = { ...ECHO_PIN, sha256: { ...ECHO_PIN.sha256, [platformKey]: withDigit(ECHO_PIN.sha256[platformKey]) } };
+
+    const refusal = await rejectionOf(acquireLibrary(pin, cache));
+
+    expect(refusal.detail).toContain("SHA-256");
+    expect(readdirSync(cache, { recursive: true }).map(String).filter((entry) => /\.(dll|so|dylib|tmp)$/.test(entry))).toEqual([]);
+  }, NETWORK_TIMEOUT_MS);
+
+  it("re-verifies a cached file instead of trusting it", async () => {
+    const cache = freshCache();
+    const first = await acquireLibrary(ECHO_PIN, cache);
+    writeFileSync(first.binaryPath, "not the library");
+    const { fetchImpl, urls } = countingFetch();
+
+    const second = await acquireLibrary(ECHO_PIN, cache, fetchImpl);
+    const library = openLibrary(second.binaryPath, second.declaration);
+
+    expect(urls.filter((url) => url.endsWith(".dll") || url.endsWith(".so"))).toHaveLength(1);
+    expect(urls.filter((url) => url.endsWith("library.json"))).toEqual([]);
+    expect(library.call("echo_echo", { again: true })).toEqual({ again: true });
+    library.close();
+  }, NETWORK_TIMEOUT_MS);
+
+  it("refuses a library with no binary for this platform and still starts the rest", async () => {
+    const platformKey = currentPlatformKey();
+    const seen: { echo?: EchoService } = {};
+
+    const loaded = await startWith([withoutPlatform(ECHO_PIN, platformKey)], freshCache(), echoConsumer(seen), bystander());
+
+    expect(loaded.started).toEqual(["bystander"]);
+    const [libraryRefusal, consumerRefusal] = loaded.quarantined;
+    expect(libraryRefusal.detail).toContain(platformKey);
+    expect(consumerRefusal.pluginId).toBe("consumer");
+    expect(seen.echo).toBeUndefined();
+    await loaded.stop();
+  }, NETWORK_TIMEOUT_MS);
+
+  it("names the platform when neither the pin nor the release carries it", async () => {
+    const refusal = await rejectionOf(acquireLibrary(ECHO_PIN, freshCache(), fetch, "darwin-arm64"));
+    expect(refusal.detail).toContain("darwin-arm64");
+  }, NETWORK_TIMEOUT_MS);
+
+  it("refuses at load a declared symbol the binary does not export", () => {
+    const [service] = declaration.services;
+    const missing = { ...service.functions[0], name: "missing", symbol: "echo_missing" };
+    const declaring = { ...declaration, services: [{ ...service, functions: [...service.functions, missing] }] };
+
+    const refusal = refusalOf(() => openLibrary(binaryPath, declaring));
+
+    expect(refusal.detail).toContain("echo_missing");
+  });
+
+  it("releases every result exactly once", () => {
+    let releases = 0;
+    const library = openLibrary(binaryPath, declaration, {
+      wrapRelease: (release) => (pointer) => { releases++; release(pointer); },
+    });
+    const symbols = ["echo_echo", "echo_fail", "echo_garbage", "echo_repeat"];
+    for (let call = 0; call < 100; call++) {
+      const symbol = symbols[call % symbols.length];
+      try {
+        library.call(symbol, symbol === "echo_repeat" ? { count: 3 } : {});
+      } catch (error) {
+        if (!isPluginError(error)) throw error;
+      }
+    }
+    library.close();
+    expect(releases).toBe(100);
+  });
+
+  it("refuses a closed library rather than calling into unloaded code", () => {
+    const library = openLibrary(binaryPath, declaration);
+    library.close();
+    expect(refusalOf(() => library.call("echo_echo", {})).detail).toContain("closed");
+  });
+});
+
+describe("parseDeclaration", () => {
+  it("names each schema violation in the refusal's detail", () => {
+    const refusal = refusalOf(() => parseDeclaration(JSON.stringify({ id: "Echo", version: "", binary: "echo", release: "echo_release", services: [] })));
+    expect(refusal.detail).toContain("id");
+    expect(refusal.detail).toContain("version");
+    expect(refusal.detail).toContain("services");
+  });
+
+  it("refuses text that is not JSON", () => {
+    expect(refusalOf(() => parseDeclaration("{")).detail).toContain("library.json");
+  });
+});
