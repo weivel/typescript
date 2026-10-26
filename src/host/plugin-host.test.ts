@@ -361,6 +361,27 @@ describe("startPlugins", () => {
     expect(loaded.quarantined[0].fix).toContain("deploy");
   });
 
+  it("imports only a deployed bundle when a scan repeats an id whose later copy has none", async () => {
+    const record: string[] = [];
+    const imported: unknown[] = [];
+    const deployed = scanOf({ manifest: manifest("twice"), module: settingsPlugin(record, "twice") });
+    const scan = {
+      ...deployed,
+      loaded: [...deployed.loaded, { manifest: manifest("twice"), manifestPath: "/home/plugin/twice-copy.json", entryPath: null }],
+    };
+
+    const loaded = await startPlugins(options(scan as never, {
+      importEntry: async (entryPath: unknown) => {
+        imported.push(entryPath);
+        return deployed.modules.get(entryPath as string);
+      },
+    }));
+
+    expect(imported).toEqual(["/home/plugin/twice.js"]);
+    expect(record).toEqual(["twice"]);
+    expect(loaded.started).toEqual(["twice"]);
+  });
+
   it("records a manifest that failed to read in the ledger as well as the quarantine list", async () => {
     const loaded = await startPlugins(options({
       loaded: [],
