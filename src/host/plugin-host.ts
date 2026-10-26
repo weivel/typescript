@@ -301,18 +301,19 @@ function closeAll(libraries: readonly LoadedLibrary[]): void {
 function collisionRefusal(declaration: LibraryDeclaration, pin: LibraryPin, serviceId: string, existing: string): PluginError {
   return pluginError(
     declaration.id,
-    `service "${serviceId}" is offered by both ${existing} and library ${declaration.id} (${pin.repository}@${pin.tag}), so the library's copy is refused`,
+    `service "${serviceId}" is offered by both ${existing} and library ${declaration.id} (${pin.repository}@${pin.tag}), so the library is refused with every service it offers`,
     `rename the service in one library's library.json, or stop ${existing} offering "${serviceId}"`,
   );
 }
 
 /**
- * Acquires and opens every pinned library, keeping each service whose id nothing earlier offers.
+ * Acquires and opens every pinned library, keeping each whose service ids nothing earlier offers.
  *
  * @remarks
  * The host registry replaces a service registered twice, so a collision is refused here, before
  * anything is registered: the embedder's own services win, then libraries in pin order. A library
- * left with no service is closed again.
+ * with one colliding service offers none of them and is closed again, because a library is one
+ * release unit and a partial offer would split it silently.
  */
 async function openLibraries(
   pins: readonly LibraryPin[],
@@ -326,16 +327,14 @@ async function openLibraries(
     try {
       const { declaration, binaryPath } = await acquireLibrary(pin, cacheDir);
       const library = openLibrary(binaryPath, declaration);
-      const offered = servicesOf(library, declaration).filter((service) => {
-        const existing = providers.get(service.id);
-        if (existing) quarantined.push(collisionRefusal(declaration, pin, service.id, existing));
-        return existing === undefined;
-      });
-      for (const service of offered) providers.set(service.id, `library ${declaration.id} (${pin.repository}@${pin.tag})`);
-      if (offered.length === 0) {
+      const offered = servicesOf(library, declaration);
+      const colliding = offered.find((service) => providers.has(service.id));
+      if (colliding) {
         library.close();
+        quarantined.push(collisionRefusal(declaration, pin, colliding.id, providers.get(colliding.id) as string));
         continue;
       }
+      for (const service of offered) providers.set(service.id, `library ${declaration.id} (${pin.repository}@${pin.tag})`);
       opened.libraries.push(library);
       opened.services.push(...offered);
     } catch (error) {

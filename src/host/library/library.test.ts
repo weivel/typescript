@@ -1,12 +1,14 @@
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { isPluginError } from "../../engine/index.js";
 import type { PluginRuntime } from "../../engine/index.js";
 import type { Plugin, PluginContext, PluginError, PluginManifest } from "../../index.js";
 import { ECHO_PIN } from "../__fixtures__/echo-pin.js";
 import { startPlugins } from "../plugin-host.js";
+import { jsonOf } from "./bridge.js";
 import { acquireLibrary, currentPlatformKey, openLibrary, parseDeclaration } from "./index.js";
 import type { LibraryDeclaration, LibraryPin } from "./index.js";
 
@@ -113,6 +115,42 @@ function countingFetch(): { fetchImpl: typeof fetch; urls: string[] } {
 
 function withDigit(digest: string): string {
   return `${digest[0] === "0" ? "1" : "0"}${digest.slice(1)}`;
+}
+
+const BYTE_ORDER_MARK = Uint8Array.of(0xef, 0xbb, 0xbf);
+
+const neverAnswers = (() => new Promise<Response>(() => {})) as typeof fetch;
+
+function withByteOrderMark(bytes: Uint8Array): Uint8Array {
+  return Uint8Array.from([...BYTE_ORDER_MARK, ...bytes]);
+}
+
+/** Puts a release's assets where the cache keeps them and pins exactly these declaration bytes, so nothing is downloaded. */
+function stageRelease(cache: string, binaryPath: string, declarationBytes: Uint8Array): LibraryPin {
+  const directory = join(cache, ...ECHO_PIN.repository.split("/"), ECHO_PIN.tag);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "library.json"), declarationBytes);
+  copyFileSync(binaryPath, join(directory, basename(binaryPath)));
+  const declarationDigest = createHash("sha256").update(declarationBytes).digest("hex");
+  return { ...ECHO_PIN, sha256: { ...ECHO_PIN.sha256, "library.json": declarationDigest } };
+}
+
+function withMirrorService(declarationText: string): Uint8Array {
+  const declared = JSON.parse(declarationText) as LibraryDeclaration;
+  const [echoService] = declared.services;
+  return new TextEncoder().encode(JSON.stringify({ ...declared, services: [echoService, { ...echoService, id: "mirror" }] }));
+}
+
+function mirrorConsumer(seen: { mirror?: unknown }): { manifest: PluginManifest; module: { default: Plugin } } {
+  return {
+    manifest: manifest("mirror-consumer", { services: { consumes: [{ id: "mirror", optional: false }] } }),
+    module: {
+      default: {
+        activate: (ctx: PluginContext) => { seen.mirror = ctx.services.get(ctx.service("mirror")); },
+        deactivate: () => {},
+      },
+    },
+  };
 }
 
 function withoutPlatform(pin: LibraryPin, platformKey: string): LibraryPin {
@@ -228,6 +266,31 @@ describe("a C library", () => {
     await loaded.stop();
   }, NETWORK_TIMEOUT_MS);
 
+  it("offers none of a library's services when one of them collides", async () => {
+    const cache = freshCache();
+    const pin = stageRelease(cache, binaryPath, withMirrorService(readFileSync(join(binaryPath, "..", "library.json"), "utf8")));
+    const seen: { mirror?: unknown } = {};
+
+    const loaded = await startWithServices([{ id: "echo", implementation: { echo: () => "the embedder's" } }], [pin], cache, mirrorConsumer(seen));
+
+    expect(loaded.started).toEqual([]);
+    expect(seen.mirror).toBeUndefined();
+    const [libraryRefusal, consumerRefusal] = loaded.quarantined;
+    expect(libraryRefusal.pluginId).toBe("echo");
+    expect(libraryRefusal.detail).toContain("both the embedding host and library echo (weivel/bindings@v0.1.1)");
+    expect(consumerRefusal.pluginId).toBe("mirror-consumer");
+    await loaded.stop();
+  });
+
+  it("refuses a library.json that starts with a byte order mark as not JSON", async () => {
+    const cache = freshCache();
+    const pin = stageRelease(cache, binaryPath, withByteOrderMark(readFileSync(join(binaryPath, "..", "library.json"))));
+
+    const refusal = await rejectionOf(acquireLibrary(pin, cache, neverAnswers));
+
+    expect(refusal.detail).toContain("library.json is not JSON");
+  });
+
   it("accepts a cached file another host renamed into place first, when it matches the pin", async () => {
     const cache = freshCache();
     const rename = async (_from: string, to: string) => {
@@ -283,6 +346,28 @@ describe("a C library", () => {
     const library = openLibrary(binaryPath, declaration);
     library.close();
     expect(refusalOf(() => library.call("echo_echo", {})).detail).toContain("closed");
+  });
+});
+
+describe("acquireLibrary", () => {
+  it("refuses a download that does not finish within its deadline, naming the URL", async () => {
+    const refusal = await rejectionOf(acquireLibrary(ECHO_PIN, freshCache(), neverAnswers, currentPlatformKey(), { downloadDeadlineMs: 50 }));
+
+    expect(refusal.detail).toContain("https://github.com/weivel/bindings/releases/download/v0.1.1/library.json did not finish within 50 ms");
+  });
+
+  it("refuses a platform key that is not <os>-<arch> in lowercase letters and digits", async () => {
+    for (const platformKey of ["../../x", "Win32-x64", "linux", "linux-x64-musl", ""]) {
+      const refusal = await rejectionOf(acquireLibrary(ECHO_PIN, freshCache(), neverAnswers, platformKey));
+      expect(refusal.detail, platformKey).toContain(`a platform key is <os>-<arch> as Node spells them, for example linux-x64, not ${platformKey}`);
+    }
+  });
+});
+
+describe("a library's answer", () => {
+  it("is refused as not JSON when it starts with a byte order mark", () => {
+    const refusal = refusalOf(() => jsonOf("echo", "echo.echo", withByteOrderMark(new TextEncoder().encode("{}"))));
+    expect(refusal.detail).toBe("echo.echo answered text that is not JSON");
   });
 });
 

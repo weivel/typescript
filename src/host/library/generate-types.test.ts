@@ -133,6 +133,16 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
     }
   });
 
+  it("refuses a type or a $ref file named like a member every object inherits, at its schema path", () => {
+    for (const type of ["constructor", "toString", "__proto__"]) {
+      expect(() => generateLibraryTypes(declarationWithResult({ type })), type).toThrow("services[0].functions[0].result.type");
+    }
+    for (const file of ["constructor", "__proto__", "toString"]) {
+      const declaration = declarationWithResult({ $ref: `https://weivel.github.io/model/${file}#/definitions/appDescriptor` });
+      expect(() => generateLibraryTypes(declaration), file).toThrow(`result.$ref names appDescriptor in ${file}, which weivel/model does not publish`);
+    }
+  });
+
   it("refuses a $ref outside the model", () => {
     expect(() => generateLibraryTypes(declarationWithResult({ $ref: "#/definitions/local" }))).toThrow(/services\[0\]\.functions\[0\]\.result\.\$ref/);
     expect(() => generateLibraryTypes(declarationWithResult({ $ref: "https://example.com/x.json#/definitions/appDescriptor" }))).toThrow(
