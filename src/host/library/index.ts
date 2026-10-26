@@ -3,7 +3,7 @@ export type { AcquiredLibrary, AcquireSeams, LibraryPin } from "./acquire.js";
 export { openLibrary } from "./bridge.js";
 export type { BridgeSeams, LoadedLibrary, NativePointer, ReleaseFunction } from "./bridge.js";
 export { parseDeclaration } from "./declaration.js";
-export { CONTRACT_TYPE_NAMES, generateLibraryTypes } from "./generate-types.js";
+export { generateLibraryTypes } from "./generate-types.js";
 export type { LibraryDeclaration, LibraryFunction, LibraryService } from "./declaration.js";
 export { servicesOf } from "./services.js";
 export type { LibraryServiceImplementation } from "./services.js";

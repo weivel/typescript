@@ -4,6 +4,7 @@ dist/
 .idea/
 src/engine/schema.generated.ts
 src/host/library/declaration.generated.ts
+src/host/library/model-definitions.generated.ts
 
 # Generated on the default branch by the readme job.
 README.md

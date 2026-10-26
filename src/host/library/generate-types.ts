@@ -1,25 +1,10 @@
 import { pluginError } from "../../engine/index.js";
 import type { LibraryDeclaration, LibraryFunction, LibraryService } from "./declaration.js";
-
-/**
- * Every type the package's public entry exports, which is what a model `$ref` may map onto.
- *
- * @implNote Held exactly equal to the entry's type exports by its test, so a type added to the
- * contract fails the suite until it is listed here; the generator ships without the compiler, so it
- * cannot ask the entry itself.
- */
-export const CONTRACT_TYPE_NAMES: ReadonlySet<string> = new Set([
-  "AppDescriptor", "AppDetect", "AppDiscovery", "AppHome", "AppLoader", "AppModelCatalog", "AppNpmPlugins",
-  "AppPathNames", "AppProjects", "AppStartupHook", "AppUsage", "CapabilityType", "Events", "HomeDescriptor",
-  "HostDescriptor", "Logger", "ManifestCommand", "ManifestConfig", "ManifestData", "ManifestLifecycle",
-  "ManifestMarketplace", "ManifestOffer", "ManifestPublish", "ManifestRequirement", "ManifestServices",
-  "MarketplaceCategory", "MarketplaceMatch", "Plugin", "PluginConfig", "PluginContext", "PluginError",
-  "PluginManifest", "PluginPaths", "RepoMeta", "Scheduler", "ServiceType", "Services", "Store", "TopicType",
-  "WantOptions",
-]);
+import { MODEL_DEFINITIONS } from "./model-definitions.generated.js";
 
 const PUBLIC_ENTRY = "@weivel/typescript";
-const MODEL_DEFINITION = /^https:\/\/weivel\.github\.io\/model\/[^#/]+#\/definitions\/([A-Za-z][A-Za-z0-9]*)$/;
+const MODEL_DEFINITION = /^https:\/\/weivel\.github\.io\/model\/([^#/]+)#\/definitions\/([^/]+)$/;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const PRIMITIVE_TYPES: Readonly<Record<string, string>> = { string: "string", integer: "number", number: "number", boolean: "boolean" };
 const STRUCTURAL_KEYWORDS = new Set(["type", "properties", "required", "additionalProperties", "items", "enum", "$ref"]);
@@ -87,14 +72,14 @@ function referenceType(schema: Schema, path: string, generation: Generation): st
   const sibling = Object.keys(schema).find((keyword) => keyword !== "$ref" && STRUCTURAL_KEYWORDS.has(keyword));
   if (sibling !== undefined) refuse(generation, `${path}.${sibling}`, "sits beside a $ref, which ignores it", "remove it, or drop the $ref");
   const reference = schema.$ref;
-  const definition = typeof reference === "string" ? MODEL_DEFINITION.exec(reference)?.[1] : undefined;
-  if (definition === undefined) {
-    refuse(generation, `${path}.$ref`, `is ${JSON.stringify(reference)}, which is not a definition weivel/model publishes`, "reference https://weivel.github.io/model/<file>#/definitions/<name>, or declare the shape inline");
+  const [, file, definition] = (typeof reference === "string" ? MODEL_DEFINITION.exec(reference) : null) ?? [];
+  if (file === undefined || definition === undefined) {
+    refuse(generation, `${path}.$ref`, `is ${JSON.stringify(reference)}, which does not name a weivel/model definition`, "reference https://weivel.github.io/model/<file>#/definitions/<name>, or declare the shape inline");
+  }
+  if (!MODEL_DEFINITIONS[file]?.includes(definition)) {
+    refuse(generation, `${path}.$ref`, `names ${definition} in ${file}, which weivel/model does not publish`, "reference a definition the model publishes, or declare the shape inline");
   }
   const contractType = pascalCase(definition);
-  if (!CONTRACT_TYPE_NAMES.has(contractType)) {
-    refuse(generation, `${path}.$ref`, `names the model definition ${definition}, but the contract exports no type ${contractType}`, `add ${contractType} to the contract, or reference a definition it exports`);
-  }
   generation.imports.add(contractType);
   return contractType;
 }
@@ -121,8 +106,8 @@ function requiredNames(schema: Schema, path: string, generation: Generation): Re
 
 function objectType(schema: Schema, path: string, generation: Generation): string {
   const additional = schema.additionalProperties;
-  if (additional !== undefined && additional !== false) {
-    refuse(generation, `${path}.additionalProperties`, "is neither false nor absent", "set additionalProperties to false, or remove it to allow any further property");
+  if (additional !== undefined && typeof additional !== "boolean") {
+    refuse(generation, `${path}.additionalProperties`, "is a schema, which the generator does not support", "set additionalProperties to true or false, or remove it");
   }
   const properties = schema.properties ?? {};
   if (!isSchema(properties)) refuse(generation, `${path}.properties`, "is not an object of schemas", "map each property name to its schema");
@@ -131,12 +116,14 @@ function objectType(schema: Schema, path: string, generation: Generation): strin
     const optional = required.has(name) ? "" : "?";
     return `${propertyKey(name)}${optional}: ${typeOf(property, `${path}.properties.${name}`, generation)}`;
   });
-  if (additional === undefined) members.push("[key: string]: unknown");
+  const undeclaredRequired = [...required].filter((name) => !Object.hasOwn(properties, name));
+  members.push(...undeclaredRequired.map((name) => `${propertyKey(name)}: unknown`));
+  if (additional !== false) members.push("[key: string]: unknown");
   return members.length === 0 ? "{ [key: string]: never }" : `{ ${members.join("; ")} }`;
 }
 
 function arrayType(schema: Schema, path: string, generation: Generation): string {
-  if (!isSchema(schema.items)) refuse(generation, `${path}.items`, "is not one schema for every element", "give the array a single items schema");
+  if (!isSchema(schema.items) && typeof schema.items !== "boolean") refuse(generation, `${path}.items`, "is not one schema for every element", "give the array a single items schema");
   const element = typeOf(schema.items, `${path}.items`, generation);
   return element.includes("|") ? `(${element})[]` : `${element}[]`;
 }
@@ -151,6 +138,8 @@ function declaredType(schema: Schema, path: string, generation: Generation): str
 }
 
 function typeOf(schema: unknown, path: string, generation: Generation): string {
+  if (schema === true) return "unknown";
+  if (schema === false) return "never";
   if (!isSchema(schema)) refuse(generation, path, "is not a schema object", "write the schema as an object; {} accepts anything");
   refuseUnsupportedKeywords(schema, path, generation);
   if ("$ref" in schema) return referenceType(schema, path, generation);
@@ -177,6 +166,9 @@ function serviceSource(service: LibraryService, index: number, generation: Gener
   const path = `services[${index}]`;
   refuseDuplicateFunctions(service, path, generation);
   const name = pascalCase(service.id);
+  if (!/^[A-Za-z]/.test(name)) {
+    refuse(generation, `${path}.id`, `is ${JSON.stringify(service.id)}, which yields ${JSON.stringify(name)}, not a TypeScript identifier`, "start the service id with a letter");
+  }
   const methods = service.functions.map((fn, fnIndex) => methodSource(fn, `${path}.functions[${fnIndex}]`, generation));
   return [
     `export interface ${name}Service {`,
@@ -200,6 +192,15 @@ function refuseCollidingNames(declaration: LibraryDeclaration, generation: Gener
   });
 }
 
+/** The header interpolates the id and version, and a line terminator in either would end its comment. */
+function refuseHeaderBreakout(declaration: LibraryDeclaration, generation: Generation): void {
+  for (const field of ["id", "version"] as const) {
+    if (CONTROL_CHARACTER.test(declaration[field])) {
+      refuse(generation, field, `is ${JSON.stringify(declaration[field])}, which carries a control character`, `remove control characters from the declaration's ${field}`);
+    }
+  }
+}
+
 /**
  * The TypeScript a plugin author compiles against for a library's services: one interface and one
  * typed key per service, importing contract types from the package's public entry.
@@ -210,6 +211,7 @@ function refuseCollidingNames(declaration: LibraryDeclaration, generation: Gener
  */
 export function generateLibraryTypes(declaration: LibraryDeclaration): string {
   const generation: Generation = { libraryId: declaration.id, imports: new Set(["ServiceType"]) };
+  refuseHeaderBreakout(declaration, generation);
   const services = declaration.services.map((service, index) => serviceSource(service, index, generation));
   refuseCollidingNames(declaration, generation);
   return [

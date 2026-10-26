@@ -59,9 +59,29 @@ function validatorModule(schema, idName, validatorName) {
   ].join("\n");
 }
 
-for (const { schemaFile, target, idName, validatorName } of GENERATED) {
-  const schema = JSON.parse(readFileSync(join(sibling("model"), schemaFile), "utf8"));
+const MODEL_DEFINITIONS_TARGET = ["src", "host", "library", "model-definitions.generated.ts"];
+
+/**
+ * The definitions each model schema publishes, keyed by the file a `$ref` names, so a library type
+ * may reference exactly what the model publishes and nothing a hand-kept list claims it does.
+ */
+function modelDefinitionsModule(schemasByFile) {
+  const definitions = Object.fromEntries(
+    Object.entries(schemasByFile).map(([schemaFile, schema]) => [schemaFile, Object.keys(schema.definitions ?? {}).sort()]),
+  );
+  return `export const MODEL_DEFINITIONS: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(definitions)};\n`;
+}
+
+function writeGenerated(target, source) {
   const path = join(repositoryRoot(), ...target);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, validatorModule(schema, idName, validatorName));
+  writeFileSync(path, source);
 }
+
+const schemasByFile = {};
+for (const { schemaFile, target, idName, validatorName } of GENERATED) {
+  const schema = JSON.parse(readFileSync(join(sibling("model"), schemaFile), "utf8"));
+  schemasByFile[schemaFile] = schema;
+  writeGenerated(target, validatorModule(schema, idName, validatorName));
+}
+writeGenerated(MODEL_DEFINITIONS_TARGET, modelDefinitionsModule(schemasByFile));
