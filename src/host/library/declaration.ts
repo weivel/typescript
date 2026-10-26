@@ -1,31 +1,8 @@
 import { pluginError, schemaIssues } from "../../engine/index.js";
+import type { LibraryDeclaration } from "./declaration.generated.js";
 import { validateLibraryDeclaration } from "./declaration.generated.js";
 
-/** One exported function of the `json` kind: UTF-8 JSON in, UTF-8 JSON out. */
-export interface LibraryFunction {
-  name: string;
-  symbol: string;
-  kind: "json";
-  argument: object | boolean;
-  result: object | boolean;
-  /** The facts of the calling process the function reads, sent beside its argument. Absent means none. */
-  context?: Array<"environment" | "home" | "arguments">;
-}
-
-/** One service a library offers, and the functions it is made of. */
-export interface LibraryService {
-  id: string;
-  functions: LibraryFunction[];
-}
-
-/** A library's `library.json`, as `library.schema.json` in `weivel/model` defines it. */
-export interface LibraryDeclaration {
-  id: string;
-  version: string;
-  binary: string;
-  release: string;
-  services: LibraryService[];
-}
+export type { LibraryDeclaration, LibraryFunction, LibraryService } from "./declaration.generated.js";
 
 const DECLARATION_FILE = "library.json";
 

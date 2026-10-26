@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { repositoryRoot, sibling } from "../../../scripts/sibling.mjs";
@@ -70,18 +70,73 @@ function compileDiagnostics(generated: string, consumer: string): string[] {
   return ts.getPreEmitDiagnostics(program).map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
 }
 
-function typeOnlyExportsOfPublicEntry(): string[] {
+const contractDirectory = join(root, "src", "contract");
+
+function isDeclaredInContract(symbol: ts.Symbol): boolean {
+  return (symbol.declarations ?? []).some((declaration) => !relative(contractDirectory, declaration.getSourceFile().fileName).startsWith(".."));
+}
+
+function contractExports(): { checker: ts.TypeChecker; types: ts.Symbol[] } {
   const program = ts.createProgram([publicEntry], compilerOptions());
   const checker = program.getTypeChecker();
   const source = program.getSourceFile(publicEntry);
   const module = source && checker.getSymbolAtLocation(source);
   if (!module) throw new Error(`cannot read ${publicEntry}`);
-  return checker
+  const types = checker
     .getExportsOfModule(module)
     .map((exported) => (exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported))
     .filter((symbol) => symbol.flags & (ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias))
-    .map((symbol) => symbol.name)
+    .filter(isDeclaredInContract);
+  return { checker, types };
+}
+
+function typeOnlyExportsOfPublicEntry(): string[] {
+  return contractExports()
+    .types.map((symbol) => symbol.name)
     .sort();
+}
+
+interface ObjectShape {
+  properties: string[];
+  required: string[];
+}
+
+function shapeOf(checker: ts.TypeChecker, symbol: ts.Symbol): ObjectShape {
+  const members = checker.getPropertiesOfType(checker.getDeclaredTypeOfSymbol(symbol));
+  return {
+    properties: members.map((member) => member.name).sort(),
+    required: members.filter((member) => !(member.flags & ts.SymbolFlags.Optional)).map((member) => member.name).sort(),
+  };
+}
+
+type ShapeLookup = (typeName: string) => ObjectShape;
+
+function shapeLookup(checker: ts.TypeChecker, types: ts.Symbol[], origin: string): ShapeLookup {
+  return (typeName) => {
+    const symbol = types.find((candidate) => candidate.name === typeName);
+    if (!symbol) throw new Error(`${origin} declares no ${typeName}`);
+    return shapeOf(checker, symbol);
+  };
+}
+
+function contractShapes(): ShapeLookup {
+  const { checker, types } = contractExports();
+  return shapeLookup(checker, types, "the contract");
+}
+
+/** The shapes the Java contract declares, as its generated declarations publish them. */
+function javaContractShapes(): ShapeLookup {
+  const javaDeclarations = join(sibling("java"), "generated", "api.d.ts");
+  const program = ts.createProgram([javaDeclarations], compilerOptions());
+  const checker = program.getTypeChecker();
+  const source = program.getSourceFile(javaDeclarations);
+  const module = source && checker.getSymbolAtLocation(source);
+  if (!module) throw new Error(`cannot read ${javaDeclarations}`);
+  return shapeLookup(checker, checker.getExportsOfModule(module), javaDeclarations);
+}
+
+function schemaShape(definition: { properties?: Record<string, unknown>; required?: string[] }): ObjectShape {
+  return { properties: Object.keys(definition.properties ?? {}).sort(), required: [...(definition.required ?? [])].sort() };
 }
 
 const ECHO_CONSUMER = `
@@ -261,6 +316,20 @@ describe("MODEL_DEFINITIONS", { timeout: 120_000 }, () => {
       .flatMap(([file, names]) => names.map((name) => ({ file, name })))
       .filter(({ name }) => !exported.has(contractTypeOf(name)));
     expect(withoutType).toEqual([{ file: "plugin.schema.json", name: "appDeclaration" }]);
+  });
+
+  it("holds each app definition with a contract type to that type's properties and required set", () => {
+    const published = JSON.parse(readFileSync(join(sibling("model"), "plugin.schema.json"), "utf8")) as {
+      definitions: Record<string, { properties?: Record<string, unknown>; required?: string[] }>;
+    };
+    const appDefinitions = Object.keys(published.definitions).filter((name) => name.startsWith("app") && name !== "appDeclaration");
+    expect(appDefinitions.length).toBeGreaterThan(0);
+    const contractShape = contractShapes();
+    const javaContractShape = javaContractShapes();
+    for (const name of appDefinitions) {
+      expect(schemaShape(published.definitions[name]), name).toEqual(contractShape(contractTypeOf(name)));
+      expect(schemaShape(published.definitions[name]), `${name} in the Java contract`).toEqual(javaContractShape(contractTypeOf(name)));
+    }
   });
 
   it("is what the model sibling publishes", () => {
