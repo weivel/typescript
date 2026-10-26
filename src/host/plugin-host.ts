@@ -7,10 +7,8 @@ import type { Plugin, PluginContext, PluginError, PluginManifest, Scheduler } fr
 import { ids, readDeployedManifests } from "./plugin-manifests.js";
 import type { VocabularyEntry } from "./plugin-manifests.js";
 import type { DeployedPlugin, ManifestScan } from "./plugin-manifests.js";
-import { acquireLibrary, openLibrary, servicesOf } from "./library/index.js";
-import { processLibraryContext } from "./library/context.js";
-import type { LibraryContextProvider } from "./library/context.js";
-import type { LibraryDeclaration, LibraryPin, LoadedLibrary } from "./library/index.js";
+import { acquireLibrary, openLibrary, processLibraryContext, servicesOf } from "./library/index.js";
+import type { LibraryContextProvider, LibraryDeclaration, LibraryPin, LoadedLibrary } from "./library/index.js";
 
 /** How long one plugin's `activate` may take before it is quarantined. */
 export const DEFAULT_ACTIVATE_TIMEOUT_MS = 10000;

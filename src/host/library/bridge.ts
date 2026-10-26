@@ -182,7 +182,7 @@ export function openLibrary(
       }
       const out: [NativePointer] = [null];
       const outLength: [number | bigint] = [0];
-      const input = encodeArgument(declaration.id, bound.label, withDeclaredContext(bound.declared, argument, contextProvider));
+      const input = encodeArgument(declaration.id, bound.label, withDeclaredContext(declaration.id, bound.label, bound.declared, argument, contextProvider));
       const status = bound.native(input, input.length, out, outLength);
       return answerOf(declaration.id, bound.label, status, takeResult(out[0], outLength[0], release));
     },
