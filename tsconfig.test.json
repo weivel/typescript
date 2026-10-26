@@ -8,6 +8,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["test"],
+  "include": ["test", "src/**/*.test.ts"],
   "exclude": ["model", "conformance", "java", "dist", "node_modules"]
 }
