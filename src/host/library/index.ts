@@ -7,3 +7,5 @@ export { generateLibraryTypes } from "./generate-types.js";
 export type { LibraryDeclaration, LibraryFunction, LibraryService } from "./declaration.js";
 export { servicesOf } from "./services.js";
 export type { LibraryServiceImplementation } from "./services.js";
+export { processLibraryContext } from "./context.js";
+export type { LibraryContext, LibraryContextProvider } from "./context.js";

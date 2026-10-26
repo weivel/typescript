@@ -8,6 +8,8 @@ import { ids, readDeployedManifests } from "./plugin-manifests.js";
 import type { VocabularyEntry } from "./plugin-manifests.js";
 import type { DeployedPlugin, ManifestScan } from "./plugin-manifests.js";
 import { acquireLibrary, openLibrary, servicesOf } from "./library/index.js";
+import { processLibraryContext } from "./library/context.js";
+import type { LibraryContextProvider } from "./library/context.js";
 import type { LibraryDeclaration, LibraryPin, LoadedLibrary } from "./library/index.js";
 
 /** How long one plugin's `activate` may take before it is quarantined. */
@@ -77,6 +79,11 @@ export interface PluginHostOptions {
   libraries?: readonly LibraryPin[];
   /** Where acquired libraries are cached. Defaults to {@link defaultLibraryCache}. */
   libraryCache?: string;
+  /**
+   * Supplies the environment, home and arguments a library function declares in its `context`.
+   * Defaults to the running process's own, and is called once per call to such a function.
+   */
+  libraryContext?: LibraryContextProvider;
   /**
    * The one clock every deadline comes from: activate, deactivate and the engine's own waits.
    *
@@ -320,13 +327,14 @@ async function openLibraries(
   cacheDir: string,
   embedderServiceIds: readonly string[],
   quarantined: PluginError[],
+  contextProvider: LibraryContextProvider,
 ): Promise<OpenedLibraries> {
   const opened: OpenedLibraries = { libraries: [], services: [] };
   const providers = new Map<string, string>(embedderServiceIds.map((id) => [id, EMBEDDING_HOST]));
   for (const pin of pins) {
     try {
       const { declaration, binaryPath } = await acquireLibrary(pin, cacheDir);
-      const library = openLibrary(binaryPath, declaration);
+      const library = openLibrary(binaryPath, declaration, contextProvider);
       const offered = servicesOf(library, declaration);
       const colliding = offered.find((service) => providers.has(service.id));
       if (colliding) {
@@ -371,6 +379,7 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
     options.libraryCache ?? defaultLibraryCache(),
     embedderServices.map((service) => service.id),
     quarantined,
+    options.libraryContext ?? processLibraryContext,
   );
   const services = [...embedderServices, ...opened.services];
   try {

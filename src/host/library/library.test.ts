@@ -326,7 +326,7 @@ describe("a C library", () => {
 
   it("releases every result exactly once", () => {
     let releases = 0;
-    const library = openLibrary(binaryPath, declaration, {
+    const library = openLibrary(binaryPath, declaration, undefined, {
       wrapRelease: (release) => (pointer) => { releases++; release(pointer); },
     });
     const symbols = ["echo_echo", "echo_fail", "echo_garbage", "echo_repeat"];
