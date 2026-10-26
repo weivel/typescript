@@ -174,11 +174,13 @@ function refusalBeforeOrdering(host: Host, deployed: DeployedPlugin): PluginErro
   );
 }
 
-/** @returns whether the plugin was quarantined, so a refusal knowable now never counts as a provider. */
-function quarantineBeforeOrdering(host: Host, quarantined: PluginError[], deployed: DeployedPlugin): boolean {
+type Activatable = DeployedPlugin & { entryPath: string };
+
+/** @returns false once the plugin is quarantined, so a refusal knowable now never counts as a provider. */
+function isActivatable(host: Host, quarantined: PluginError[], deployed: DeployedPlugin): deployed is Activatable {
   const refusal = refusalBeforeOrdering(host, deployed);
   if (refusal) quarantine(host, quarantined, deployed.manifest, refusal);
-  return refusal !== null;
+  return refusal === null && typeof deployed.entryPath === "string";
 }
 
 /**
@@ -298,14 +300,14 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   const quarantined: PluginError[] = [];
   const started: string[] = [];
   const plugins = new Map<string, Plugin>();
-  const byId = new Map<string, DeployedPlugin>(scan.loaded.map((plugin) => [plugin.manifest.id, plugin]));
 
   for (const failure of scan.failed) {
     host.markBroken(failure.pluginId, failure);
     quarantined.push(failure);
   }
 
-  const activatable = scan.loaded.filter((plugin) => !quarantineBeforeOrdering(host, quarantined, plugin));
+  const activatable = scan.loaded.filter((plugin) => isActivatable(host, quarantined, plugin));
+  const byId = new Map<string, Activatable>(activatable.map((plugin) => [plugin.manifest.id, plugin]));
   const plan = activationOrder(
     activatable.map((plugin) => plugin.manifest),
     (options.services ?? []).map((service) => service.id),
@@ -330,8 +332,7 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   for (const pluginId of plan.order) {
     const deployed = byId.get(pluginId);
     if (!deployed) continue;
-    const { manifest } = deployed;
-    const entryPath = deployed.entryPath as string;
+    const { manifest, entryPath } = deployed;
 
     let plugin: Plugin | null;
     try {
