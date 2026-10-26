@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { repositoryRoot, sibling } from "../../../scripts/sibling.mjs";
 import type { LibraryDeclaration } from "./declaration.js";
 import { parseDeclaration } from "./declaration.js";
-import { CONTRACT_TYPE_NAMES, generateLibraryTypes } from "./generate-types.js";
+import { generateLibraryTypes } from "./generate-types.js";
+import { MODEL_DEFINITIONS } from "./model-definitions.generated.js";
 
 const root = repositoryRoot();
 const publicEntry = join(root, "src", "index.ts");
@@ -16,7 +17,7 @@ function echoDeclaration(): LibraryDeclaration {
   return parseDeclaration(readFileSync(join(sibling("model"), "test", "fixtures", "echo.library.json"), "utf8"));
 }
 
-function declarationWithResult(result: object, argument: object = { type: "object" }): LibraryDeclaration {
+function declarationWithResult(result: object | boolean, argument: object | boolean = { type: "object" }): LibraryDeclaration {
   return {
     id: "fixture",
     version: "1.0.0",
@@ -119,9 +120,17 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
     expect(compileDiagnostics(generated, consumer)).toEqual([]);
   });
 
-  it("refuses a model $ref whose type the contract does not export, naming it", () => {
-    const declaration = declarationWithResult({ $ref: "https://weivel.github.io/model/plugin.schema.json#/definitions/noSuchThing" });
-    expect(() => generateLibraryTypes(declaration)).toThrow(/services\[0\]\.functions\[0\]\.result\.\$ref.*NoSuchThing/);
+  it("refuses a model $ref to a definition the model does not publish, naming it", () => {
+    const unpublished = [
+      { file: "plugin.schema.json", definition: "pluginContext" },
+      { file: "plugin.schema.json", definition: "noSuchThing" },
+      { file: "library.schema.json", definition: "appDescriptor" },
+      { file: "other.schema.json", definition: "appDescriptor" },
+    ];
+    for (const { file, definition } of unpublished) {
+      const declaration = declarationWithResult({ $ref: `https://weivel.github.io/model/${file}#/definitions/${definition}` });
+      expect(() => generateLibraryTypes(declaration), `${file} ${definition}`).toThrow(`result.$ref names ${definition} in ${file}, which weivel/model does not publish`);
+    }
   });
 
   it("refuses a $ref outside the model", () => {
@@ -154,14 +163,40 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
           tags: { type: "array", items: { type: "string" } },
           mode: { enum: ["fast", "slow", 3, null] },
           "not-an-identifier": {},
+          accepted: true,
+          refused: false,
+          anything: { type: "array", items: true },
         },
-        required: ["name", "mode"],
+        required: ["name", "mode", "undeclared", "also-undeclared"],
         additionalProperties: false,
       }),
     );
     expect(generated).toContain(
-      'get(argument: { [key: string]: unknown }): { name: string; size?: number; count?: number; enabled?: boolean; tags?: string[]; mode: "fast" | "slow" | 3 | null; "not-an-identifier"?: unknown };',
+      'get(argument: { [key: string]: unknown }): { name: string; size?: number; count?: number; enabled?: boolean; tags?: string[]; mode: "fast" | "slow" | 3 | null; "not-an-identifier"?: unknown; accepted?: unknown; refused?: never; anything?: unknown[]; undeclared: unknown; "also-undeclared": unknown };',
     );
+  });
+
+  it("maps additionalProperties true like an absent one, and boolean schemas to unknown and never", () => {
+    const generated = generateLibraryTypes(declarationWithResult(false, { type: "object", properties: { a: { type: "string" } }, additionalProperties: true }));
+    expect(generated).toContain("get(argument: { a?: string; [key: string]: unknown }): never;");
+    expect(generateLibraryTypes(declarationWithResult({ type: "string" }, true))).toContain("get(argument: unknown): string;");
+  });
+
+  it("refuses a service id that yields no TypeScript identifier, naming it", () => {
+    for (const id of ["2fa", "1-password"]) {
+      const declaration = declarationWithResult({ type: "string" });
+      declaration.services[0].id = id;
+      expect(() => generateLibraryTypes(declaration), id).toThrow("services[0].id");
+    }
+  });
+
+  it("refuses a control character in the id or version the header names", () => {
+    for (const version of ["1.0.0\nexport const injected = 1;", "1.0.0 x", "1.0.0\r"]) {
+      const declaration = { ...declarationWithResult({ type: "string" }), version };
+      expect(() => generateLibraryTypes(declaration), JSON.stringify(version)).toThrow("cannot generate types: version");
+    }
+    const declaration = { ...declarationWithResult({ type: "string" }), id: "fixture\n" };
+    expect(() => generateLibraryTypes(declaration)).toThrow("cannot generate types: id");
   });
 
   it("refuses two services whose names collide", () => {
@@ -171,16 +206,17 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
   });
 });
 
-describe("CONTRACT_TYPE_NAMES", { timeout: 120_000 }, () => {
-  it("is exactly the types the package's public entry exports", () => {
-    expect([...CONTRACT_TYPE_NAMES].sort()).toEqual(typeOnlyExportsOfPublicEntry());
+describe("MODEL_DEFINITIONS", { timeout: 120_000 }, () => {
+  it("maps every definition the model publishes onto a type the contract exports", () => {
+    const exported = new Set(typeOnlyExportsOfPublicEntry());
+    const missing = Object.entries(MODEL_DEFINITIONS)
+      .flatMap(([file, names]) => names.map((name) => ({ file, type: name.charAt(0).toUpperCase() + name.slice(1) })))
+      .filter(({ type }) => !exported.has(type));
+    expect(missing).toEqual([]);
   });
 
-  it("covers every definition the model publishes", () => {
-    const schema = JSON.parse(readFileSync(join(sibling("model"), "plugin.schema.json"), "utf8")) as { definitions?: Record<string, unknown> };
-    const missing = Object.keys(schema.definitions ?? {})
-      .map((name) => name.charAt(0).toUpperCase() + name.slice(1))
-      .filter((name) => !CONTRACT_TYPE_NAMES.has(name));
-    expect(missing).toEqual([]);
+  it("is what the model sibling publishes", () => {
+    const published = JSON.parse(readFileSync(join(sibling("model"), "plugin.schema.json"), "utf8")) as { definitions?: Record<string, unknown> };
+    expect(MODEL_DEFINITIONS["plugin.schema.json"]).toEqual(Object.keys(published.definitions ?? {}).sort());
   });
 });
