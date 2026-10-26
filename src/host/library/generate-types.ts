@@ -76,7 +76,7 @@ function referenceType(schema: Schema, path: string, generation: Generation): st
   if (file === undefined || definition === undefined) {
     refuse(generation, `${path}.$ref`, `is ${JSON.stringify(reference)}, which does not name a weivel/model definition`, "reference https://weivel.github.io/model/<file>#/definitions/<name>, or declare the shape inline");
   }
-  if (!MODEL_DEFINITIONS[file]?.includes(definition)) {
+  if (!(Object.hasOwn(MODEL_DEFINITIONS, file) && MODEL_DEFINITIONS[file].includes(definition))) {
     refuse(generation, `${path}.$ref`, `names ${definition} in ${file}, which weivel/model does not publish`, "reference a definition the model publishes, or declare the shape inline");
   }
   const contractType = pascalCase(definition);
@@ -133,7 +133,7 @@ function declaredType(schema: Schema, path: string, generation: Generation): str
   if (type === undefined) return "unknown";
   if (type === "object") return objectType(schema, path, generation);
   if (type === "array") return arrayType(schema, path, generation);
-  if (typeof type === "string" && type in PRIMITIVE_TYPES) return PRIMITIVE_TYPES[type];
+  if (typeof type === "string" && Object.hasOwn(PRIMITIVE_TYPES, type)) return PRIMITIVE_TYPES[type];
   return refuse(generation, `${path}.type`, `is ${JSON.stringify(type)}, which the generator does not support`, "use one of object, array, string, integer, number or boolean");
 }
 

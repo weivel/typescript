@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pluginError } from "../../engine/index.js";
+import { isPluginError, pluginError } from "../../engine/index.js";
 import type { PluginError } from "../../index.js";
 import { parseDeclaration } from "./declaration.js";
 import type { LibraryDeclaration } from "./declaration.js";
+import { STRICT_UTF8 } from "./strict-utf8.js";
 
 /**
  * Which release of which library a host loads, and the digest every file of it must have.
@@ -30,6 +31,15 @@ const DECLARATION_ASSET = "library.json";
 const RELEASE_HOST = "https://github.com";
 const BINARY_EXTENSION: Readonly<Record<string, string>> = { win32: "dll", linux: "so", darwin: "dylib" };
 const PATH_SEGMENT = /^(?!\.{1,2}$)[A-Za-z0-9_.+-]+$/;
+const PLATFORM_KEY = /^[a-z0-9]+-[a-z0-9]+$/;
+
+/**
+ * How long one asset may take to download, from the request to its last byte.
+ *
+ * @implNote One overall deadline, where Java's `LibraryAcquirer` sets a 15 s connect and a 60 s
+ * read timeout on its connection: fetch has no per-phase timeouts, so their sum is the bound.
+ */
+const DOWNLOAD_DEADLINE_MS = 75_000;
 
 /** The platform key this process loads binaries for, in the form a release names them. */
 export function currentPlatformKey(): string {
@@ -49,6 +59,16 @@ function assertPinShape(pin: LibraryPin): void {
   const segments = [...pin.repository.split("/"), pin.tag];
   if (segments.length === 3 && segments.every((segment) => PATH_SEGMENT.test(segment))) return;
   throw refusal(pin, "the pin's repository must be owner/name and its tag a plain release tag", "pin the library as { repository: \"owner/name\", tag: \"v1.2.3\" }");
+}
+
+/** @implNote The key becomes part of an asset's file name in the cache, so it is held to the shape Java holds it to. */
+function assertPlatformKeyShape(pin: LibraryPin, platformKey: string): void {
+  if (PLATFORM_KEY.test(platformKey)) return;
+  throw refusal(
+    pin,
+    `a platform key is <os>-<arch> as Node spells them, for example linux-x64, not ${platformKey}`,
+    "pass the platform key a release names its binaries by, or omit it to load this process's own",
+  );
 }
 
 function pinnedDigest(pin: LibraryPin, key: string, missingFix: string): string {
@@ -75,23 +95,38 @@ async function readIfPresent(path: string): Promise<Uint8Array | null> {
   }
 }
 
-async function download(pin: LibraryPin, url: string, fetchImpl: typeof fetch): Promise<Uint8Array> {
-  let response: Response;
-  try {
-    response = await fetchImpl(url);
-  } catch (error) {
-    throw refusal(pin, `${url} could not be fetched: ${(error as Error).message}`, "check the network, then start the host again");
-  }
+/** @implNote fetch ends a stuck download on its signal only if it observes it, so an injected fetch is raced too. */
+function untilDeadline<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  const expired = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  return Promise.race([work, expired]);
+}
+
+async function fetchedBytes(pin: LibraryPin, url: string, fetchImpl: typeof fetch, signal: AbortSignal): Promise<Uint8Array> {
+  const response = await fetchImpl(url, { signal });
   if (!response.ok) {
     throw refusal(pin, `${url} answered HTTP ${response.status}`, `check that release ${pin.tag} of ${pin.repository} publishes this asset`);
   }
   return new Uint8Array(await response.arrayBuffer());
 }
 
+async function download(source: AssetSource, url: string): Promise<Uint8Array> {
+  const { pin, downloadDeadlineMs } = source;
+  const signal = AbortSignal.timeout(downloadDeadlineMs);
+  try {
+    return await untilDeadline(fetchedBytes(pin, url, source.fetchImpl, signal), signal);
+  } catch (error) {
+    if (isPluginError(error)) throw error;
+    const detail = signal.aborted ? `${url} did not finish within ${downloadDeadlineMs} ms` : `${url} could not be fetched: ${(error as Error).message}`;
+    throw refusal(pin, detail, "check the network, then start the host again");
+  }
+}
+
 /** Test seams into acquisition; a host passes none. */
 export interface AcquireSeams {
   /** Replaces the rename that moves a verified download into place, so a test can make it fail. */
   rename?: (from: string, to: string) => Promise<void>;
+  /** Replaces the download deadline, so a test need not wait out the real one. */
+  downloadDeadlineMs?: number;
 }
 
 interface AssetSource {
@@ -99,6 +134,7 @@ interface AssetSource {
   directory: string;
   fetchImpl: typeof fetch;
   renameImpl: (from: string, to: string) => Promise<void>;
+  downloadDeadlineMs: number;
 }
 
 function errorCodeOf(error: unknown): string {
@@ -142,7 +178,7 @@ async function verifiedAsset(source: AssetSource, asset: string, digest: string)
   const cached = await readIfPresent(path);
   if (cached && sha256Of(cached) === digest) return { path, bytes: cached };
   const url = `${RELEASE_HOST}/${pin.repository}/releases/download/${pin.tag}/${asset}`;
-  const downloaded = await download(pin, url, source.fetchImpl);
+  const downloaded = await download(source, url);
   const actual = sha256Of(downloaded);
   if (actual !== digest) {
     throw refusal(pin, `${asset} from ${url} has SHA-256 ${actual}, but the pin says ${digest}`, "never load it: correct the pin only if the release was rebuilt on purpose");
@@ -155,7 +191,7 @@ async function verifiedAsset(source: AssetSource, asset: string, digest: string)
 function declarationOf(pin: LibraryPin, bytes: Uint8Array): LibraryDeclaration {
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = STRICT_UTF8.decode(bytes);
   } catch {
     throw refusal(pin, `${DECLARATION_ASSET} is not UTF-8`, "publish library.json as UTF-8");
   }
@@ -176,10 +212,17 @@ export async function acquireLibrary(
   seams: AcquireSeams = {},
 ): Promise<AcquiredLibrary> {
   assertPinShape(pin);
+  assertPlatformKeyShape(pin, platformKey);
   const binaryDigest = pinnedDigest(pin, platformKey, `add the ${platformKey} digest from the release's SHA256SUMS to the pin, or run on a platform the library is built for`);
   const declarationDigest = pinnedDigest(pin, DECLARATION_ASSET, "add the library.json digest from the release's SHA256SUMS to the pin");
   const directory = join(cacheDir, ...pin.repository.split("/"), pin.tag);
-  const source: AssetSource = { pin, directory, fetchImpl, renameImpl: seams.rename ?? rename };
+  const source: AssetSource = {
+    pin,
+    directory,
+    fetchImpl,
+    renameImpl: seams.rename ?? rename,
+    downloadDeadlineMs: seams.downloadDeadlineMs ?? DOWNLOAD_DEADLINE_MS,
+  };
   const declaration = declarationOf(pin, (await verifiedAsset(source, DECLARATION_ASSET, declarationDigest)).bytes);
   const binary = await verifiedAsset(source, binaryAssetFor(pin, declaration, platformKey), binaryDigest);
   return { declaration, binaryPath: binary.path };

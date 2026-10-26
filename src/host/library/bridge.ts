@@ -2,6 +2,7 @@ import koffi from "koffi";
 import { pluginError } from "../../engine/index.js";
 import type { PluginError } from "../../index.js";
 import type { LibraryDeclaration } from "./declaration.js";
+import { STRICT_UTF8 } from "./strict-utf8.js";
 
 /** An address inside the library, which the host never dereferences beyond copying a result out. */
 export type NativePointer = unknown;
@@ -39,7 +40,6 @@ const JSON_KIND_PARAMETERS = ["const uint8_t *", "size_t", "_Out_ uint8_t **", "
 const RELEASE_RESULT = "void";
 const RELEASE_PARAMETERS = ["uint8_t *"];
 
-const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 const UTF8 = new TextEncoder();
 
 function loadBinary(binaryPath: string, libraryId: string): koffi.IKoffiLib {
@@ -109,7 +109,8 @@ function takeResult(pointer: NativePointer, length: number | bigint, release: Re
   }
 }
 
-function jsonOf(libraryId: string, label: string, bytes: Uint8Array): unknown {
+/** Reads a library's answer as strict UTF-8 JSON, refusing anything else as the library's fault. */
+export function jsonOf(libraryId: string, label: string, bytes: Uint8Array): unknown {
   let text: string;
   try {
     text = STRICT_UTF8.decode(bytes);
