@@ -1,5 +1,5 @@
 export { acquireLibrary, currentPlatformKey } from "./acquire.js";
-export type { AcquiredLibrary, LibraryPin } from "./acquire.js";
+export type { AcquiredLibrary, AcquireSeams, LibraryPin } from "./acquire.js";
 export { openLibrary } from "./bridge.js";
 export type { BridgeSeams, LoadedLibrary, NativePointer, ReleaseFunction } from "./bridge.js";
 export { parseDeclaration } from "./declaration.js";

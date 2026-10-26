@@ -84,6 +84,15 @@ function encodeArgument(libraryId: string, label: string, argument: unknown): Ui
 }
 
 /**
+ * @implNote koffi 2.16.3 writes a NULL `_Out_ uint8_t **` back as `null`, overwriting whatever the
+ * out array held (measured through `_dupenv_s`); the zero-address check covers a NULL that reaches
+ * the host as an External instead.
+ */
+function isNullPointer(pointer: NativePointer): boolean {
+  return pointer === null || pointer === undefined || koffi.address(pointer) === 0n;
+}
+
+/**
  * Copies a library-owned result into host memory, then hands it back to the library's release.
  *
  * @remarks
@@ -91,7 +100,7 @@ function encodeArgument(libraryId: string, label: string, argument: unknown): Ui
  * reports a failure, and there is nothing of its to free.
  */
 function takeResult(pointer: NativePointer, length: number | bigint, release: ReleaseFunction): Uint8Array | null {
-  if (pointer === null) return null;
+  if (isNullPointer(pointer)) return null;
   try {
     const byteCount = Number(length);
     return byteCount === 0 ? new Uint8Array(0) : Uint8Array.from(koffi.decode(pointer, "uint8_t", byteCount) as ArrayLike<number>);
@@ -120,10 +129,15 @@ function failureOf(libraryId: string, label: string, status: number, answer: unk
   return pluginError(libraryId, `${label} failed with status ${status} and no {message, fix} object`, `report it to the maintainers of ${libraryId}: a failure must say what went wrong and how to fix it`);
 }
 
-function answerOf(libraryId: string, label: string, status: number, bytes: Uint8Array | null): unknown {
-  if (bytes === null) {
-    throw pluginError(libraryId, `${label} failed with status ${status} and returned no answer`, "the library could not allocate its answer; retry the call");
+function missingAnswer(libraryId: string, label: string, status: number): PluginError {
+  if (status === 0) {
+    return pluginError(libraryId, `${label} reported success but returned no answer`, `report it to the maintainers of ${libraryId}: a success must carry its JSON result`);
   }
+  return pluginError(libraryId, `${label} failed with status ${status} and returned no answer`, "the library could not allocate its answer; retry the call");
+}
+
+function answerOf(libraryId: string, label: string, status: number, bytes: Uint8Array | null): unknown {
+  if (bytes === null) throw missingAnswer(libraryId, label, status);
   const answer = jsonOf(libraryId, label, bytes);
   if (status !== 0) throw failureOf(libraryId, label, status, answer);
   return answer;

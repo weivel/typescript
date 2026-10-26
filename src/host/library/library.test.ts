@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -56,6 +56,15 @@ function bystander(): { manifest: PluginManifest; module: { default: Plugin } } 
 }
 
 async function startWith(libraries: readonly LibraryPin[], libraryCache: string, ...plugins: Array<{ manifest: PluginManifest; module: unknown }>) {
+  return startWithServices([], libraries, libraryCache, ...plugins);
+}
+
+async function startWithServices(
+  services: ReadonlyArray<{ id: string; implementation: unknown }>,
+  libraries: readonly LibraryPin[],
+  libraryCache: string,
+  ...plugins: Array<{ manifest: PluginManifest; module: unknown }>
+) {
   const scan = scanOf(...plugins);
   return startPlugins({
     app: "test",
@@ -63,9 +72,14 @@ async function startWith(libraries: readonly LibraryPin[], libraryCache: string,
     runtimeFor: () => runtime(),
     scan,
     importEntry: async (entryPath: string) => scan.modules.get(entryPath),
+    services,
     libraries,
     libraryCache,
   });
+}
+
+function permissionDenied(): Error {
+  return Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
 }
 
 function refusalOf(work: () => unknown): PluginError {
@@ -185,6 +199,56 @@ describe("a C library", () => {
   it("names the platform when neither the pin nor the release carries it", async () => {
     const refusal = await rejectionOf(acquireLibrary(ECHO_PIN, freshCache(), fetch, "darwin-arm64"));
     expect(refusal.detail).toContain("darwin-arm64");
+  }, NETWORK_TIMEOUT_MS);
+
+  it("keeps the embedder's own service when a library offers the same id, refusing the library's copy", async () => {
+    const seen: { echo?: EchoService } = {};
+    const embedderEcho = { echo: () => "the embedder's" };
+
+    const loaded = await startWithServices([{ id: "echo", implementation: embedderEcho }], [ECHO_PIN], freshCache(), echoConsumer(seen));
+
+    expect(loaded.started).toEqual(["consumer"]);
+    expect(seen.echo?.echo({})).toBe("the embedder's");
+    const [refusal] = loaded.quarantined;
+    expect(refusal.pluginId).toBe("echo");
+    expect(refusal.detail).toContain("the embedding host");
+    expect(refusal.detail).toContain("weivel/bindings@v0.1.1");
+    await loaded.stop();
+  }, NETWORK_TIMEOUT_MS);
+
+  it("refuses the second library's copy of a service id the first library already offers", async () => {
+    const seen: { echo?: EchoService } = {};
+
+    const loaded = await startWith([ECHO_PIN, ECHO_PIN], freshCache(), echoConsumer(seen));
+
+    expect(loaded.started).toEqual(["consumer"]);
+    expect(loaded.quarantined).toHaveLength(1);
+    expect(loaded.quarantined[0].detail).toMatch(/both library echo \(weivel\/bindings@v0\.1\.1\) and library echo/);
+    expect(seen.echo?.echo({ still: "served" })).toEqual({ still: "served" });
+    await loaded.stop();
+  }, NETWORK_TIMEOUT_MS);
+
+  it("accepts a cached file another host renamed into place first, when it matches the pin", async () => {
+    const cache = freshCache();
+    const rename = async (_from: string, to: string) => {
+      if (to.endsWith(".dll") || to.endsWith(".so")) copyFileSync(binaryPath, to);
+      else writeFileSync(to, readFileSync(join(binaryPath, "..", "library.json")));
+      throw permissionDenied();
+    };
+
+    const acquired = await acquireLibrary(ECHO_PIN, cache, fetch, currentPlatformKey(), { rename });
+    const library = openLibrary(acquired.binaryPath, acquired.declaration);
+
+    expect(library.call("echo_echo", { raced: true })).toEqual({ raced: true });
+    library.close();
+  }, NETWORK_TIMEOUT_MS);
+
+  it("refuses an asset it could not rename into place when nothing valid is there", async () => {
+    const rename = async () => { throw permissionDenied(); };
+
+    const refusal = await rejectionOf(acquireLibrary(ECHO_PIN, freshCache(), fetch, currentPlatformKey(), { rename }));
+
+    expect(refusal.detail).toContain("EPERM");
   }, NETWORK_TIMEOUT_MS);
 
   it("refuses at load a declared symbol the binary does not export", () => {
