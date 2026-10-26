@@ -4,9 +4,12 @@ export {
   DEFAULT_CALL_TIMEOUT_MS,
   DEFAULT_DEACTIVATE_TIMEOUT_MS,
   DEFAULT_INVOKE_TIMEOUT_MS,
+  defaultLibraryCache,
   ledgerRows,
   startPlugins,
 } from "./plugin-host.js";
 export type { CapabilityCall, LoadedHost, PluginHostOptions, PluginLedgerRow } from "./plugin-host.js";
 export { readDeployedManifests } from "./plugin-manifests.js";
 export type { DeployedPlugin, ManifestScan, VocabularyEntry } from "./plugin-manifests.js";
+export { acquireLibrary, currentPlatformKey, openLibrary, parseDeclaration, servicesOf } from "./library/index.js";
+export type { AcquiredLibrary, LibraryDeclaration, LibraryFunction, LibraryPin, LibraryService, LoadedLibrary } from "./library/index.js";

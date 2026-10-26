@@ -27,9 +27,14 @@ const SERVICE_SIDES: readonly ServiceSide[] = ["provides", "consumes"];
  */
 export function validateManifest(manifest: unknown, wellKnownServices?: readonly string[]): ValidationIssue[] {
   if (!validateAgainstSchema(manifest)) {
-    return firstPerPath(withoutAlternativeNoise(validateAgainstSchema.errors ?? []).flatMap(issueOf));
+    return schemaIssues(validateAgainstSchema.errors ?? []);
   }
   return firstPerPath([...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest)]);
+}
+
+/** One issue per failing path, each carrying the failing subschema's own `fix`, from a validator's raw errors. */
+export function schemaIssues(errors: readonly ErrorObject[]): ValidationIssue[] {
+  return firstPerPath(withoutAlternativeNoise([...errors]).flatMap(issueOf));
 }
 
 /** Returns the manifest itself, or throws a refusal attributed to its id carrying the first issue's fix. */

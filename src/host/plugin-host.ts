@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { activationOrder, createHost, DISCARD, isPluginError, pluginError, proxyHandles, REAL_TIME } from "../engine/index.js";
 import type { DiagnosticSink, Host, PluginRuntime } from "../engine/index.js";
@@ -5,6 +7,8 @@ import type { Plugin, PluginContext, PluginError, PluginManifest, Scheduler } fr
 import { ids, readDeployedManifests } from "./plugin-manifests.js";
 import type { VocabularyEntry } from "./plugin-manifests.js";
 import type { DeployedPlugin, ManifestScan } from "./plugin-manifests.js";
+import { acquireLibrary, openLibrary, servicesOf } from "./library/index.js";
+import type { LibraryPin, LoadedLibrary } from "./library/index.js";
 
 /** How long one plugin's `activate` may take before it is quarantined. */
 export const DEFAULT_ACTIVATE_TIMEOUT_MS = 10000;
@@ -63,6 +67,17 @@ export interface PluginHostOptions {
    */
   services?: ReadonlyArray<{ id: string; implementation: unknown }>;
   /**
+   * C libraries to acquire, verify and open, each declared service of which is offered like {@link services}.
+   *
+   * @remarks
+   * A library that cannot be acquired or opened costs only its own services: its refusal joins
+   * {@link LoadedHost.quarantined}, and a plugin requiring one of its services is then refused the
+   * normal way, while every other library and plugin still starts.
+   */
+  libraries?: readonly LibraryPin[];
+  /** Where acquired libraries are cached. Defaults to {@link defaultLibraryCache}. */
+  libraryCache?: string;
+  /**
    * The one clock every deadline comes from: activate, deactivate and the engine's own waits.
    *
    * @remarks
@@ -97,7 +112,10 @@ export interface LoadedHost {
   host: Host;
   /** Plugin ids that activated cleanly, in activation order. */
   started: string[];
-  /** One error per plugin that could not be loaded, each naming the plugin and the fix. */
+  /**
+   * One error per plugin that could not be loaded, each naming the plugin and the fix, and one per
+   * library that could not be acquired or opened, naming its release or its id.
+   */
   quarantined: PluginError[];
   /** Every plugin whose manifest validated, as the scan found it on disk. */
   deployed: DeployedPlugin[];
@@ -263,6 +281,32 @@ async function stopBeforeQuarantine(scheduler: Scheduler, pluginId: string, time
   }
 }
 
+/** The per-user library cache: `%LOCALAPPDATA%` on Windows, `$XDG_CACHE_HOME` or `~/.cache` elsewhere. */
+export function defaultLibraryCache(): string {
+  const base = process.platform === "win32" ? process.env.LOCALAPPDATA : process.env.XDG_CACHE_HOME;
+  return join(base || join(homedir(), ".cache"), "weivel", "libraries");
+}
+
+interface OpenedLibraries {
+  libraries: LoadedLibrary[];
+  services: Array<{ id: string; implementation: unknown }>;
+}
+
+async function openLibraries(pins: readonly LibraryPin[], cacheDir: string, quarantined: PluginError[]): Promise<OpenedLibraries> {
+  const opened: OpenedLibraries = { libraries: [], services: [] };
+  for (const pin of pins) {
+    try {
+      const { declaration, binaryPath } = await acquireLibrary(pin, cacheDir);
+      const library = openLibrary(binaryPath, declaration);
+      opened.libraries.push(library);
+      opened.services.push(...servicesOf(library, declaration));
+    } catch (error) {
+      quarantined.push(isPluginError(error) ? error : pluginError(`${pin.repository}@${pin.tag}`, detailOf(error), "check the library pin and its release"));
+    }
+  }
+  return opened;
+}
+
 /**
  * Loads every plugin deployed in a home: manifests first, then dependency order, then one
  * `activate` at a time under its own timeout.
@@ -283,6 +327,10 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   const importEntry = options.importEntry ?? (async (entryPath: string) => import(pathToFileURL(entryPath).href));
   const scan = options.scan ?? readDeployedManifests(options.pluginDir, options.wellKnownServices);
 
+  const quarantined: PluginError[] = [];
+  const opened = await openLibraries(options.libraries ?? [], options.libraryCache ?? defaultLibraryCache(), quarantined);
+  const services = [...(options.services ?? []), ...opened.services];
+
   const host = createHost({
     app: options.app,
     applications: options.applications,
@@ -293,11 +341,10 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
     handles: proxyHandles(diagnostics),
     diagnostics,
   });
-  for (const { id, implementation } of options.services ?? []) {
+  for (const { id, implementation } of services) {
     host.provideService(id, implementation);
   }
 
-  const quarantined: PluginError[] = [];
   const started: string[] = [];
   const plugins = new Map<string, Plugin>();
 
@@ -310,7 +357,7 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   const byId = new Map<string, Activatable>(activatable.map((plugin) => [plugin.manifest.id, plugin]));
   const plan = activationOrder(
     activatable.map((plugin) => plugin.manifest),
-    (options.services ?? []).map((service) => service.id),
+    services.map((service) => service.id),
   );
   for (const cycle of plan.cycles) {
     for (const pluginId of cycle) {
@@ -396,6 +443,7 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
       }
       host.release(pluginId);
     }
+    for (const library of opened.libraries) library.close();
   }
 
   let shutdown: Promise<void> | null = null;
