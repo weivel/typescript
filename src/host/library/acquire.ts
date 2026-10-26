@@ -88,15 +88,42 @@ async function download(pin: LibraryPin, url: string, fetchImpl: typeof fetch): 
   return new Uint8Array(await response.arrayBuffer());
 }
 
+/** Test seams into acquisition; a host passes none. */
+export interface AcquireSeams {
+  /** Replaces the rename that moves a verified download into place, so a test can make it fail. */
+  rename?: (from: string, to: string) => Promise<void>;
+}
+
+interface AssetSource {
+  pin: LibraryPin;
+  directory: string;
+  fetchImpl: typeof fetch;
+  renameImpl: (from: string, to: string) => Promise<void>;
+}
+
+function errorCodeOf(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : String((error as Error)?.message ?? error);
+}
+
 /**
+ * Moves a verified download into place, accepting a destination another host already put there.
+ *
  * @implNote Written beside its final name and renamed into place, so a run killed mid-write leaves
- * a stray temporary file rather than a truncated asset under the real name.
+ * a stray temporary file rather than a truncated asset under the real name. On Windows a rename
+ * onto a DLL another process has loaded fails with `EPERM` (measured); when two hosts share one
+ * cache, that DLL is the very file this host was about to write, so the destination is re-hashed
+ * and accepted when it matches the pin.
  */
-async function writeAtomically(path: string, bytes: Uint8Array): Promise<void> {
+async function storeVerified(source: AssetSource, path: string, bytes: Uint8Array, digest: string): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, bytes);
-    await rename(temporary, path);
+    await source.renameImpl(temporary, path);
+  } catch (error) {
+    const present = await readIfPresent(path);
+    if (present && sha256Of(present) === digest) return;
+    throw refusal(source.pin, `${path} could not be written: ${errorCodeOf(error)}`, "free the cached file or point the library cache at a writable directory, then start the host again");
   } finally {
     await rm(temporary, { force: true });
   }
@@ -109,24 +136,19 @@ async function writeAtomically(path: string, bytes: Uint8Array): Promise<void> {
  * A cached file is hashed on every read and never trusted for existing: a mismatch downloads again,
  * and a download that also mismatches is refused without being written.
  */
-async function verifiedAsset(
-  pin: LibraryPin,
-  asset: string,
-  digest: string,
-  directory: string,
-  fetchImpl: typeof fetch,
-): Promise<{ path: string; bytes: Uint8Array }> {
+async function verifiedAsset(source: AssetSource, asset: string, digest: string): Promise<{ path: string; bytes: Uint8Array }> {
+  const { pin, directory } = source;
   const path = join(directory, asset);
   const cached = await readIfPresent(path);
   if (cached && sha256Of(cached) === digest) return { path, bytes: cached };
   const url = `${RELEASE_HOST}/${pin.repository}/releases/download/${pin.tag}/${asset}`;
-  const downloaded = await download(pin, url, fetchImpl);
+  const downloaded = await download(pin, url, source.fetchImpl);
   const actual = sha256Of(downloaded);
   if (actual !== digest) {
     throw refusal(pin, `${asset} from ${url} has SHA-256 ${actual}, but the pin says ${digest}`, "never load it: correct the pin only if the release was rebuilt on purpose");
   }
   await mkdir(directory, { recursive: true });
-  await writeAtomically(path, downloaded);
+  await storeVerified(source, path, downloaded, digest);
   return { path, bytes: downloaded };
 }
 
@@ -151,13 +173,14 @@ export async function acquireLibrary(
   cacheDir: string,
   fetchImpl: typeof fetch = fetch,
   platformKey: string = currentPlatformKey(),
+  seams: AcquireSeams = {},
 ): Promise<AcquiredLibrary> {
   assertPinShape(pin);
   const binaryDigest = pinnedDigest(pin, platformKey, `add the ${platformKey} digest from the release's SHA256SUMS to the pin, or run on a platform the library is built for`);
   const declarationDigest = pinnedDigest(pin, DECLARATION_ASSET, "add the library.json digest from the release's SHA256SUMS to the pin");
   const directory = join(cacheDir, ...pin.repository.split("/"), pin.tag);
-  const declarationAsset = await verifiedAsset(pin, DECLARATION_ASSET, declarationDigest, directory, fetchImpl);
-  const declaration = declarationOf(pin, declarationAsset.bytes);
-  const binary = await verifiedAsset(pin, binaryAssetFor(pin, declaration, platformKey), binaryDigest, directory, fetchImpl);
+  const source: AssetSource = { pin, directory, fetchImpl, renameImpl: seams.rename ?? rename };
+  const declaration = declarationOf(pin, (await verifiedAsset(source, DECLARATION_ASSET, declarationDigest)).bytes);
+  const binary = await verifiedAsset(source, binaryAssetFor(pin, declaration, platformKey), binaryDigest);
   return { declaration, binaryPath: binary.path };
 }

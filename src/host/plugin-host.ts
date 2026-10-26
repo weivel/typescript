@@ -8,7 +8,7 @@ import { ids, readDeployedManifests } from "./plugin-manifests.js";
 import type { VocabularyEntry } from "./plugin-manifests.js";
 import type { DeployedPlugin, ManifestScan } from "./plugin-manifests.js";
 import { acquireLibrary, openLibrary, servicesOf } from "./library/index.js";
-import type { LibraryPin, LoadedLibrary } from "./library/index.js";
+import type { LibraryDeclaration, LibraryPin, LoadedLibrary } from "./library/index.js";
 
 /** How long one plugin's `activate` may take before it is quarantined. */
 export const DEFAULT_ACTIVATE_TIMEOUT_MS = 10000;
@@ -292,14 +292,52 @@ interface OpenedLibraries {
   services: Array<{ id: string; implementation: unknown }>;
 }
 
-async function openLibraries(pins: readonly LibraryPin[], cacheDir: string, quarantined: PluginError[]): Promise<OpenedLibraries> {
+const EMBEDDING_HOST = "the embedding host";
+
+function closeAll(libraries: readonly LoadedLibrary[]): void {
+  for (const library of libraries) library.close();
+}
+
+function collisionRefusal(declaration: LibraryDeclaration, pin: LibraryPin, serviceId: string, existing: string): PluginError {
+  return pluginError(
+    declaration.id,
+    `service "${serviceId}" is offered by both ${existing} and library ${declaration.id} (${pin.repository}@${pin.tag}), so the library's copy is refused`,
+    `rename the service in one library's library.json, or stop ${existing} offering "${serviceId}"`,
+  );
+}
+
+/**
+ * Acquires and opens every pinned library, keeping each service whose id nothing earlier offers.
+ *
+ * @remarks
+ * The host registry replaces a service registered twice, so a collision is refused here, before
+ * anything is registered: the embedder's own services win, then libraries in pin order. A library
+ * left with no service is closed again.
+ */
+async function openLibraries(
+  pins: readonly LibraryPin[],
+  cacheDir: string,
+  embedderServiceIds: readonly string[],
+  quarantined: PluginError[],
+): Promise<OpenedLibraries> {
   const opened: OpenedLibraries = { libraries: [], services: [] };
+  const providers = new Map<string, string>(embedderServiceIds.map((id) => [id, EMBEDDING_HOST]));
   for (const pin of pins) {
     try {
       const { declaration, binaryPath } = await acquireLibrary(pin, cacheDir);
       const library = openLibrary(binaryPath, declaration);
+      const offered = servicesOf(library, declaration).filter((service) => {
+        const existing = providers.get(service.id);
+        if (existing) quarantined.push(collisionRefusal(declaration, pin, service.id, existing));
+        return existing === undefined;
+      });
+      for (const service of offered) providers.set(service.id, `library ${declaration.id} (${pin.repository}@${pin.tag})`);
+      if (offered.length === 0) {
+        library.close();
+        continue;
+      }
       opened.libraries.push(library);
-      opened.services.push(...servicesOf(library, declaration));
+      opened.services.push(...offered);
     } catch (error) {
       quarantined.push(isPluginError(error) ? error : pluginError(`${pin.repository}@${pin.tag}`, detailOf(error), "check the library pin and its release"));
     }
@@ -328,136 +366,147 @@ export async function startPlugins(options: PluginHostOptions): Promise<LoadedHo
   const scan = options.scan ?? readDeployedManifests(options.pluginDir, options.wellKnownServices);
 
   const quarantined: PluginError[] = [];
-  const opened = await openLibraries(options.libraries ?? [], options.libraryCache ?? defaultLibraryCache(), quarantined);
-  const services = [...(options.services ?? []), ...opened.services];
-
-  const host = createHost({
-    app: options.app,
-    applications: options.applications,
-    surfaces: options.surfaces ?? [],
-    vocabulary: ids(options.vocabulary),
-    wellKnownServices: ids(options.wellKnownServices),
-    scheduler,
-    handles: proxyHandles(diagnostics),
-    diagnostics,
-  });
-  for (const { id, implementation } of services) {
-    host.provideService(id, implementation);
-  }
-
-  const started: string[] = [];
-  const plugins = new Map<string, Plugin>();
-
-  for (const failure of scan.failed) {
-    host.markBroken(failure.pluginId, failure);
-    quarantined.push(failure);
-  }
-
-  const activatable = scan.loaded.filter((plugin) => isActivatable(host, quarantined, plugin));
-  const byId = new Map<string, Activatable>(activatable.map((plugin) => [plugin.manifest.id, plugin]));
-  const plan = activationOrder(
-    activatable.map((plugin) => plugin.manifest),
-    services.map((service) => service.id),
+  const embedderServices = options.services ?? [];
+  const opened = await openLibraries(
+    options.libraries ?? [],
+    options.libraryCache ?? defaultLibraryCache(),
+    embedderServices.map((service) => service.id),
+    quarantined,
   );
-  for (const cycle of plan.cycles) {
-    for (const pluginId of cycle) {
-      const manifest = byId.get(pluginId)?.manifest;
-      if (!manifest) continue;
-      quarantine(host, quarantined, manifest, pluginError(
-        pluginId,
-        `is in a dependency cycle: ${cycle.join(" -> ")} -> ${cycle[0]}`,
-        "break the cycle by removing one plugin's entry from services.consumes in its plugin.json",
-      ));
-    }
-  }
+  const services = [...embedderServices, ...opened.services];
+  try {
 
-  for (const refusal of plan.refusals) {
-    const manifest = byId.get(refusal.pluginId)?.manifest;
-    if (manifest) quarantine(host, quarantined, manifest, refusal);
-  }
-
-  for (const pluginId of plan.order) {
-    const deployed = byId.get(pluginId);
-    if (!deployed) continue;
-    const { manifest, entryPath } = deployed;
-
-    let plugin: Plugin | null;
-    try {
-      plugin = asPlugin(await importEntry(entryPath));
-    } catch (error) {
-      const failure = errorFor(pluginId, error, "rebuild the plugin: its deployed bundle could not be imported, or its default class could not be constructed");
-      quarantine(host, quarantined, manifest, failure);
-      continue;
+    const host = createHost({
+      app: options.app,
+      applications: options.applications,
+      surfaces: options.surfaces ?? [],
+      vocabulary: ids(options.vocabulary),
+      wellKnownServices: ids(options.wellKnownServices),
+      scheduler,
+      handles: proxyHandles(diagnostics),
+      diagnostics,
+    });
+    for (const { id, implementation } of services) {
+      host.provideService(id, implementation);
     }
 
-    if (!plugin) {
-      const error = pluginError(
-        pluginId,
-        "its entry module exports no plugin",
-        "export default an object implementing Plugin, or a class implementing it that takes no constructor arguments",
-      );
-      quarantine(host, quarantined, manifest, error);
-      continue;
-    }
+    const started: string[] = [];
+    const plugins = new Map<string, Plugin>();
 
-    let context: PluginContext;
-    try {
-      context = host.contextFor(manifest, options.runtimeFor(manifest));
-    } catch (error) {
-      const failure = errorFor(pluginId, error, "fix the plugin's own configuration; its runtime could not be built");
-      quarantine(host, quarantined, manifest, failure);
-      continue;
-    }
-
-    try {
-      await withTimeout(scheduler, pluginId, timeoutMs, () => plugin.activate(context));
-    } catch (error) {
-      const failure = errorFor(pluginId, error, "fix the error activate threw, or disable the plugin");
-      await stopBeforeQuarantine(scheduler, pluginId, stopMs, plugin);
-      host.markBroken(pluginId, failure);
+    for (const failure of scan.failed) {
+      host.markBroken(failure.pluginId, failure);
       quarantined.push(failure);
-      continue;
     }
 
-    const mismatch = host.verifyActivation(manifest);
-    if (mismatch) {
-      await stopBeforeQuarantine(scheduler, pluginId, stopMs, plugin);
-      host.markBroken(pluginId, mismatch);
-      quarantined.push(mismatch);
-      continue;
+    const activatable = scan.loaded.filter((plugin) => isActivatable(host, quarantined, plugin));
+    const byId = new Map<string, Activatable>(activatable.map((plugin) => [plugin.manifest.id, plugin]));
+    const plan = activationOrder(
+      activatable.map((plugin) => plugin.manifest),
+      services.map((service) => service.id),
+    );
+    for (const cycle of plan.cycles) {
+      for (const pluginId of cycle) {
+        const manifest = byId.get(pluginId)?.manifest;
+        if (!manifest) continue;
+        quarantine(host, quarantined, manifest, pluginError(
+          pluginId,
+          `is in a dependency cycle: ${cycle.join(" -> ")} -> ${cycle[0]}`,
+          "break the cycle by removing one plugin's entry from services.consumes in its plugin.json",
+        ));
+      }
     }
 
-    plugins.set(pluginId, plugin);
-    started.push(pluginId);
-  }
+    for (const refusal of plan.refusals) {
+      const manifest = byId.get(refusal.pluginId)?.manifest;
+      if (manifest) quarantine(host, quarantined, manifest, refusal);
+    }
 
-  async function shutDown(): Promise<void> {
-    for (const pluginId of [...started].reverse()) {
-      const plugin = plugins.get(pluginId);
-      if (!plugin) continue;
+    for (const pluginId of plan.order) {
+      const deployed = byId.get(pluginId);
+      if (!deployed) continue;
+      const { manifest, entryPath } = deployed;
+
+      let plugin: Plugin | null;
       try {
-        await callDeactivate(scheduler, pluginId, stopMs, plugin);
+        plugin = asPlugin(await importEntry(entryPath));
       } catch (error) {
-        host.markBroken(pluginId, errorFor(pluginId, error, "fix the error deactivate threw; the plugin was stopped anyway"));
+        const failure = errorFor(pluginId, error, "rebuild the plugin: its deployed bundle could not be imported, or its default class could not be constructed");
+        quarantine(host, quarantined, manifest, failure);
         continue;
       }
-      host.release(pluginId);
-    }
-    for (const library of opened.libraries) library.close();
-  }
 
-  let shutdown: Promise<void> | null = null;
-  return {
-    host,
-    scheduler,
-    started,
-    quarantined,
-    deployed: scan.loaded,
-    stop: async () => {
-      shutdown ??= shutDown();
-      await shutdown;
-    },
-  };
+      if (!plugin) {
+        const error = pluginError(
+          pluginId,
+          "its entry module exports no plugin",
+          "export default an object implementing Plugin, or a class implementing it that takes no constructor arguments",
+        );
+        quarantine(host, quarantined, manifest, error);
+        continue;
+      }
+
+      let context: PluginContext;
+      try {
+        context = host.contextFor(manifest, options.runtimeFor(manifest));
+      } catch (error) {
+        const failure = errorFor(pluginId, error, "fix the plugin's own configuration; its runtime could not be built");
+        quarantine(host, quarantined, manifest, failure);
+        continue;
+      }
+
+      try {
+        await withTimeout(scheduler, pluginId, timeoutMs, () => plugin.activate(context));
+      } catch (error) {
+        const failure = errorFor(pluginId, error, "fix the error activate threw, or disable the plugin");
+        await stopBeforeQuarantine(scheduler, pluginId, stopMs, plugin);
+        host.markBroken(pluginId, failure);
+        quarantined.push(failure);
+        continue;
+      }
+
+      const mismatch = host.verifyActivation(manifest);
+      if (mismatch) {
+        await stopBeforeQuarantine(scheduler, pluginId, stopMs, plugin);
+        host.markBroken(pluginId, mismatch);
+        quarantined.push(mismatch);
+        continue;
+      }
+
+      plugins.set(pluginId, plugin);
+      started.push(pluginId);
+    }
+
+    async function shutDown(): Promise<void> {
+      for (const pluginId of [...started].reverse()) {
+        const plugin = plugins.get(pluginId);
+        if (!plugin) continue;
+        try {
+          await callDeactivate(scheduler, pluginId, stopMs, plugin);
+        } catch (error) {
+          host.markBroken(pluginId, errorFor(pluginId, error, "fix the error deactivate threw; the plugin was stopped anyway"));
+          continue;
+        }
+        host.release(pluginId);
+      }
+      closeAll(opened.libraries);
+    }
+
+    let shutdown: Promise<void> | null = null;
+    return {
+      host,
+      scheduler,
+      started,
+      quarantined,
+      deployed: scan.loaded,
+      stop: async () => {
+        shutdown ??= shutDown();
+        await shutdown;
+      },
+    };
+  } catch (error) {
+    closeAll(opened.libraries);
+    throw error;
+  }
 }
 
 /** How long a capability read may take. */
