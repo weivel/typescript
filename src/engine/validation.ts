@@ -1,8 +1,7 @@
-import { Ajv } from "ajv";
-import type { ErrorObject, ValidateFunction } from "ajv";
+import type { ErrorObject } from "ajv";
 import type { PluginManifest } from "../index.js";
 import { pluginError } from "./errors.js";
-import { MANIFEST_SCHEMA } from "./schema.generated.js";
+import { validateAgainstSchema } from "./schema.generated.js";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -14,23 +13,6 @@ type ServiceSide = "provides" | "consumes";
 
 const SERVICE_SIDES: readonly ServiceSide[] = ["provides", "consumes"];
 
-let compiledSchema: ValidateFunction | undefined;
-
-/**
- * @implNote Compiled on first use and cached, because ajv generates code with `new Function` and a
- * host that forbids runtime code generation must still be able to load the module. The function
- * writes `.errors` on every call, so a caller reads it synchronously before the next call; nothing
- * else is retained, which keeps this clear of the mutable host state design 7.11 forbids. `fix` is
- * the schema's own keyword, declared so strict mode accepts it and so the failing subschema can
- * hand its fix to the author.
- */
-function validateSchema(): ValidateFunction {
-  compiledSchema ??= new Ajv({ strict: true, allErrors: true, verbose: true })
-    .addKeyword({ keyword: "fix", schemaType: "string" })
-    .compile(MANIFEST_SCHEMA);
-  return compiledSchema;
-}
-
 /**
  * Checks a manifest against the published schema, then against `VALIDATION.md` V1 and V2.
  *
@@ -38,11 +20,14 @@ function validateSchema(): ValidateFunction {
  * V1 and V2 run only when the schema passes: once a field has the wrong type there is nothing
  * trustworthy left to cross-check. `wellKnownServices` undefined skips V2, and an empty list refuses
  * every bare id.
+ *
+ * @implNote The precompiled validator writes `.errors` on every call, so they are read synchronously
+ * before the next call; nothing else is retained, which keeps this clear of the mutable host state
+ * design 7.11 forbids.
  */
 export function validateManifest(manifest: unknown, wellKnownServices?: readonly string[]): ValidationIssue[] {
-  const validate = validateSchema();
-  if (!validate(manifest)) {
-    return firstPerPath(withoutAlternativeNoise(validate.errors ?? []).flatMap(issueOf));
+  if (!validateAgainstSchema(manifest)) {
+    return firstPerPath(withoutAlternativeNoise(validateAgainstSchema.errors ?? []).flatMap(issueOf));
   }
   return firstPerPath([...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest)]);
 }

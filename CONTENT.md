@@ -6,9 +6,9 @@ held to the vectors in `weivel/conformance`, exactly as `weivel/java` is.
 ## Layout
 
 - `.` and `./engine`: the contract and the engine. Neither reaches a Node builtin, which a test
-  proves by walking the module graph. Manifest validation compiles the schema at first use and so
-  needs a host that permits runtime code generation (no CSP without `unsafe-eval`, no Workers-style
-  eval ban); everything else in `./engine` does not.
+  proves by walking the module graph. Neither generates code at run time either: the manifest
+  validator is precompiled at build time, so the engine runs under a CSP without `unsafe-eval` or a
+  Workers-style eval ban, which a test proves in a Node that forbids it.
 - `./host`: the Node host. It may use builtins.
 - `./conformance`: the driver the conformance runner launches.
 - `scripts/`: sibling resolution, schema embedding and the conformance run.
@@ -16,8 +16,8 @@ held to the vectors in `weivel/conformance`, exactly as `weivel/java` is.
 ## Siblings
 
 `model`, `conformance` and `java` are found inside the repository first (CI checks them out there)
-and beside it second (a local workspace). The manifest schema is embedded at build time into a
-gitignored module, so no copy of it is committed.
+and beside it second (a local workspace). The manifest schema is compiled at build time into a
+gitignored validator module, so no copy of it is committed.
 
 ## Subpaths
 
