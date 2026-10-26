@@ -25,8 +25,7 @@
   },
   "scripts": {
     "build": "node scripts/embed-schema.mjs && tsc",
-    "test": "node scripts/embed-schema.mjs && tsc --noEmit -p tsconfig.test.json && vitest run",
-    "conformance": "node scripts/run-conformance.mjs"
+    "test": "node scripts/embed-schema.mjs && tsc --noEmit -p tsconfig.test.json && vitest run"
   },
   "dependencies": {
     "ajv": "8.17.1"

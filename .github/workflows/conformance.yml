@@ -1,0 +1,19 @@
+name: Conformance
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  conformance:
+    uses: intisy/workflows/.github/workflows/conformance.yml@main
+    with:
+      kit_repository: weivel/conformance
+      driver_build: npm ci && npm run build
+      driver: node dist/conformance/driver.js
+      extra_repositories: |
+        weivel/model model
+    secrets:
+      envPAT: ${{ secrets.PAT }}
