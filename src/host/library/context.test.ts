@@ -178,7 +178,6 @@ describe("a library function's declared context", () => {
       scan: {
         loaded: [{ manifest: CONSUMER_MANIFEST, manifestPath: "/home/plugin/consumer.json", entryPath: CONSUMER_ENTRY }],
         failed: [],
-        modules: new Map([[CONSUMER_ENTRY, module]]),
       },
       importEntry: async () => module,
       libraries: [pin],
