@@ -36,13 +36,33 @@ type Dependencies = Map<string, Set<string>>;
  *
  * @param edgeSource which kind of declaration draws the edges; declarations of the other kind are
  * ignored entirely, for ordering and for refusal alike
+ * @param hostProvided - service ids the host itself supplies. They meet a mandatory need exactly as
+ * a unit's offer would, but the host is never activated, refused or listed in the order.
  * @throws when two units share an id, which is a caller bug rather than a configuration
  * @implNote A cycle member is NOT refused: the cycle it is reported in is already the account of
  * why it did not start. It does stop being a provider, and so does a refused unit, so refusal
  * runs to a fixpoint over the units that will actually start.
  * @implNote A degradable need is a different axis from an optional one: it never excuses an absence.
+ * @implNote The host is modelled as a unit that offers its services and needs nothing, so the
+ * refusal fixpoint, which cascades, sees them as providers from its first pass instead of
+ * filtering refusals afterwards.
  */
-export function order(units: readonly ActivationUnit[], edgeSource: DeclarationKind): ActivationPlan {
+export function order(
+  units: readonly ActivationUnit[],
+  edgeSource: DeclarationKind,
+  hostProvided: readonly string[] = [],
+): ActivationPlan {
+  if (hostProvided.length === 0) {
+    return orderUnits(units, edgeSource);
+  }
+  const host: ActivationUnit = { id: HOST_UNIT_ID, provides: hostProvided.map((id) => ({ kind: "service" as const, id })), requires: [] };
+  const plan = orderUnits([...units, host], edgeSource);
+  return { ...plan, order: plan.order.filter((id) => id !== HOST_UNIT_ID) };
+}
+
+const HOST_UNIT_ID = String.fromCharCode(0) + "host";
+
+function orderUnits(units: readonly ActivationUnit[], edgeSource: DeclarationKind): ActivationPlan {
   refuseDuplicateIds(units);
   const refusedIds = new Set<string>();
   const refusals: PluginError[] = [];
@@ -72,23 +92,13 @@ export function unitsFromManifests(manifests: readonly PluginManifest[]): Activa
   }));
 }
 
-const HOST_UNIT_ID = String.fromCharCode(0) + "host";
-
 /**
  * The order a plugin host activates manifests in.
  *
- * @param hostProvided - service ids the host itself supplies. They meet a mandatory need exactly as
- * a plugin's offer would, but the host is never activated, refused or listed in the order.
- * @implNote Modelled as a unit that offers them and needs nothing, so the refusal fixpoint, which
- * cascades, sees them as providers from its first pass instead of filtering refusals afterwards.
+ * @param hostProvided - service ids the host itself supplies, as {@link order} takes them
  */
 export function activationOrder(manifests: readonly PluginManifest[], hostProvided: readonly string[] = []): ActivationPlan {
-  const units = unitsFromManifests(manifests);
-  if (hostProvided.length > 0) {
-    units.push({ id: HOST_UNIT_ID, provides: hostProvided.map((id) => ({ kind: "service" as const, id })), requires: [] });
-  }
-  const plan = order(units, "service");
-  return { ...plan, order: plan.order.filter((id) => id !== HOST_UNIT_ID) };
+  return order(unitsFromManifests(manifests), "service", hostProvided);
 }
 
 function unavailableOf(refusedIds: ReadonlySet<string>, cycles: readonly string[][]): Set<string> {

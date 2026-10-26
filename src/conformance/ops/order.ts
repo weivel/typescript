@@ -4,7 +4,8 @@ import type { Operation } from "../operation.js";
 
 export const order: Operation = (given) => {
   const edgeSource = given.edgeSource === "capabilities" ? "capability" : "service";
-  const plan = planOrder(unitsOf(given.units), edgeSource);
+  const hostProvided = arrayOf(given.hostProvided).map(String);
+  const plan = planOrder(unitsOf(given.units), edgeSource, hostProvided);
   return { order: plan.order, cycle: plan.cycles[0] ?? null };
 };
 
