@@ -2,6 +2,7 @@ import type { Operations } from "./operation.js";
 import { boot } from "./ops/boot.js";
 import { carry } from "./ops/carry.js";
 import { order } from "./ops/order.js";
+import { reach } from "./ops/reach.js";
 import { resolve } from "./ops/resolve.js";
 import { revoke } from "./ops/revoke.js";
 import { scope } from "./ops/scope.js";
@@ -10,4 +11,4 @@ import { validate } from "./ops/validate.js";
 import { want } from "./ops/want.js";
 
 /** The ops this driver can witness; an op absent here answers unwitnessed. */
-export const operations: Operations = { boot, carry, order, resolve, revoke, scope, supports, validate, want };
+export const operations: Operations = { boot, carry, order, reach, resolve, revoke, scope, supports, validate, want };

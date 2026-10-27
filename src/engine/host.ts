@@ -10,8 +10,10 @@ import { pluginError } from "./errors.js";
 import { factsOf } from "./facts.js";
 import type { Handles } from "./handles.js";
 import { PluginLedger } from "./ledger.js";
-import type { LedgerRow } from "./ledger.js";
-import { ServiceHub } from "./registry.js";
+import type { LedgerRow, ServiceRefusal } from "./ledger.js";
+import { ServiceHub, stoppedWaiting } from "./registry.js";
+import type { Fence, ServiceAttempt } from "./registry.js";
+import { readOffer, readRequirement } from "./requirements.js";
 
 export interface HostOptions {
   /** The HOME this host is loaded into, which every plugin reads on its descriptor. */
@@ -45,6 +47,8 @@ export interface HostLedger {
   entries(): LedgerRow[];
   entry(pluginId: string): LedgerRow | undefined;
   recordDeclared(manifest: PluginManifest): void;
+  /** Every service a plugin reached for without declaring it, once per plugin and id, in the order reported. */
+  refusals(): ServiceRefusal[];
 }
 
 /**
@@ -147,6 +151,7 @@ class HostState {
         entries: () => this.ledger.entries(),
         entry: (pluginId) => this.ledger.entry(pluginId),
         recordDeclared: (manifest) => this.recordDeclared(manifest),
+        refusals: () => this.ledger.refusals(),
       },
       supports: (manifest) => compatibility({ applications: this.applications, api: this.descriptor.api }, factsOf(manifest))?.refusal ?? null,
       contextFor: (manifest, runtime) => this.contextFor(manifest, runtime),
@@ -178,7 +183,7 @@ class HostState {
       manifest,
       host: this.descriptor,
       runtime,
-      registry: this.hub.forConsumer(pluginId, (attempt, id) => this.refuseLate(pluginId, `a late ${attempt} of service`, id)),
+      registry: this.hub.forConsumer(pluginId, this.fenceFor(pluginId, declaredServices(manifest))),
       events: this.recording(pluginId, runtime.events),
       provide: (capabilityId, implementation) => this.provide(pluginId, capabilityId, implementation),
     });
@@ -230,6 +235,38 @@ class HostState {
   }
 
   /**
+   * @implNote A late `get` is let through, because it installs nothing and a stopped plugin still
+   * polling would otherwise flood the sink; an undeclared one is refused whether or not it is late.
+   */
+  private fenceFor(pluginId: string, declared: ReadonlySet<string>): Fence {
+    const lateRefusal = (attempt: ServiceAttempt, id: string): PluginError | null => {
+      if (attempt === "get" || !this.refuseLate(pluginId, `a late ${attempt} of service`, id)) return null;
+      return stoppedWaiting(pluginId, id);
+    };
+    return {
+      refusal: (attempt, id) => {
+        const late = lateRefusal(attempt, id);
+        if (late !== null || attempt === "registration" || declared.has(id)) return late;
+        return this.refuseUndeclared(pluginId, id);
+      },
+      reaches: (id) => declared.has(id),
+    };
+  }
+
+  /** Refuses a service the plugin did not declare, reporting it once per plugin and id (invariant 12). */
+  private refuseUndeclared(pluginId: string, serviceId: string): PluginError {
+    const refusal = pluginError(
+      pluginId,
+      `reached for service "${serviceId}", which it does not declare`,
+      `add "${serviceId}" to services.consumes in its plugin.json`,
+    );
+    if (this.ledger.recordServiceRefused(pluginId, serviceId)) {
+      this.diagnostics(`refused service "${serviceId}" to ${pluginId}, which does not declare it: ${refusal.fix}`);
+    }
+    return refusal;
+  }
+
+  /**
    * Whether a call from this plugin arrives after it was quarantined or released.
    *
    * @implNote Quarantine stops the host waiting for a plugin, not the plugin: an activation
@@ -267,4 +304,20 @@ class HostState {
     owned.add(once);
     return once;
   }
+}
+
+/**
+ * The service ids a plugin may reach: what it consumes and what it provides itself.
+ *
+ * @implNote Read defensively, because `contextFor` is handed manifests nobody validated, and one
+ * whose services are malformed reaches nothing rather than taking the host down.
+ */
+function declaredServices(manifest: PluginManifest): ReadonlySet<string> {
+  const consumed = listOf(manifest.services?.consumes).map((declaration) => readRequirement(declaration).id);
+  const provided = listOf(manifest.services?.provides).map((declaration) => readOffer(declaration).id);
+  return new Set([...consumed, ...provided].filter((id): id is string => typeof id === "string"));
+}
+
+function listOf<T>(declarations: readonly T[] | undefined): readonly T[] {
+  return Array.isArray(declarations) ? declarations.filter((declaration) => declaration !== null && declaration !== undefined) : [];
 }
