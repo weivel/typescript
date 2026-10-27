@@ -1,6 +1,6 @@
 import { createHost, isPluginError } from "../../engine/index.js";
 import type { Host, PluginRuntime } from "../../engine/index.js";
-import type { PluginContext, PluginManifest } from "../../index.js";
+import type { ManifestRequirement, PluginContext, PluginManifest } from "../../index.js";
 import { ManualScheduler } from "../manual-scheduler.js";
 import type { Operation } from "../operation.js";
 import { settledTurn, settlementOf } from "./settlement.js";
@@ -105,7 +105,11 @@ function messageOf(line: string | undefined): Refusal | null {
 }
 
 function manifestOf(plugin: Record<string, unknown>): PluginManifest {
-  return { id: String(plugin.id), api: 1, services: { consumes: stringsOf(plugin.consumes), provides: stringsOf(plugin.provides) } };
+  return { id: String(plugin.id), api: 1, services: { consumes: declarationsOf(plugin.consumes), provides: stringsOf(plugin.provides) } };
+}
+
+function declarationsOf(value: unknown): (string | ManifestRequirement)[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string | ManifestRequirement => typeof entry === "string" || (typeof entry === "object" && entry !== null)) : [];
 }
 
 function recordsOf(value: unknown): Record<string, unknown>[] {
