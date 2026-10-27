@@ -190,6 +190,22 @@ describe("a consumer reaches only what it declared", () => {
     expect(host.ledger.refusals()).toEqual([]);
   });
 
+  it("refuses a revoked plugin's undeclared call as undeclared, and only its declared want as late", async () => {
+    const { host, reported } = hostWith();
+    const agenda = host.contextFor({ id: "agenda", api: 2, services: { consumes: ["clock"] } }, runtime());
+    host.release("agenda");
+    const undeclared: unknown = await agenda.services.want(agenda.service("calendar:events")).catch((failure: unknown) => failure);
+    agenda.services.watch(agenda.service("locale"), () => {});
+    const declared: unknown = await agenda.services.want(agenda.service("clock")).catch((failure: unknown) => failure);
+    expect(host.ledger.refusals()).toEqual([
+      { pluginId: "agenda", serviceId: "calendar:events" },
+      { pluginId: "agenda", serviceId: "locale" },
+    ]);
+    expect((undeclared as { fix: string }).fix).toContain("services.consumes");
+    expect((declared as { detail: string }).detail).toContain("stopped while waiting");
+    expect(reported.some((line) => line.includes("locale") && line.includes("services.consumes"))).toBe(true);
+  });
+
   it("lists only the registered ids a plugin may reach, without reporting the rest", () => {
     const { host, reported } = hostWith();
     host.provideService("clock", {});

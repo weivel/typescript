@@ -236,7 +236,10 @@ class HostState {
 
   /**
    * @implNote A late `get` is let through, because it installs nothing and a stopped plugin still
-   * polling would otherwise flood the sink; an undeclared one is refused whether or not it is late.
+   * polling would otherwise flood the sink. The declaration is checked before lateness, so an
+   * undeclared call is refused as undeclared whether or not it is late. `reaches` ignores the late
+   * state on purpose, so a revoked plugin's `ids()` still lists what it declared, as a late `get`
+   * is let through.
    */
   private fenceFor(pluginId: string, declared: ReadonlySet<string>): Fence {
     const lateRefusal = (attempt: ServiceAttempt, id: string): PluginError | null => {
@@ -245,9 +248,8 @@ class HostState {
     };
     return {
       refusal: (attempt, id) => {
-        const late = lateRefusal(attempt, id);
-        if (late !== null || attempt === "registration" || declared.has(id)) return late;
-        return this.refuseUndeclared(pluginId, id);
+        if (attempt !== "registration" && !declared.has(id)) return this.refuseUndeclared(pluginId, id);
+        return lateRefusal(attempt, id);
       },
       reaches: (id) => declared.has(id),
     };
