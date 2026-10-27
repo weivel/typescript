@@ -218,6 +218,27 @@ describe("a consumer reaches only what it declared", () => {
     expect(host.ledger.refusals()).toEqual([]);
     expect(reported).toEqual([]);
   });
+
+  it("reports a refusal once for the life of the host, across a restart of the plugin", () => {
+    const { host, reported } = hostWith();
+    registered(host);
+    const before = host.contextFor(UNDECLARED, runtime());
+    expect(before.services.get(before.service("calendar:events"))).toBeUndefined();
+    host.release("notes");
+    const after = host.contextFor(UNDECLARED, runtime());
+    expect(after.services.get(after.service("calendar:events"))).toBeUndefined();
+    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+    expect(reported.filter((line) => line.includes("calendar:events") && line.includes("services.consumes"))).toHaveLength(1);
+  });
+
+  it("still lists a revoked plugin's declared, registered ids", () => {
+    const { host } = hostWith();
+    host.provideService("clock", {});
+    registered(host);
+    const agenda = host.contextFor(DECLARING, runtime());
+    host.release("agenda");
+    expect([...agenda.services.ids()].sort()).toEqual(["calendar:events", "clock"]);
+  });
 });
 
 describe("verifyActivation", () => {
