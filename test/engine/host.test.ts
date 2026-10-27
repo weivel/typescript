@@ -125,6 +125,101 @@ describe("the fence", () => {
   });
 });
 
+describe("a consumer reaches only what it declared", () => {
+  const PROVIDING: PluginManifest = { id: "calendar", api: 2, services: { provides: ["calendar:events"] } };
+  const UNDECLARED: PluginManifest = { id: "notes", api: 2 };
+  const DECLARING: PluginManifest = { id: "agenda", api: 2, services: { consumes: ["calendar:events", "clock"] } };
+
+  function registered(host: ReturnType<typeof createHost>): void {
+    const provider = host.contextFor(PROVIDING, runtime());
+    provider.services.register(provider.service("calendar:events"), { name: "events" });
+  }
+
+  it("answers nothing to an undeclared get and records the refusal once", () => {
+    const { host, reported } = hostWith();
+    registered(host);
+    const notes = host.contextFor(UNDECLARED, runtime());
+    expect(notes.services.get(notes.service("calendar:events"))).toBeUndefined();
+    expect(notes.services.get(notes.service("calendar:events"))).toBeUndefined();
+    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+    const lines = reported.filter((line) => line.includes("calendar:events"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("notes");
+    expect(lines[0]).toContain("services.consumes");
+  });
+
+  it("refuses a host service the plugin did not declare", () => {
+    const { host } = hostWith();
+    host.provideService("clock", { now: () => 0 });
+    const notes = host.contextFor(UNDECLARED, runtime());
+    const agenda = host.contextFor(DECLARING, runtime());
+    expect(notes.services.get(notes.service("clock"))).toBeUndefined();
+    expect(agenda.services.get(agenda.service("clock"))).toBeDefined();
+    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "clock" }]);
+  });
+
+  it("rejects an undeclared want with the fix rather than the late wording", async () => {
+    const { host } = hostWith();
+    registered(host);
+    const notes = host.contextFor(UNDECLARED, runtime());
+    const refusal: unknown = await notes.services.want(notes.service("calendar:events")).catch((failure: unknown) => failure);
+    expect(isPluginError(refusal)).toBe(true);
+    expect((refusal as { fix: string }).fix).toContain("services.consumes");
+    expect((refusal as { detail: string }).detail).not.toContain("stopped");
+    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+  });
+
+  it("keeps an undeclared watch inert", () => {
+    const { host } = hostWith();
+    const notes = host.contextFor(UNDECLARED, runtime());
+    const heard: unknown[] = [];
+    notes.services.watch(notes.service("calendar:events"), (service) => heard.push(service));
+    registered(host);
+    expect(heard).toEqual([]);
+    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+  });
+
+  it("serves what a plugin consumes or provides, and reads a declared id nothing provides as absence", async () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(DECLARING, runtime());
+    expect(agenda.services.get(agenda.service("calendar:events"))).toBeUndefined();
+    const provider = host.contextFor(PROVIDING, runtime());
+    provider.services.register(provider.service("calendar:events"), { name: "events" });
+    expect(provider.services.get(provider.service("calendar:events"))).toBeDefined();
+    await expect(agenda.services.want(agenda.service("calendar:events"))).resolves.toBeDefined();
+    expect(host.ledger.refusals()).toEqual([]);
+  });
+
+  it("refuses a revoked plugin's undeclared call as undeclared, and only its declared want as late", async () => {
+    const { host, reported } = hostWith();
+    const agenda = host.contextFor({ id: "agenda", api: 2, services: { consumes: ["clock"] } }, runtime());
+    host.release("agenda");
+    const undeclared: unknown = await agenda.services.want(agenda.service("calendar:events")).catch((failure: unknown) => failure);
+    agenda.services.watch(agenda.service("locale"), () => {});
+    const declared: unknown = await agenda.services.want(agenda.service("clock")).catch((failure: unknown) => failure);
+    expect(host.ledger.refusals()).toEqual([
+      { pluginId: "agenda", serviceId: "calendar:events" },
+      { pluginId: "agenda", serviceId: "locale" },
+    ]);
+    expect((undeclared as { fix: string }).fix).toContain("services.consumes");
+    expect((declared as { detail: string }).detail).toContain("stopped while waiting");
+    expect(reported.some((line) => line.includes("locale") && line.includes("services.consumes"))).toBe(true);
+  });
+
+  it("lists only the registered ids a plugin may reach, without reporting the rest", () => {
+    const { host, reported } = hostWith();
+    host.provideService("clock", {});
+    host.provideService("locale", {});
+    registered(host);
+    const agenda = host.contextFor(DECLARING, runtime());
+    const notes = host.contextFor(UNDECLARED, runtime());
+    expect([...agenda.services.ids()].sort()).toEqual(["calendar:events", "clock"]);
+    expect(notes.services.ids()).toEqual([]);
+    expect(host.ledger.refusals()).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+});
+
 describe("verifyActivation", () => {
   it("refuses a capability declared and never provided", () => {
     const { host } = hostWith();

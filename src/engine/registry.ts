@@ -1,4 +1,4 @@
-import type { Scheduler } from "../index.js";
+import type { PluginError, Scheduler } from "../index.js";
 import { ConstrainedWant } from "./constrained-want.js";
 import type { Offering, WantSeam } from "./constrained-want.js";
 import { isServiceProvider } from "./constraints.js";
@@ -33,10 +33,17 @@ export interface ConsumerRegistry {
   ids(): string[];
 }
 
-/** Whether a consumer's call is refused, because the host has stopped it; the host reports the refusal. */
-export type Fence = (attempt: "want" | "watch" | "registration", serviceId: string) => boolean;
+export type ServiceAttempt = "get" | "want" | "watch" | "registration";
 
-const OPEN: Fence = () => false;
+/** What the host lets one consumer reach; the registry asks, and never knows why. */
+export interface Fence {
+  /** Why the host refuses this attempt, having reported it, or null to let it through. */
+  refusal(attempt: ServiceAttempt, serviceId: string): PluginError | null;
+  /** Whether the consumer may reach the id at all, asked without reporting: listing is not an attempt. */
+  reaches(serviceId: string): boolean;
+}
+
+const OPEN: Fence = { refusal: () => null, reaches: () => true };
 
 export interface ServiceHubOptions {
   scheduler: Scheduler;
@@ -160,32 +167,35 @@ export class ServiceHub {
    * first argument selects the constrained `want`, and a third argument selects the provider form
    * of `register`, even when it is null.
    * @implNote The fence is consulted here, at the one place the overloads are dispatched, so a
-   * host fencing a plugin never re-dispatches them. A fenced `register` and `watch` are inert and a
-   * fenced `want` is rejected; `get` stays open, because it installs nothing.
+   * host fencing a plugin never re-dispatches them. A fenced `get` answers nothing, a fenced
+   * `register` and `watch` are inert, a fenced `want` is rejected with the fence's own reason, and
+   * `ids` lists only what the fence lets the consumer reach.
    */
   forConsumer(pluginId: string, fence: Fence = OPEN): ConsumerRegistry {
     const want = (wanted: string | ServiceRequirement, limit?: number | Budget): Promise<unknown> => {
       const id = typeof wanted === "object" ? wanted.id : wanted;
-      if (fence("want", id)) return refusedWant(pluginId, id);
+      const refusal = fence.refusal("want", id);
+      if (refusal !== null) return refusedWant(refusal);
       return typeof wanted === "object"
         ? this.awaitUnderConstraints(pluginId, wanted, limit)
         : this.awaitService(pluginId, wanted, typeof limit === "number" ? limit : undefined);
     };
     const register = (id: string, service: unknown, ...advertised: [Record<string, number> | null] | []): (() => void) => {
-      if (fence("registration", id)) return () => {};
+      if (fence.refusal("registration", id) !== null) return () => {};
       return advertised.length === 0
         ? this.addService(pluginId, id, constant(service), null)
         : this.addService(pluginId, id, this.providerOf(pluginId, id, service), advertised[0]);
     };
     return {
       get: (id) => {
+        if (fence.refusal("get", id) !== null) return undefined;
         this.recorder?.consumed(pluginId, id);
         return this.get(id);
       },
       want,
-      watch: (id, listener) => (fence("watch", id) ? () => {} : this.addWatcher(pluginId, id, listener)),
+      watch: (id, listener) => (fence.refusal("watch", id) !== null ? () => {} : this.addWatcher(pluginId, id, listener)),
       register,
-      ids: () => this.ids(),
+      ids: () => this.ids().filter((id) => fence.reaches(id)),
     };
   }
 
@@ -418,13 +428,13 @@ export class ServiceHub {
   }
 }
 
-function refusedWant(pluginId: string, id: string): Promise<unknown> {
-  const refused = Promise.reject(stoppedWaiting(pluginId, id));
+function refusedWant(refusal: PluginError): Promise<unknown> {
+  const refused = Promise.reject(refusal);
   refused.catch(() => {});
   return refused;
 }
 
-function stoppedWaiting(pluginId: string, id: string): Error {
+export function stoppedWaiting(pluginId: string, id: string): PluginError {
   return pluginError(
     pluginId,
     `stopped while waiting for service "${id}"`,

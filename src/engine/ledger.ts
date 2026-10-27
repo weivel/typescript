@@ -21,6 +21,12 @@ export interface LedgerRow {
   topics: string[];
 }
 
+/** One plugin refused a service it did not declare. */
+export interface ServiceRefusal {
+  pluginId: string;
+  serviceId: string;
+}
+
 interface Relationships {
   capabilitiesDeclared: Set<string>;
   capabilitiesProvided: Set<string>;
@@ -74,6 +80,7 @@ function fresh(): Relationships {
  */
 export class PluginLedger {
   private readonly rows = new Map<string, Entry>();
+  private readonly refused: ServiceRefusal[] = [];
 
   /** Every row, as copies a caller may keep. */
   entries(): LedgerRow[] {
@@ -113,6 +120,24 @@ export class PluginLedger {
 
   recordTopic(pluginId: string, topic: string): void {
     this.ensure(pluginId).relationships.topics.add(topic);
+  }
+
+  /**
+   * Records that a plugin was refused a service, and answers whether this is the first time.
+   *
+   * @implNote Kept across activations rather than reset with a row, because the record exists to
+   * report a refusal once per plugin and id, and a plugin polling an id it never declared would
+   * otherwise be reported again every time it restarts.
+   */
+  recordServiceRefused(pluginId: string, serviceId: string): boolean {
+    if (this.refused.some((entry) => entry.pluginId === pluginId && entry.serviceId === serviceId)) return false;
+    this.refused.push({ pluginId, serviceId });
+    return true;
+  }
+
+  /** Every refusal, in the order first reported, as copies a caller may keep. */
+  refusals(): ServiceRefusal[] {
+    return this.refused.map((entry) => ({ ...entry }));
   }
 
   /** Moves a plugin to a status, with the error that put it there, or none to clear it. */
