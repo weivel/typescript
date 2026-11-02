@@ -1,5 +1,6 @@
 import type {
   CapabilityType,
+  ConfigSetOptions,
   Events,
   HomeDescriptor,
   HostDescriptor,
@@ -8,11 +9,13 @@ import type {
   PluginContext,
   PluginManifest,
   PluginPaths,
+  PluginSecrets,
   Services,
   ServiceType,
   TopicType,
   WantOptions,
 } from "../index.js";
+import { pluginError } from "./errors.js";
 import type { ConsumerRegistry } from "./registry.js";
 
 /** The bus a host supplies per plugin, in ids and untyped payloads; the context attaches the types. */
@@ -29,6 +32,8 @@ export interface PluginRuntime {
   events: RuntimeEvents;
   /** Every app home the host knows about. Absent means it knows of none. */
   homes?: { all(): HomeDescriptor[] };
+  /** The plugin's secrets, already scoped to its id. Absent means this host has no secret store. */
+  secrets?: PluginSecrets;
 }
 
 /** What the host opened for one plugin, from which its context is built. */
@@ -47,7 +52,9 @@ export interface Session {
  * The context one plugin's activation receives.
  *
  * @remarks
- * `manifest`, `config`, `log` and `paths` are handed over by identity, never rebuilt (invariant 4).
+ * `manifest`, `log`, `paths` and `secrets` are handed over by identity, never rebuilt (invariant 4).
+ * `config` is fenced, so a portable write on a host without the layer is refused (invariant 13),
+ * and a member the runtime omits stays absent rather than arriving as a stub.
  */
 export function contextOf(session: Session): PluginContext {
   const { runtime } = session;
@@ -55,7 +62,7 @@ export function contextOf(session: Session): PluginContext {
     capability: (id) => ({ id }),
     service: (id) => ({ id }),
     topic: (id) => ({ id }),
-    config: runtime.config,
+    config: configOver(session.manifest.id, runtime),
     log: runtime.log,
     paths: runtime.paths,
     manifest: session.manifest,
@@ -64,7 +71,25 @@ export function contextOf(session: Session): PluginContext {
     provide: (type, implementation) => session.provide(capabilityIdOf(type), implementation),
     services: servicesOver(session.registry),
     events: eventsOver(session.events),
+    ...(runtime.secrets === undefined ? {} : { secrets: runtime.secrets }),
   };
+}
+
+function configOver(pluginId: string, runtime: PluginRuntime): PluginConfig {
+  const settings = runtime.config;
+  const hasPortableLayer = runtime.paths.portable !== undefined;
+  function set(key: string, value: unknown): Promise<void>;
+  function set(key: string, value: unknown, options: ConfigSetOptions): Promise<void>;
+  function set(key: string, value: unknown, options?: ConfigSetOptions): Promise<void> {
+    if (options === undefined) return settings.set(key, value);
+    if (options.layer === "portable" && !hasPortableLayer) return Promise.reject(noPortableLayer(pluginId));
+    return settings.set(key, value, options);
+  }
+  return { all: () => settings.all(), get: <T>(key: string) => settings.get<T>(key), set };
+}
+
+function noPortableLayer(pluginId: string): Error {
+  return pluginError(pluginId, "this host has no portable settings layer", 'write to the "application" layer, or run on a host that offers paths.portable');
 }
 
 /**
