@@ -69,6 +69,8 @@ export interface PluginContext {
   readonly log: Logger;
   readonly manifest: PluginManifest;
   readonly paths: PluginPaths;
+  /** This plugin's secrets, present only on a host with a secret store. */
+  readonly secrets?: PluginSecrets;
   /**
    * Supplies the implementation behind a capability the manifest declares.
    *
@@ -199,6 +201,11 @@ export interface PluginPaths {
   config: string;
   home: string;
   plugin: string;
+  /**
+   * The plugin's own folder in the user's portable home, present only on a host with a portable
+   * settings layer.
+   */
+  portable?: string;
   repos: string;
 }
 
@@ -392,6 +399,37 @@ export interface PluginConfig {
    * survive a host that runs the plugin out of process.
    */
   set(key: string, value: unknown): Promise<void>;
+  /**
+   * Writes one setting to the layer the options name.
+   *
+   * @remarks
+   * Refused, as a rejection naming the missing layer, when `layer` is `"portable"` on a host that
+   * offers no `paths.portable`, rather than landing in the application layer where the plugin would
+   * never read it back.
+   */
+  set(key: string, value: unknown, options: ConfigSetOptions): Promise<void>;
+}
+
+/** Where a settings write goes. */
+export interface ConfigSetOptions {
+  /** The layer written to. Absent means `"application"`, the per-application file. */
+  layer?: "application" | "portable";
+}
+
+/**
+ * A plugin's secrets, scoped to its own id, on a host that has a secret store.
+ *
+ * @remarks
+ * A value is a UTF-8 string of any length, and a secret is shared across applications. A plugin
+ * keeps a credential here and never in a file of its own.
+ */
+export interface PluginSecrets {
+  /** Removes one secret; removing one that is not there succeeds. */
+  delete(name: string): Promise<void>;
+  /** One secret, absent when it was never set. */
+  get(name: string): Promise<string | undefined>;
+  /** Stores one secret, replacing any value it had. */
+  set(name: string, value: string): Promise<void>;
 }
 
 /** One service a plugin asks for, and what its absence or its shortfall costs. */

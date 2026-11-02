@@ -103,6 +103,47 @@ describe("contextFor", () => {
     expect(calls).toBe(2);
     expect(host.contextFor({ id: "b", api: 2 }, runtime()).homes()).toEqual([]);
   });
+
+  it("leaves secrets and the portable path absent on a host that offers neither", () => {
+    const { host } = hostWith();
+    const context = host.contextFor(PROVIDER, runtime());
+    expect("secrets" in context).toBe(false);
+    expect("portable" in context.paths).toBe(false);
+  });
+
+  it("hands over the runtime's secrets and portable path by identity", () => {
+    const { host } = hostWith();
+    const secrets = { get: async () => "token", set: async () => {}, delete: async () => {} };
+    const offered = runtime();
+    const paths = { ...offered.paths, portable: "/portable/a" };
+    const context = host.contextFor(PROVIDER, { ...offered, paths, secrets });
+    expect(context.secrets).toBe(secrets);
+    expect(context.paths).toBe(paths);
+  });
+
+  it("refuses a portable write without the layer and hands the runtime nothing", async () => {
+    const { host } = hostWith();
+    const layers: unknown[] = [];
+    const offered = runtime();
+    const config = { ...offered.config, set: async (_key: string, _value: unknown, options?: unknown) => void layers.push(options) };
+    const context = host.contextFor(PROVIDER, { ...offered, config });
+    await expect(context.config.set("theme", "dark", { layer: "portable" })).rejects.toMatchObject({
+      detail: "this host has no portable settings layer",
+    });
+    await context.config.set("theme", "dark");
+    await context.config.set("theme", "dark", { layer: "application" });
+    expect(layers).toEqual([undefined, { layer: "application" }]);
+  });
+
+  it("passes a portable write through on a host with the layer", async () => {
+    const { host } = hostWith();
+    const layers: unknown[] = [];
+    const offered = runtime();
+    const config = { ...offered.config, set: async (_key: string, _value: unknown, options?: unknown) => void layers.push(options) };
+    const paths = { ...offered.paths, portable: "/portable/a" };
+    await host.contextFor(PROVIDER, { ...offered, config, paths }).config.set("theme", "dark", { layer: "portable" });
+    expect(layers).toEqual([{ layer: "portable" }]);
+  });
 });
 
 describe("the fence", () => {
