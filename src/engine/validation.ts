@@ -1,5 +1,6 @@
 import type { ErrorObject } from "ajv";
 import type { PluginManifest } from "../index.js";
+import { descriptionIssues } from "./description.js";
 import { pluginError } from "./errors.js";
 import { validateAgainstSchema } from "./schema.generated.js";
 
@@ -14,7 +15,7 @@ type ServiceSide = "provides" | "consumes";
 const SERVICE_SIDES: readonly ServiceSide[] = ["provides", "consumes"];
 
 /**
- * Checks a manifest against the published schema, then against `VALIDATION.md` V1 and V2.
+ * Checks a manifest against the published schema, then against `VALIDATION.md` V1, V2 and V3.
  *
  * @remarks
  * V1 and V2 run only when the schema passes: once a field has the wrong type there is nothing
@@ -29,7 +30,7 @@ export function validateManifest(manifest: unknown, wellKnownServices?: readonly
   if (!validateAgainstSchema(manifest)) {
     return schemaIssues(validateAgainstSchema.errors ?? []);
   }
-  return firstPerPath([...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest)]);
+  return firstPerPath([...bareServiceIssues(manifest, wellKnownServices), ...duplicateServiceIssues(manifest), ...descriptionIssues(manifest)]);
 }
 
 /** One issue per failing path, each carrying the failing subschema's own `fix`, from a validator's raw errors. */

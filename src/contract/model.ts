@@ -296,11 +296,15 @@ export interface PluginManifest {
   packages?: Record<string, unknown>;
   /** The executables this host puts on the user's PATH. */
   pathCommands?: ManifestPathCommands;
+  /** Operations a host offers the user, each a call into one of this plugin's own services. */
+  actions?: Record<string, ActionDeclaration>;
   /** Declared permissions, surfaced at install and in dashboards. Not sandbox-enforced. */
   permissions?: string[];
   publish?: ManifestPublish;
   repo?: RepoMeta;
   services?: ManifestServices;
+  /** Settings a user can change, keyed by setting key. */
+  settings?: Record<string, SettingDeclaration>;
   /**
    * The applications this artifact is for. Absent means every application.
    *
@@ -311,6 +315,84 @@ export interface PluginManifest {
    * disjoint.
    */
   targets?: string[];
+  /** Screens a host draws, keyed by view id, each a flat list of nodes that name their parent. */
+  views?: Record<string, ViewDeclaration>;
+}
+
+export type Tone = "neutral" | "accent" | "success" | "warning" | "danger";
+export type Size = "small" | "medium" | "large";
+export type Emphasis = "low" | "normal" | "high";
+export type ChartForm = "line" | "bar" | "sparkline" | "meter";
+export type SettingType = "text" | "secret" | "number" | "toggle" | "choice" | "multi-choice" | "path" | "list" | "key-value";
+export type SettingLayer = "portable" | "application";
+
+export type ComponentName =
+  | "stack" | "grid" | "split" | "tabs" | "section" | "card" | "divider" | "text" | "list" | "table"
+  | "tree" | "detail" | "chart" | "log" | "code" | "diff" | "badge" | "icon" | "field" | "search"
+  | "form" | "button" | "dialog" | "toast" | "progress" | "spinner" | "empty" | "loading" | "error"
+  | "unavailable";
+
+/** A call into one of this plugin's own services. */
+export interface Binding {
+  service: string;
+  method: string;
+  argument?: Record<string, unknown>;
+}
+
+interface SettingBase {
+  label: string;
+  help?: string;
+  default?: unknown;
+  layer?: SettingLayer;
+  minimum?: number;
+  maximum?: number;
+  pattern?: string;
+}
+
+export interface ChoiceSettingDeclaration extends SettingBase {
+  type: "choice" | "multi-choice";
+  /** At least one value. */
+  choices: [string, ...string[]];
+}
+
+export interface PlainSettingDeclaration extends SettingBase {
+  type: Exclude<SettingType, "choice" | "multi-choice">;
+  choices?: string[];
+}
+
+/** One setting; a choice or multi-choice setting must carry at least one choice. */
+export type SettingDeclaration = ChoiceSettingDeclaration | PlainSettingDeclaration;
+
+export interface ActionDeclaration {
+  label: string;
+  call: Binding;
+  confirm?: string;
+  input?: Record<string, SettingDeclaration>;
+  tone?: Tone;
+}
+
+export interface ViewNode {
+  id: string;
+  parent?: string;
+  component: ComponentName;
+  size?: Size;
+  emphasis?: Emphasis;
+  tone?: Tone;
+  label?: string;
+  text?: string;
+  icon?: string;
+  bind?: Binding;
+  action?: string;
+  field?: string;
+  chart?: ChartForm;
+  /** A whole number from 1 to 12. */
+  span?: number;
+}
+
+export interface ViewDeclaration {
+  title: string;
+  /** At least one node. */
+  nodes: [ViewNode, ...ViewNode[]];
 }
 
 /**
