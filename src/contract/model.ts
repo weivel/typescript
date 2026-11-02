@@ -190,6 +190,23 @@ export interface ManifestCommand {
 }
 
 /**
+ * The executables a host puts on the user's PATH.
+ *
+ * @remarks
+ * Not the in-application slash commands, which are `commands` in a manifest: the
+ * two are unrelated, and sharing the word is what made the first draft collide.
+ */
+export interface ManifestPathCommands {
+  /**
+   * How many of its commands this host must keep: 1 means it cannot be left with none, 0 means it
+   * can.
+   */
+  minimum?: number;
+  /** The command names this host asks for, which a name already held may turn into a fallback. */
+  requested: string[];
+}
+
+/**
  * The absolute storage directories of the app home a plugin is running in.
  *
  * @remarks
@@ -260,8 +277,25 @@ export interface PluginManifest {
   icons?: Record<string, string>;
   /** The plugin's permanent identity, matching its repository name. */
   id: string;
+  /** The install method this listing is a provider for, for example `npm`. */
+  installMethod?: string;
+  /** What this manifest describes. Absent means a plugin; a loader is a host. */
+  kind?: "plugin" | "host";
   lifecycle?: ManifestLifecycle;
   marketplace?: ManifestMarketplace;
+  /** The install methods this listing supports, by method id. */
+  methods?: string[];
+  /**
+   * The package this item is under each install method, keyed by method id.
+   *
+   * @remarks
+   * Each value is a package name string, or an object carrying `name` and
+   * optionally `options`; the published schema checks which, because Java has no union for
+   * a map's values.
+   */
+  packages?: Record<string, unknown>;
+  /** The executables this host puts on the user's PATH. */
+  pathCommands?: ManifestPathCommands;
   /** Declared permissions, surfaced at install and in dashboards. Not sandbox-enforced. */
   permissions?: string[];
   publish?: ManifestPublish;
