@@ -1,4 +1,4 @@
-import type { ActionDeclaration, PluginManifest, ViewNode } from "../contract/model.js";
+import type { ActionDeclaration, PluginManifest, UiNode } from "../contract/model.js";
 import type { ValidationIssue } from "./validation.js";
 
 type Description = Pick<PluginManifest, "settings" | "actions" | "views" | "services">;
@@ -31,8 +31,8 @@ function nodeIssues(
   description: Description,
   providedServices: ReadonlySet<string>,
   viewId: string,
-  nodes: readonly ViewNode[],
-  node: ViewNode,
+  nodes: readonly UiNode[],
+  node: UiNode,
   index: number,
 ): ValidationIssue[] {
   const base = `views.${viewId}.nodes[${index}]`;
@@ -45,7 +45,7 @@ function nodeIssues(
   ];
 }
 
-function repeatedId(base: string, nodes: readonly ViewNode[], node: ViewNode, index: number): ValidationIssue[] {
+function repeatedId(base: string, nodes: readonly UiNode[], node: UiNode, index: number): ValidationIssue[] {
   if (!nodes.slice(0, index).some((earlier) => earlier.id === node.id)) {
     return [];
   }
@@ -53,7 +53,7 @@ function repeatedId(base: string, nodes: readonly ViewNode[], node: ViewNode, in
   return [{ path, message: `${path}: "${node.id}" is already the id of an earlier node in this view`, fix: "give each node in a view its own id" }];
 }
 
-function unresolvedParent(base: string, nodes: readonly ViewNode[], node: ViewNode, index: number): ValidationIssue[] {
+function unresolvedParent(base: string, nodes: readonly UiNode[], node: UiNode, index: number): ValidationIssue[] {
   if (node.parent === undefined || nodes.slice(0, index).some((earlier) => earlier.id === node.parent)) {
     return [];
   }
