@@ -271,6 +271,12 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
     );
   });
 
+  it("maps a const to its literal type and refuses a const that is not a primitive", () => {
+    const generated = generateLibraryTypes(declarationWithResult({ type: "object", properties: { kind: { const: "host" }, deleted: { const: true }, nothing: { const: null } }, required: ["kind"], additionalProperties: false }));
+    expect(generated).toContain('get(argument: { [key: string]: unknown }): { kind: "host"; deleted?: true; nothing?: null };');
+    expect(() => generateLibraryTypes(declarationWithResult({ const: { nested: 1 } }))).toThrow(/services\[0\]\.functions\[0\]\.result\.const/);
+  });
+
   it("maps additionalProperties true like an absent one, and boolean schemas to unknown and never", () => {
     const generated = generateLibraryTypes(declarationWithResult(false, { type: "object", properties: { a: { type: "string" } }, additionalProperties: true }));
     expect(generated).toContain("get(argument: { a?: string; [key: string]: unknown }): never;");

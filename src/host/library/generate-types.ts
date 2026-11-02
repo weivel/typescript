@@ -7,7 +7,7 @@ const MODEL_DEFINITION = /^https:\/\/weivel\.github\.io\/model\/([^#/]+)#\/defin
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const PRIMITIVE_TYPES: Readonly<Record<string, string>> = { string: "string", integer: "number", number: "number", boolean: "boolean" };
-const STRUCTURAL_KEYWORDS = new Set(["type", "properties", "required", "additionalProperties", "items", "enum", "$ref"]);
+const STRUCTURAL_KEYWORDS = new Set(["type", "properties", "required", "additionalProperties", "items", "enum", "const", "$ref"]);
 const OBJECT_KEYWORDS = ["properties", "required", "additionalProperties"];
 
 /**
@@ -54,7 +54,7 @@ function propertyKey(name: string): string {
 function refuseUnsupportedKeywords(schema: Schema, path: string, generation: Generation): void {
   const unsupported = Object.keys(schema).find((keyword) => !STRUCTURAL_KEYWORDS.has(keyword) && !TYPE_NEUTRAL_KEYWORDS.has(keyword));
   if (unsupported !== undefined) {
-    refuse(generation, `${path}.${unsupported}`, "is not a schema form the generator supports", "use object, array, string, integer, number, boolean, enum, a $ref to a model definition, or {}");
+    refuse(generation, `${path}.${unsupported}`, "is not a schema form the generator supports", "use object, array, string, integer, number, boolean, enum, const, a $ref to a model definition, or {}");
   }
 }
 
@@ -97,6 +97,13 @@ function enumType(schema: Schema, path: string, generation: Generation): string 
     refuse(generation, `${path}.enum`, "is not a non-empty list of strings, numbers, booleans or null", "list the allowed primitive values");
   }
   return [...new Set(values.map((value) => JSON.stringify(value)))].join(" | ");
+}
+
+function constType(schema: Schema, path: string, generation: Generation): string {
+  if (!isEnumValue(schema.const)) {
+    refuse(generation, `${path}.const`, "is not a string, number, boolean or null", "use a primitive value");
+  }
+  return JSON.stringify(schema.const);
 }
 
 function requiredNames(schema: Schema, path: string, generation: Generation): ReadonlySet<string> {
@@ -147,6 +154,7 @@ function typeOf(schema: unknown, path: string, generation: Generation): string {
   refuseUnsupportedKeywords(schema, path, generation);
   if ("$ref" in schema) return referenceType(schema, path, generation);
   refuseMisplacedKeywords(schema, path, generation);
+  if ("const" in schema) return constType(schema, path, generation);
   if ("enum" in schema) return enumType(schema, path, generation);
   return declaredType(schema, path, generation);
 }
