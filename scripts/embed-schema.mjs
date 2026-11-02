@@ -57,37 +57,52 @@ function unionMember(type) {
 
 /**
  * The TypeScript type a schema node describes, declaring each object with properties as the
- * interface `typeNames` names for its path, so the declaration's types are read from the schema
- * rather than kept beside it by hand.
+ * interface `scope.names` names for its path, so the declaration's types are read from the schema
+ * rather than kept beside it by hand. A `$ref` to a definition is read at the path `#<definition>`,
+ * or is the type `scope.external` maps it to.
  */
-function schemaType(schema, path, typeNames, interfaces) {
-  if (Array.isArray(schema.anyOf)) return schema.anyOf.map((arm) => schemaType(arm, path, typeNames, interfaces)).join(" | ");
+function schemaType(schema, path, scope) {
+  if (typeof schema.$ref === "string") return referencedType(schema.$ref, scope);
+  if (Array.isArray(schema.anyOf)) return schema.anyOf.map((arm) => schemaType(arm, path, scope)).join(" | ");
   if (Array.isArray(schema.enum)) return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
   if (schema.type === "string") return "string";
   if (schema.type === "integer" || schema.type === "number") return "number";
   if (schema.type === "boolean") return "boolean";
-  if (schema.type === "array") return unionMember(schemaType(schema.items, path, typeNames, interfaces));
+  if (schema.type === "null") return "null";
+  if (schema.type === "array") return unionMember(schemaType(schema.items, path, scope));
+  if (schema.type === "object" && typeof schema.additionalProperties === "object") {
+    return `Record<string, ${schemaType(schema.additionalProperties, path, scope)}>`;
+  }
   if (schema.type === "object" && schema.properties === undefined) return "object";
-  if (schema.type === "object" || schema.properties !== undefined) return interfaceType(schema, path, typeNames, interfaces);
-  throw new Error(`cannot type the library schema at ${path || "its root"}: ${JSON.stringify(schema)}`);
+  if (schema.type === "object" || schema.properties !== undefined) return interfaceType(schema, path, scope);
+  throw new Error(`cannot type the schema at ${path || "its root"}: ${JSON.stringify(schema)}`);
 }
 
-function interfaceType(schema, path, typeNames, interfaces) {
-  const name = typeNames[path];
-  if (name === undefined) throw new Error(`the library schema declares an object at ${path || "its root"} that no type name is given for`);
+function referencedType(reference, scope) {
+  const name = reference.replace("#/definitions/", "");
+  const target = scope.definitions?.[name];
+  if (target === undefined) throw new Error(`cannot resolve ${reference}`);
+  return scope.external?.[name] ?? schemaType(target, `#${name}`, scope);
+}
+
+function interfaceType(schema, path, scope) {
+  const name = scope.names[path];
+  if (name === undefined) throw new Error(`the schema declares an object at ${path || "its root"} that no type name is given for`);
+  if (scope.interfaces.has(name)) return name;
+  scope.interfaces.set(name, "");
   const required = new Set(schema.required ?? []);
   const members = Object.entries(schema.properties).map(([key, property]) => {
-    const type = schemaType(property, path ? `${path}.${key}` : key, typeNames, interfaces);
+    const type = schemaType(property, path ? `${path}.${key}` : key, scope);
     return `${documentation(property.description, "  ")}  ${JSON.stringify(key)}${required.has(key) ? "" : "?"}: ${type};`;
   });
-  interfaces.push(`${documentation(schema.description, "")}export interface ${name} {\n${members.join("\n")}\n}`);
+  scope.interfaces.set(name, `${documentation(schema.description, "")}export interface ${name} {\n${members.join("\n")}\n}`);
   return name;
 }
 
-function typesSource(schema, typeNames) {
-  const interfaces = [];
-  schemaType(schema, "", typeNames, interfaces);
-  return interfaces.reverse().join("\n\n");
+function typesSource(schema, scope) {
+  const typeScope = { ...scope, interfaces: new Map() };
+  schemaType(schema, "", typeScope);
+  return [...typeScope.interfaces.values()].reverse().join("\n\n");
 }
 
 function validatorModule(schema, idName, validatorName, typeNames) {
@@ -105,7 +120,7 @@ function validatorModule(schema, idName, validatorName, typeNames) {
     body,
     `export const ${idName}: string = ${JSON.stringify(schema.$id)};`,
     `export const ${validatorName}: ValidateFunction = ${exported[1]};`,
-    ...(typeNames ? [typesSource(schema, typeNames)] : []),
+    ...(typeNames ? [typesSource(schema, { names: typeNames })] : []),
     "",
   ].join("\n");
 }
@@ -156,6 +171,35 @@ function modelDefinitionsModule(schemasByFile, contractTypes) {
   ].join("\n");
 }
 
+const UI_DATA_TYPE_NAMES = {
+  "#item": "UiItem",
+  "#column": "UiColumn",
+  "#entry": "UiEntry",
+  "#series": "UiSeries",
+  "#itemsAnswer": "UiItems",
+  "#textAnswer": "UiTextAnswer",
+  "#entriesAnswer": "UiEntriesAnswer",
+  "#measureAnswer": "UiMeasureAnswer",
+  "#chartAnswer": "UiSeriesAnswer",
+  "#badgeAnswer": "UiBadgeAnswer",
+};
+
+/**
+ * The answer types of `ui-data.schema.json`: one interface per answer definition, `UiItemState`
+ * from the item's state enum, and `UiData` as the union of what every bindable component answers.
+ *
+ * @implNote The tone definition maps to the contract's `UiTone` rather than a second union, so a
+ * tone the contract adds cannot be missing from an answer type.
+ */
+function uiDataTypesSource(schema) {
+  const scope = { names: UI_DATA_TYPE_NAMES, definitions: schema.definitions, external: { tone: "UiTone" }, interfaces: new Map() };
+  const components = Object.keys(schema.definitions).filter((name) => schema.definitions[name].$ref !== undefined);
+  const answerTypes = components.map((component) => schemaType(schema.definitions[component], `#${component}`, scope));
+  const answers = [...new Set(answerTypes.flatMap((type) => type.split(" | ")))];
+  const state = schemaType(schema.definitions.item.properties.state, "#item.state", scope);
+  return [...scope.interfaces.values(), `export type UiItemState = ${state};`, `export type UiData = ${answers.join(" | ")};`].join("\n\n");
+}
+
 const UI_DATA_TARGET = ["src", "host", "ui-data.generated.ts"];
 
 /**
@@ -168,10 +212,17 @@ function definitionValidatorsModule(schema) {
   const names = Object.keys(schema.definitions);
   const references = Object.fromEntries(names.map((name) => [name, `${schema.$id}#/definitions/${name}`]));
   const standalone = inlineRuntimeHelpers(standaloneCode(ajv, references)).replace(/^"use strict";/, "");
-  if (/new Function|eval\(/.test(standalone) || requiresAnything(standalone)) {
+  if (/new Function|\beval\(/.test(standalone) || requiresAnything(standalone)) {
     throw new Error("the precompiled ui-data validators still generate or require code at run time");
   }
-  return ["// @ts-nocheck", standalone, `export const UI_DATA_DEFINITIONS: readonly string[] = ${JSON.stringify(names)};`, ""].join(String.fromCharCode(10));
+  return [
+    "// @ts-nocheck",
+    `import type { UiTone } from "../index.js";`,
+    standalone,
+    `export const UI_DATA_DEFINITIONS: readonly string[] = ${JSON.stringify(names)};`,
+    uiDataTypesSource(schema),
+    "",
+  ].join("\n");
 }
 
 function writeGenerated(target, source) {

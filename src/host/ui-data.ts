@@ -1,48 +1,8 @@
-import type { UiComponent, UiTone } from "../index.js";
+import type { UiComponent } from "../index.js";
 import { schemaIssues, type ValidationIssue } from "../engine/validation.js";
 import * as validators from "./ui-data.generated.js";
 
-export type UiItemState = "installed" | "detected" | "available";
-
-/** One row of an items answer; a tree is flat items linked by `parent`. */
-export interface UiItem {
-  id: string;
-  label?: string;
-  state?: UiItemState;
-  parent?: string;
-  values?: Record<string, string | number | boolean | null>;
-  tone?: UiTone;
-}
-
-export interface UiColumn {
-  key: string;
-  label: string;
-  sortable?: boolean;
-}
-
-/** The answer of the items family: list, table and tree. */
-export interface UiItems {
-  items: UiItem[];
-  columns?: UiColumn[];
-}
-
-export interface UiEntry {
-  label: string;
-  value: string | number | boolean | null;
-}
-
-export interface UiSeries {
-  label: string;
-  points: number[];
-}
-
-/** What a view node's bind answers, by family. */
-export type UiData =
-  | UiItems
-  | { text: string; tone?: UiTone }
-  | { entries: UiEntry[] }
-  | { value: number; maximum: number }
-  | { series: UiSeries[] };
+export type { UiColumn, UiData, UiEntry, UiItem, UiItems, UiItemState, UiSeries } from "./ui-data.generated.js";
 
 const BINDABLE: ReadonlySet<string> = new Set(validators.UI_DATA_DEFINITIONS);
 
