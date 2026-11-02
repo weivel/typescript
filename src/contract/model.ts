@@ -320,13 +320,13 @@ export interface PluginManifest {
 }
 
 export type UiTone = "neutral" | "accent" | "success" | "warning" | "danger";
-export type Size = "small" | "medium" | "large";
-export type Emphasis = "low" | "normal" | "high";
-export type ChartForm = "line" | "bar" | "sparkline" | "meter";
+export type UiSize = "small" | "medium" | "large";
+export type UiEmphasis = "low" | "normal" | "high";
+export type UiChart = "line" | "bar" | "sparkline" | "meter";
 export type SettingType = "text" | "secret" | "number" | "toggle" | "choice" | "multi-choice" | "path" | "list" | "key-value";
-export type SettingLayer = "portable" | "application";
+export type SettingsLayer = "application" | "portable";
 
-export type ComponentName =
+export type UiComponent =
   | "stack" | "grid" | "split" | "tabs" | "section" | "card" | "divider" | "text" | "list" | "table"
   | "tree" | "detail" | "chart" | "log" | "code" | "diff" | "badge" | "icon" | "field" | "search"
   | "form" | "button" | "dialog" | "toast" | "progress" | "spinner" | "empty" | "loading" | "error"
@@ -345,7 +345,7 @@ export interface SettingDeclaration {
   label: string;
   help?: string;
   default?: unknown;
-  layer?: SettingLayer;
+  layer?: SettingsLayer;
   choices?: string[];
   minimum?: number;
   maximum?: number;
@@ -366,9 +366,9 @@ export interface ActionDeclaration {
 export interface UiNode {
   id: string;
   parent?: string;
-  component: ComponentName;
-  size?: Size;
-  emphasis?: Emphasis;
+  component: UiComponent;
+  size?: UiSize;
+  emphasis?: UiEmphasis;
   tone?: UiTone;
   label?: string;
   text?: string;
@@ -376,7 +376,7 @@ export interface UiNode {
   bind?: UiBinding;
   action?: string;
   field?: string;
-  chart?: ChartForm;
+  chart?: UiChart;
   /** A whole number from 1 to 12. */
   span?: number;
 }
@@ -521,7 +521,7 @@ export interface PluginConfig {
 /** Where a settings write goes. */
 export interface ConfigSetOptions {
   /** The layer written to. Absent means `"application"`, the per-application file. */
-  layer?: "application" | "portable";
+  layer?: SettingsLayer;
 }
 
 /**
