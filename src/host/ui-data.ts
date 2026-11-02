@@ -2,7 +2,20 @@ import type { UiComponent } from "../index.js";
 import { schemaIssues, type ValidationIssue } from "../engine/validation.js";
 import * as validators from "./ui-data.generated.js";
 
-export type { UiColumn, UiData, UiEntry, UiItem, UiItems, UiItemState, UiSeries } from "./ui-data.generated.js";
+export type {
+  UiBadgeAnswer,
+  UiColumn,
+  UiData,
+  UiEntriesAnswer,
+  UiEntry,
+  UiItem,
+  UiItems,
+  UiItemState,
+  UiMeasureAnswer,
+  UiSeries,
+  UiSeriesAnswer,
+  UiTextAnswer,
+} from "./ui-data.generated.js";
 
 const BINDABLE: ReadonlySet<string> = new Set(validators.UI_DATA_DEFINITIONS);
 

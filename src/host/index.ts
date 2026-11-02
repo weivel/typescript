@@ -14,4 +14,17 @@ export type { DeployedPlugin, ManifestScan, VocabularyEntry } from "./plugin-man
 export { acquireLibrary, currentPlatformKey, generateLibraryTypes, openLibrary, parseDeclaration, servicesOf } from "./library/index.js";
 export type { AcquiredLibrary, LibraryDeclaration, LibraryFunction, LibraryPin, LibraryService, LoadedLibrary } from "./library/index.js";
 export { checkUiData } from "./ui-data.js";
-export type { UiColumn, UiData, UiEntry, UiItem, UiItems, UiItemState, UiSeries } from "./ui-data.js";
+export type {
+  UiBadgeAnswer,
+  UiColumn,
+  UiData,
+  UiEntriesAnswer,
+  UiEntry,
+  UiItem,
+  UiItems,
+  UiItemState,
+  UiMeasureAnswer,
+  UiSeries,
+  UiSeriesAnswer,
+  UiTextAnswer,
+} from "./ui-data.js";

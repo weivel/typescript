@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
+import type { UiComponent } from "../index.js";
+import type { UiBadgeAnswer, UiEntriesAnswer, UiMeasureAnswer, UiSeriesAnswer, UiTextAnswer } from "./index.js";
 import { checkUiData } from "./ui-data.js";
+
+const TAKES_DATA: Record<UiComponent, boolean> = {
+  stack: false, grid: false, split: false, tabs: false, section: false, card: false, divider: false,
+  text: true, list: true, table: true, tree: true, detail: true, chart: true, log: true, code: true,
+  diff: true, badge: true, icon: false, field: false, search: false, form: false, button: false,
+  dialog: false, toast: false, progress: true, spinner: false, empty: false, loading: false, error: false,
+  unavailable: false,
+};
+
+const textAnswer: UiTextAnswer = { text: "a" };
+const entriesAnswer: UiEntriesAnswer = { entries: [{ label: "a", value: 1 }] };
+const measureAnswer: UiMeasureAnswer = { value: 1, maximum: 2 };
+const seriesAnswer: UiSeriesAnswer = { series: [{ label: "cpu", points: [1] }] };
+const badgeAnswer: UiBadgeAnswer = { text: "ok", tone: "success" };
 
 function pathsOf(component: Parameters<typeof checkUiData>[0], value: unknown): string[] {
   return (checkUiData(component, value) ?? []).map((issue) => issue.path);
@@ -42,6 +58,20 @@ describe("checkUiData", () => {
 
   it("reports a non-object answer at the root", () => {
     expect(pathsOf("list", "nope")).toEqual(["(root)"]);
+  });
+
+  it("has a definition for every component that takes data, and none for the rest", () => {
+    for (const [component, takesData] of Object.entries(TAKES_DATA) as [UiComponent, boolean][]) {
+      expect({ component, checked: checkUiData(component, {}) !== null }).toEqual({ component, checked: takesData });
+    }
+  });
+
+  it("accepts each answer shape the host entry exports", () => {
+    expect(checkUiData("text", textAnswer)).toEqual([]);
+    expect(checkUiData("detail", entriesAnswer)).toEqual([]);
+    expect(checkUiData("progress", measureAnswer)).toEqual([]);
+    expect(checkUiData("chart", seriesAnswer)).toEqual([]);
+    expect(checkUiData("badge", badgeAnswer)).toEqual([]);
   });
 
   it("answers null for a component that takes no data", () => {
