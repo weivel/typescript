@@ -44,3 +44,15 @@ it("validates a manifest in a host that bans runtime code generation", () => {
   expect(issues.map((issue) => issue.path).sort()).toEqual(["api", "id"]);
   expect(issues.find((issue) => issue.path === "id")?.fix).toContain("lowercase words joined by single hyphens");
 });
+
+it("checks a ui binding answer in a host that bans runtime code generation", () => {
+  const host = pathToFileURL(join(outDir, "host", "ui-data.js")).href;
+  const result = underEvalBan(`
+    const { checkUiData } = await import(${JSON.stringify(host)});
+    console.log(JSON.stringify(checkUiData("list", { items: [{}] })));
+  `);
+
+  expect(result.status, result.output).toBe(0);
+  const issues = JSON.parse(result.output) as Array<{ path: string }>;
+  expect(issues.map((issue) => issue.path)).toEqual(["items[0].id"]);
+});
