@@ -156,6 +156,24 @@ function modelDefinitionsModule(schemasByFile, contractTypes) {
   ].join("\n");
 }
 
+const UI_DATA_TARGET = ["src", "host", "ui-data.generated.ts"];
+
+/**
+ * One precompiled validator per definition the schema publishes, exported by definition name, so
+ * the host picks the validator for a component by the component's own name.
+ */
+function definitionValidatorsModule(schema) {
+  const ajv = manifestAjv();
+  ajv.addSchema(schema);
+  const names = Object.keys(schema.definitions);
+  const references = Object.fromEntries(names.map((name) => [name, `${schema.$id}#/definitions/${name}`]));
+  const standalone = inlineRuntimeHelpers(standaloneCode(ajv, references)).replace(/^"use strict";/, "");
+  if (/new Function|eval\(/.test(standalone) || requiresAnything(standalone)) {
+    throw new Error("the precompiled ui-data validators still generate or require code at run time");
+  }
+  return ["// @ts-nocheck", standalone, `export const UI_DATA_DEFINITIONS: readonly string[] = ${JSON.stringify(names)};`, ""].join(String.fromCharCode(10));
+}
+
 function writeGenerated(target, source) {
   const path = join(repositoryRoot(), ...target);
   mkdirSync(dirname(path), { recursive: true });
@@ -169,3 +187,4 @@ for (const { schemaFile, target, idName, validatorName, typeNames } of GENERATED
   writeGenerated(target, validatorModule(schema, idName, validatorName, typeNames));
 }
 writeGenerated(MODEL_DEFINITIONS_TARGET, modelDefinitionsModule(schemasByFile, contractTypeNames()));
+writeGenerated(UI_DATA_TARGET, definitionValidatorsModule(JSON.parse(readFileSync(join(sibling("model"), "ui-data.schema.json"), "utf8"))));
