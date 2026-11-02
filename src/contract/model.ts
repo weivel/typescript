@@ -304,7 +304,7 @@ export interface PluginManifest {
   repo?: RepoMeta;
   services?: ManifestServices;
   /** Settings a user can change, keyed by setting key. */
-  settings?: Record<string, SettingDeclaration>;
+  settings?: UiSettings;
   /**
    * The applications this artifact is for. Absent means every application.
    *
@@ -319,7 +319,7 @@ export interface PluginManifest {
   views?: Record<string, ViewDeclaration>;
 }
 
-export type Tone = "neutral" | "accent" | "success" | "warning" | "danger";
+export type UiTone = "neutral" | "accent" | "success" | "warning" | "danger";
 export type Size = "small" | "medium" | "large";
 export type Emphasis = "low" | "normal" | "high";
 export type ChartForm = "line" | "bar" | "sparkline" | "meter";
@@ -333,55 +333,47 @@ export type ComponentName =
   | "unavailable";
 
 /** A call into one of this plugin's own services. */
-export interface Binding {
+export interface UiBinding {
   service: string;
   method: string;
   argument?: Record<string, unknown>;
 }
 
-interface SettingBase {
+/** One setting; `choices` is required, with at least one value, when the type is `choice` or `multi-choice`. */
+export interface SettingDeclaration {
+  type: SettingType;
   label: string;
   help?: string;
   default?: unknown;
   layer?: SettingLayer;
+  choices?: string[];
   minimum?: number;
   maximum?: number;
   pattern?: string;
 }
 
-export interface ChoiceSettingDeclaration extends SettingBase {
-  type: "choice" | "multi-choice";
-  /** At least one value. */
-  choices: [string, ...string[]];
-}
-
-export interface PlainSettingDeclaration extends SettingBase {
-  type: Exclude<SettingType, "choice" | "multi-choice">;
-  choices?: string[];
-}
-
-/** One setting; a choice or multi-choice setting must carry at least one choice. */
-export type SettingDeclaration = ChoiceSettingDeclaration | PlainSettingDeclaration;
+/** Settings keyed by setting key. */
+export type UiSettings = Record<string, SettingDeclaration>;
 
 export interface ActionDeclaration {
   label: string;
-  call: Binding;
+  call: UiBinding;
   confirm?: string;
-  input?: Record<string, SettingDeclaration>;
-  tone?: Tone;
+  input?: UiSettings;
+  tone?: UiTone;
 }
 
-export interface ViewNode {
+export interface UiNode {
   id: string;
   parent?: string;
   component: ComponentName;
   size?: Size;
   emphasis?: Emphasis;
-  tone?: Tone;
+  tone?: UiTone;
   label?: string;
   text?: string;
   icon?: string;
-  bind?: Binding;
+  bind?: UiBinding;
   action?: string;
   field?: string;
   chart?: ChartForm;
@@ -392,7 +384,7 @@ export interface ViewNode {
 export interface ViewDeclaration {
   title: string;
   /** At least one node. */
-  nodes: [ViewNode, ...ViewNode[]];
+  nodes: UiNode[];
 }
 
 /**
