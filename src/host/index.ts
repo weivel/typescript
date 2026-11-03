@@ -13,6 +13,14 @@ export { readDeployedManifests } from "./plugin-manifests.js";
 export type { DeployedPlugin, ManifestScan, VocabularyEntry } from "./plugin-manifests.js";
 export { acquireLibrary, currentPlatformKey, generateLibraryTypes, openLibrary, parseDeclaration, servicesOf } from "./library/index.js";
 export type { AcquiredLibrary, LibraryDeclaration, LibraryFunction, LibraryPin, LibraryService, LoadedLibrary } from "./library/index.js";
+export { checkInstallMethodAnswer } from "./install-method.js";
+export type {
+  InstallMethodDefinition,
+  InstallMethodDetectAnswer,
+  InstallMethodOperationAnswer,
+  InstallMethodOperationRefusal,
+  InstallMethodOperationSuccess,
+} from "./install-method.js";
 export { checkUiData } from "./ui-data.js";
 export type {
   UiBadgeAnswer,

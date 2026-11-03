@@ -63,7 +63,8 @@ function unionMember(type) {
  */
 function schemaType(schema, path, scope) {
   if (typeof schema.$ref === "string") return referencedType(schema.$ref, scope);
-  if (Array.isArray(schema.anyOf)) return schema.anyOf.map((arm) => schemaType(arm, path, scope)).join(" | ");
+  if (Array.isArray(schema.anyOf)) return schema.anyOf.map((arm, index) => schemaType(arm, armPath(path, index, scope), scope)).join(" | ");
+  if ("const" in schema) return JSON.stringify(schema.const);
   if (Array.isArray(schema.enum)) return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
   if (schema.type === "string") return "string";
   if (schema.type === "integer" || schema.type === "number") return "number";
@@ -76,6 +77,12 @@ function schemaType(schema, path, scope) {
   if (schema.type === "object" && schema.properties === undefined) return "object";
   if (schema.type === "object" || schema.properties !== undefined) return interfaceType(schema, path, scope);
   throw new Error(`cannot type the schema at ${path || "its root"}: ${JSON.stringify(schema)}`);
+}
+
+/** An arm of an `anyOf` is named by `<path>|<index>` when the scope names it, and otherwise shares its parent's name. */
+function armPath(path, index, scope) {
+  const indexed = `${path}|${index}`;
+  return indexed in scope.names ? indexed : path;
 }
 
 function referencedType(reference, scope) {
@@ -202,25 +209,42 @@ function uiDataTypesSource(schema) {
 
 const UI_DATA_TARGET = ["src", "host", "ui-data.generated.ts"];
 
+const INSTALL_METHOD_TYPE_NAMES = {
+  "#detectAnswer": "InstallMethodDetectAnswer",
+  "#operationAnswer|0": "InstallMethodOperationSuccess",
+  "#operationAnswer|1": "InstallMethodOperationRefusal",
+};
+
+/**
+ * One interface per answer an install method gives, and `InstallMethodOperationAnswer` as the
+ * union of the success and the refusal that install, update and remove may answer.
+ */
+function installMethodTypesSource(schema) {
+  const scope = { names: INSTALL_METHOD_TYPE_NAMES, definitions: schema.definitions, interfaces: new Map() };
+  schemaType(schema.definitions.detectAnswer, "#detectAnswer", scope);
+  const operation = schemaType(schema.definitions.operationAnswer, "#operationAnswer", scope);
+  return [...scope.interfaces.values(), `export type InstallMethodOperationAnswer = ${operation};`].join("\n\n");
+}
+
 /**
  * One precompiled validator per definition the schema publishes, exported by definition name, so
  * the host picks the validator for a component by the component's own name.
  */
-function definitionValidatorsModule(schema) {
+function definitionValidatorsModule(schema, { header, definitionsName, typesSource }) {
   const ajv = manifestAjv();
   ajv.addSchema(schema);
   const names = Object.keys(schema.definitions);
   const references = Object.fromEntries(names.map((name) => [name, `${schema.$id}#/definitions/${name}`]));
   const standalone = inlineRuntimeHelpers(standaloneCode(ajv, references)).replace(/^"use strict";/, "");
   if (/new Function|\beval\(/.test(standalone) || requiresAnything(standalone)) {
-    throw new Error("the precompiled ui-data validators still generate or require code at run time");
+    throw new Error(`the precompiled ${schema.$id} validators still generate or require code at run time`);
   }
   return [
     "// @ts-nocheck",
-    `import type { UiTone } from "../index.js";`,
+    ...header,
     standalone,
-    `export const UI_DATA_DEFINITIONS: readonly string[] = ${JSON.stringify(names)};`,
-    uiDataTypesSource(schema),
+    `export const ${definitionsName}: readonly string[] = ${JSON.stringify(names)};`,
+    typesSource(schema),
     "",
   ].join("\n");
 }
@@ -238,4 +262,10 @@ for (const { schemaFile, target, idName, validatorName, typeNames } of GENERATED
   writeGenerated(target, validatorModule(schema, idName, validatorName, typeNames));
 }
 writeGenerated(MODEL_DEFINITIONS_TARGET, modelDefinitionsModule(schemasByFile, contractTypeNames()));
-writeGenerated(UI_DATA_TARGET, definitionValidatorsModule(JSON.parse(readFileSync(join(sibling("model"), "ui-data.schema.json"), "utf8"))));
+const DEFINITION_MODULES = [
+  { schemaFile: "ui-data.schema.json", target: UI_DATA_TARGET, header: [`import type { UiTone } from "../index.js";`], definitionsName: "UI_DATA_DEFINITIONS", typesSource: uiDataTypesSource },
+  { schemaFile: "install-method.schema.json", target: ["src", "host", "install-method.generated.ts"], header: [], definitionsName: "INSTALL_METHOD_DEFINITIONS", typesSource: installMethodTypesSource },
+];
+for (const { schemaFile, target, ...module } of DEFINITION_MODULES) {
+  writeGenerated(target, definitionValidatorsModule(JSON.parse(readFileSync(join(sibling("model"), schemaFile), "utf8")), module));
+}
