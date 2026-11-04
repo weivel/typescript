@@ -1,0 +1,3004 @@
+{
+  "$schema": "https://weivel.github.io/model/library.schema.json",
+  "id": "runtime",
+  "version": "0.1.0",
+  "binary": "runtime",
+  "release": "runtime_release",
+  "services": [
+    {
+      "id": "paths",
+      "functions": [
+        {
+          "name": "resolve",
+          "symbol": "runtime_paths_resolve",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "plugin": { "type": "string" },
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["portable", "cache"]
+              }
+            },
+            "required": ["home"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string" },
+              "repos": { "type": "string" },
+              "plugin": { "type": "string" },
+              "cache": { "type": "string" },
+              "config": { "type": "string" },
+              "portable": { "type": "string" },
+              "pluginCache": { "type": "string" }
+            },
+            "required": ["home", "repos", "plugin", "cache", "config"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "places",
+      "functions": [
+        {
+          "name": "resolve",
+          "symbol": "runtime_places_resolve",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "environment": { "type": "object" }
+            },
+            "required": ["home"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "portable": { "type": "string" },
+              "state": { "type": "string" },
+              "cache": { "type": "string" },
+              "secretsFile": { "type": "string" },
+              "forceFileStore": { "type": "boolean" }
+            },
+            "required": ["portable", "state", "cache", "secretsFile", "forceFileStore"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "functions": [
+        {
+          "name": "all",
+          "symbol": "runtime_config_all",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "portable": { "type": "string", "minLength": 1 },
+              "plugin": { "type": "string" },
+              "config": { "type": "object" }
+            },
+            "required": ["home", "plugin"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "values": { "type": "object" } },
+            "required": ["values"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "get",
+          "symbol": "runtime_config_get",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "portable": { "type": "string", "minLength": 1 },
+              "plugin": { "type": "string" },
+              "config": { "type": "object" },
+              "key": { "type": "string" }
+            },
+            "required": ["home", "plugin", "key"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "value": {} },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "set",
+          "symbol": "runtime_config_set",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "portable": { "type": "string", "minLength": 1 },
+              "plugin": { "type": "string" },
+              "config": { "type": "object" },
+              "key": { "type": "string" },
+              "value": {},
+              "layer": { "enum": ["application", "portable"] }
+            },
+            "required": ["home", "plugin", "key", "value"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "previous": {} },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "functions": [
+        {
+          "name": "all",
+          "symbol": "runtime_settings_all",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "portable": { "type": "string", "minLength": 1 }
+            },
+            "required": ["home"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "values": { "type": "object" } },
+            "required": ["values"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "set",
+          "symbol": "runtime_settings_set",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "portable": { "type": "string", "minLength": 1 },
+              "key": { "type": "string" },
+              "value": {},
+              "layer": { "enum": ["application", "portable"] }
+            },
+            "required": ["home", "key", "value"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "previous": {} },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "log",
+      "functions": [
+        {
+          "name": "write",
+          "symbol": "runtime_log_write",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string", "minLength": 1 },
+              "names": { "type": "object" },
+              "portable": { "type": "string", "minLength": 1 },
+              "plugin": { "type": "string" },
+              "config": { "type": "object" },
+              "start": { "type": "string" },
+              "time": { "type": "string" },
+              "level": { "enum": ["debug", "info", "warn", "error"] },
+              "message": { "type": "string" },
+              "noColor": { "type": "boolean" }
+            },
+            "required": ["home", "plugin", "start", "time", "level", "message", "noColor"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "console": { "type": "string" } },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "secrets",
+      "functions": [
+        {
+          "name": "get",
+          "symbol": "runtime_secrets_get",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "secretsFile": { "type": "string", "minLength": 1 },
+                  "forceFileStore": { "type": "boolean" }
+                },
+                "required": ["secretsFile", "forceFileStore"]
+              },
+              "plugin": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" },
+              "name": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "plugin", "name"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "value": { "type": "string" } },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "set",
+          "symbol": "runtime_secrets_set",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "secretsFile": { "type": "string", "minLength": 1 },
+                  "forceFileStore": { "type": "boolean" }
+                },
+                "required": ["secretsFile", "forceFileStore"]
+              },
+              "plugin": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" },
+              "name": { "type": "string", "minLength": 1 },
+              "value": { "type": "string" }
+            },
+            "required": ["places", "plugin", "name", "value"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "place": { "enum": ["store", "file"] } },
+            "required": ["place"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "delete",
+          "symbol": "runtime_secrets_delete",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "secretsFile": { "type": "string", "minLength": 1 },
+                  "forceFileStore": { "type": "boolean" }
+                },
+                "required": ["secretsFile", "forceFileStore"]
+              },
+              "plugin": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" },
+              "name": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "plugin", "name"]
+          },
+          "result": { "type": "object", "additionalProperties": false }
+        },
+        {
+          "name": "clear",
+          "symbol": "runtime_secrets_clear",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "secretsFile": { "type": "string", "minLength": 1 },
+                  "forceFileStore": { "type": "boolean" }
+                },
+                "required": ["secretsFile", "forceFileStore"]
+              },
+              "plugin": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" }
+            },
+            "required": ["places", "plugin"]
+          },
+          "result": { "type": "object", "additionalProperties": false }
+        },
+        {
+          "name": "reconcile",
+          "symbol": "runtime_secrets_reconcile",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "secretsFile": { "type": "string", "minLength": 1 },
+                  "forceFileStore": { "type": "boolean" }
+                },
+                "required": ["secretsFile", "forceFileStore"]
+              }
+            },
+            "required": ["places"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "moved": { "type": "integer", "minimum": 0 } },
+            "required": ["moved"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "registry",
+      "functions": [
+        {
+          "name": "register",
+          "symbol": "runtime_registry_register",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              },
+              "registration": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "kind": { "const": "host" },
+                  "version": { "type": "string", "minLength": 1 },
+                  "home": { "type": "string" },
+                  "application": { "type": "object" },
+                  "provenance": {
+                    "type": "object",
+                    "properties": {
+                      "method": { "type": "string", "minLength": 1 },
+                      "version": { "type": "string", "minLength": 1 },
+                      "location": { "type": "string", "minLength": 1 },
+                      "os": { "type": "string", "minLength": 1 },
+                      "architecture": { "type": "string", "minLength": 1 },
+                      "installedAt": {
+                        "type": "string",
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+                      }
+                    },
+                    "required": ["method", "version", "location", "os", "architecture", "installedAt"]
+                  },
+                  "requiresCommand": { "type": "boolean" },
+                  "start": {
+                    "type": "object",
+                    "description": "How a launcher starts the host: the language runtime it needs and its entry, a relative path inside its installed bundle.",
+                    "properties": {
+                      "runtime": { "enum": ["javascript", "jvm", "native"] },
+                      "entry": { "type": "string", "minLength": 1 }
+                    },
+                    "required": ["runtime", "entry"]
+                  }
+                },
+                "required": ["id", "kind", "version", "provenance", "requiresCommand"]
+              }
+            },
+            "required": ["places", "registration"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "registration": { "type": "object" } },
+            "required": ["registration"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "get",
+          "symbol": "runtime_registry_get",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              },
+              "id": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "id"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "registration": { "type": "object" } },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "list",
+          "symbol": "runtime_registry_list",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              }
+            },
+            "required": ["places"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "registration": { "type": "object" },
+                    "orphan": { "type": "boolean" }
+                  },
+                  "required": ["registration", "orphan"],
+                  "additionalProperties": false
+                }
+              },
+              "unreadable": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["hosts", "unreadable"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "forget",
+          "symbol": "runtime_registry_forget",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state", "cache"]
+              },
+              "id": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "id"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "forgotten": { "type": "boolean" } },
+            "required": ["forgotten"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "changes",
+      "functions": [
+        {
+          "name": "apply",
+          "symbol": "runtime_changes_apply_json",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              },
+              "host": { "type": "string", "minLength": 1 },
+              "change": {
+                "type": "object",
+                "properties": {
+                  "kind": { "enum": ["file", "directory", "json-key", "profile-line", "path-entry"] },
+                  "path": { "type": "string", "minLength": 1 },
+                  "content": { "type": "string" },
+                  "executable": { "type": "boolean" },
+                  "file": { "type": "string", "minLength": 1 },
+                  "key": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                  "value": {},
+                  "line": { "type": "string", "minLength": 1 },
+                  "directory": { "type": "string", "minLength": 1 },
+                  "home": { "type": "string", "minLength": 1 },
+                  "source": { "type": "string", "minLength": 1 },
+                  "create": { "type": "boolean" },
+                  "shell": { "type": "string" }
+                },
+                "required": ["kind"]
+              }
+            },
+            "required": ["places", "host", "change"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "recorded": { "type": "boolean" },
+              "sequence": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["recorded"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "reverse",
+          "symbol": "runtime_changes_reverse_json",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              },
+              "host": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "host"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "reversed": { "type": "integer", "minimum": 0 },
+              "drifted": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sequence": { "type": "integer", "minimum": 1 },
+                    "kind": { "type": "string" },
+                    "detail": { "type": "string" }
+                  },
+                  "required": ["sequence", "kind", "detail"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["reversed", "drifted"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "commands",
+      "functions": [
+        {
+          "name": "request",
+          "symbol": "runtime_commands_request",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state"]
+              },
+              "environment": { "type": "object" },
+              "host": { "type": "string", "minLength": 1 },
+              "home": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "target": { "type": "string", "minLength": 1 },
+              "arguments": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["places", "environment", "host", "home", "name", "target"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "rename",
+          "symbol": "runtime_commands_rename",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state"]
+              },
+              "environment": { "type": "object" },
+              "host": { "type": "string", "minLength": 1 },
+              "from": { "type": "string", "minLength": 1 },
+              "to": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "environment", "host", "from", "to"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" }
+            },
+            "additionalProperties": false,
+            "required": ["name"]
+          }
+        },
+        {
+          "name": "delete",
+          "symbol": "runtime_commands_delete",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state"]
+              },
+              "host": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "host", "name"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "deleted": { "const": true }
+            },
+            "required": ["deleted"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "add",
+          "symbol": "runtime_commands_add",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state"]
+              },
+              "environment": { "type": "object" },
+              "host": { "type": "string", "minLength": 1 },
+              "home": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "target": { "type": "string", "minLength": 1 },
+              "arguments": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["places", "environment", "host", "home", "name", "target"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" }
+            },
+            "additionalProperties": false,
+            "required": ["name"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "install",
+      "functions": [
+        {
+          "name": "packages",
+          "symbol": "runtime_install_packages",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": { "type": "string", "minLength": 1 }
+                },
+                "required": ["portable"]
+              },
+              "item": { "type": "string", "minLength": 1 },
+              "manifestPackages": { "type": "object" }
+            },
+            "required": ["places", "item"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "packages": { "type": "object" }
+            },
+            "required": ["packages"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "plan",
+          "symbol": "runtime_install_plan",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": { "type": "string", "minLength": 1 }
+                },
+                "required": ["portable"]
+              },
+              "item": { "type": "string", "minLength": 1 },
+              "manifestPackages": { "type": "object" },
+              "methods": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "chosen": { "type": "string", "minLength": 1 },
+              "installedProviders": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "catalog": { "type": "array", "items": { "type": "object" } }
+            },
+            "required": ["places", "item", "methods", "chosen"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "steps": { "type": "array", "items": { "type": "object" } }
+            },
+            "required": ["steps"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "detect",
+          "symbol": "runtime_install_detect",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cache": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "portable",
+                  "cache"
+                ]
+              },
+              "item": {
+                "type": "string",
+                "minLength": 1
+              },
+              "manifestPackages": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "places",
+              "item"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "detections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "type": "string"
+                    },
+                    "item": {
+                      "type": "string"
+                    },
+                    "package": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "object"
+                    },
+                    "answer": {
+                      "type": "object",
+                      "properties": {
+                        "installed": {
+                          "type": "boolean"
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "installed"
+                      ]
+                    },
+                    "refused": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "method",
+                    "item"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "detections"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "entry",
+          "symbol": "runtime_install_entry_json",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cache": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "state",
+                  "cache"
+                ]
+              },
+              "loader": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "application": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  },
+                  "home": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "application",
+                  "home"
+                ]
+              }
+            },
+            "required": [
+              "places",
+              "loader"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "written": {
+                "type": "boolean"
+              },
+              "sequences": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "message": {
+                "type": "string"
+              },
+              "fix": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "written"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "runtime",
+          "symbol": "runtime_install_runtime",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": {
+                "type": "string",
+                "minLength": 1
+              },
+              "platform": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+-[a-z0-9]+$"
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "cache",
+              "environment"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "const": "node"
+              },
+              "version": {
+                "type": "string"
+              },
+              "executable": {
+                "type": "string"
+              },
+              "fetched": {
+                "type": "boolean"
+              },
+              "source": {
+                "enum": [
+                  "path",
+                  "acquired"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "executable",
+              "fetched",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "ecosystem",
+          "symbol": "runtime_install_ecosystem",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "local"
+                        },
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "path"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "https"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "url"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cache": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "portable",
+                  "state",
+                  "cache"
+                ]
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "choices": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "defaults": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "requested": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "platform": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+-[a-z0-9]+$"
+              }
+            },
+            "required": [
+              "sources",
+              "places",
+              "environment"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "installed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "cached": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unavailable": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "fix": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "message",
+                    "fix"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "enabled": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "applications": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "enum": [
+                        "installed",
+                        "detected",
+                        "skipped",
+                        "missing",
+                        "unavailable",
+                        "failed"
+                      ]
+                    },
+                    "installedThrough": {
+                      "type": "string"
+                    },
+                    "origin": {
+                      "type": "object",
+                      "properties": {
+                        "method": {
+                          "type": "string"
+                        },
+                        "package": {
+                          "type": "string"
+                        },
+                        "options": {
+                          "type": "object"
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "offered": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "flag": {
+                      "type": "string"
+                    },
+                    "unavailable": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "method": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "fix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "method",
+                          "message",
+                          "fix"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "loaders": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "application": {
+                      "type": "string"
+                    },
+                    "home": {
+                      "type": "string"
+                    },
+                    "commands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "refusedCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "fix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "detail",
+                          "fix"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "entry": {
+                      "type": "object",
+                      "properties": {
+                        "written": {
+                          "type": "boolean"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "fix": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "written"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "application",
+                    "home",
+                    "commands",
+                    "refusedCommands",
+                    "entry"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "missing": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "application": {
+                      "type": "string"
+                    },
+                    "methods": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "application",
+                    "methods"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "javascript": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "const": "node"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "executable": {
+                    "type": "string"
+                  },
+                  "fetched": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "enum": [
+                      "path",
+                      "acquired"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "version",
+                  "executable",
+                  "fetched",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "installed",
+              "cached",
+              "unavailable",
+              "enabled",
+              "applications",
+              "loaders",
+              "missing"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "application",
+          "symbol": "runtime_install_application",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cache": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "portable",
+                  "state",
+                  "cache"
+                ]
+              },
+              "loader": {
+                "type": "string",
+                "minLength": 1
+              },
+              "operation": {
+                "enum": [
+                  "update",
+                  "remove"
+                ]
+              }
+            },
+            "required": [
+              "places",
+              "loader",
+              "operation"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "enum": [
+                  "update",
+                  "remove"
+                ]
+              },
+              "version": {
+                "type": "string"
+              },
+              "unrecorded": {
+                "type": "object",
+                "properties": { "message": { "type": "string" }, "fix": { "type": "string" } },
+                "required": ["message", "fix"],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "operation"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "registerLoader",
+          "symbol": "runtime_install_register_loader",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "portable": { "type": "string", "minLength": 1 },
+                  "state": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["portable", "state", "cache"]
+              },
+              "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+              "id": { "type": "string", "minLength": 1 },
+              "version": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "environment", "id", "version"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "provenance": { "type": "object" },
+              "commands": { "type": "array", "items": { "type": "string" } },
+              "refusedCommands": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": { "name": { "type": "string" }, "detail": { "type": "string" }, "fix": { "type": "string" } },
+                  "required": ["name", "detail", "fix"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["provenance", "commands", "refusedCommands"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "fetch",
+      "functions": [
+        {
+          "name": "get",
+          "symbol": "runtime_fetch_get",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string", "minLength": 1 },
+              "destination": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "etag": { "type": "string" },
+              "lastModified": { "type": "string" },
+              "maxBytes": { "type": "integer", "minimum": 0 },
+              "timeoutSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 86400 }
+            },
+            "required": ["url", "destination"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "outcome": { "enum": ["stored", "not-modified"] },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "bytes": { "type": "integer", "minimum": 0 },
+              "etag": { "type": "string" },
+              "lastModified": { "type": "string" }
+            },
+            "required": ["outcome"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "catalog",
+      "functions": [
+        {
+          "name": "read",
+          "symbol": "runtime_catalog_read",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "origin": { "type": "string", "minLength": 1 }
+            },
+            "required": ["text", "origin"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "catalog": { "type": "object", "properties": { "format": { "const": 1 }, "items": { "type": "object" } }, "required": ["format", "items"] }
+            },
+            "required": ["catalog"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "sources",
+          "symbol": "runtime_catalog_sources",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "settings": { "type": "object" }
+            },
+            "required": ["settings"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "sources": { "type": "array", "items": { "oneOf": [ { "type": "object", "properties": { "kind": { "const": "local" }, "path": { "type": "string" } }, "required": ["kind", "path"] }, { "type": "object", "properties": { "kind": { "const": "https" }, "url": { "type": "string" } }, "required": ["kind", "url"] } ] } },
+              "skipped": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": { "type": "integer", "minimum": 0 },
+                    "detail": { "type": "string" }
+                  },
+                  "required": ["index", "detail"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["sources", "skipped"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "merge",
+          "symbol": "runtime_catalog_merge",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "catalogs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": { "oneOf": [ { "type": "object", "properties": { "kind": { "const": "local" }, "path": { "type": "string" } }, "required": ["kind", "path"] }, { "type": "object", "properties": { "kind": { "const": "https" }, "url": { "type": "string" } }, "required": ["kind", "url"] } ] },
+                    "catalog": { "type": "object", "properties": { "format": { "const": 1 }, "items": { "type": "object" } }, "required": ["format", "items"] }
+                  },
+                  "required": ["source", "catalog"]
+                }
+              }
+            },
+            "required": ["catalogs"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "catalog": { "type": "object", "properties": { "format": { "const": 1 }, "items": { "type": "object" } }, "required": ["format", "items"] },
+              "shadowed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "source": { "oneOf": [ { "type": "object", "properties": { "kind": { "const": "local" }, "path": { "type": "string" } }, "required": ["kind", "path"] }, { "type": "object", "properties": { "kind": { "const": "https" }, "url": { "type": "string" } }, "required": ["kind", "url"] } ] }
+                  },
+                  "required": ["id", "source"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["catalog", "shadowed"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "check",
+          "symbol": "runtime_catalog_check",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "source": { "oneOf": [ { "type": "object", "properties": { "kind": { "const": "local" }, "path": { "type": "string" } }, "required": ["kind", "path"] }, { "type": "object", "properties": { "kind": { "const": "https" }, "url": { "type": "string" } }, "required": ["kind", "url"] } ] },
+              "cache": { "type": "string", "minLength": 1 },
+              "now": { "type": "string", "minLength": 1 },
+              "intervalHours": { "type": "number" }
+            },
+            "required": ["source", "cache", "now", "intervalHours"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "kind": { "enum": ["skipped", "unchanged", "changed", "failed"] },
+              "catalog": { "type": "object", "properties": { "format": { "const": 1 }, "items": { "type": "object" } }, "required": ["format", "items"] },
+              "detail": { "type": "string" }
+            },
+            "required": ["kind"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "current",
+          "symbol": "runtime_catalog_current",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "sources": { "type": "array", "items": { "oneOf": [ { "type": "object", "properties": { "kind": { "const": "local" }, "path": { "type": "string" } }, "required": ["kind", "path"] }, { "type": "object", "properties": { "kind": { "const": "https" }, "url": { "type": "string" } }, "required": ["kind", "url"] } ] } },
+              "cache": { "type": "string", "minLength": 1 }
+            },
+            "required": ["sources", "cache"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "catalog": { "type": "object", "properties": { "format": { "const": 1 }, "items": { "type": "object" } }, "required": ["format", "items"] }
+            },
+            "required": ["catalog"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "resolve",
+          "symbol": "runtime_catalog_resolve",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "catalog": { "type": "object", "properties": { "format": { "const": 1 }, "items": { "type": "object" } }, "required": ["format", "items"] },
+              "enabled": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "pin": { "type": "string" }
+                  },
+                  "required": ["id"]
+                }
+              },
+              "installed": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+              "kind": { "enum": ["plugin", "host", "library"] }
+            },
+            "required": ["catalog", "enabled", "installed"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "run": { "type": "object", "additionalProperties": { "type": "string" } },
+              "fetch": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "version": { "type": "string" }
+                  },
+                  "required": ["id", "version"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["run", "fetch"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "cache",
+      "functions": [
+        {
+          "name": "install",
+          "symbol": "runtime_cache_install",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": { "type": "string", "minLength": 1 },
+              "id": { "type": "string", "minLength": 1 },
+              "item": { "type": "object" },
+              "version": { "type": "string", "minLength": 1 },
+              "platform": { "type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$" }
+            },
+            "required": ["cache", "id", "item", "version"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "version": { "type": "string" },
+              "directory": { "type": "string" },
+              "fetched": { "type": "array", "items": { "type": "string" } },
+              "cached": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["id", "version", "directory", "fetched", "cached"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "installed",
+          "symbol": "runtime_cache_installed",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": { "type": "string", "minLength": 1 },
+              "platform": { "type": "string" }
+            },
+            "required": ["cache"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "bundles": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+              "libraries": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } }
+            },
+            "required": ["bundles", "libraries"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "check",
+          "symbol": "runtime_cache_check",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "directory": { "type": "string", "minLength": 1 }
+            },
+            "required": ["directory"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "kind": { "enum": ["absent", "intact", "damaged"] },
+              "detail": { "type": "string" },
+              "fix": { "type": "string" },
+              "file": { "type": "string" }
+            },
+            "required": ["kind"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "platform",
+          "symbol": "runtime_cache_platform",
+          "kind": "json",
+          "argument": { "type": "object" },
+          "result": {
+            "type": "object",
+            "properties": {
+              "platform": { "type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$" }
+            },
+            "required": ["platform"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "sweep",
+          "symbol": "runtime_cache_sweep",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": { "type": "string", "minLength": 1 },
+              "state": { "type": "string", "minLength": 1 }
+            },
+            "required": ["cache", "state"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "removed": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["removed"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "updates",
+      "functions": [
+        {
+          "name": "apply",
+          "symbol": "runtime_updates_apply",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state", "cache"]
+              },
+              "hostId": { "type": "string", "minLength": 1 },
+              "settings": { "type": "object" },
+              "defaults": { "type": "object", "additionalProperties": { "type": "string" } },
+              "running": { "type": "object", "additionalProperties": { "type": "string" } },
+              "libraries": { "type": "array", "items": { "type": "string" } },
+              "platform": { "type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$" }
+            },
+            "required": ["places", "hostId"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "plugins": { "type": "object", "additionalProperties": { "type": "string" } },
+              "run": { "type": "object", "additionalProperties": { "type": "string" } },
+              "next": { "type": "object", "additionalProperties": { "type": "string" } },
+              "rollback": { "type": "object", "additionalProperties": { "type": "string" } },
+              "unrecorded": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "fix": { "type": "string" }
+                  },
+                  "required": ["message", "fix"],
+                  "additionalProperties": false
+                }
+              },
+              "runRecord": { "type": "string" }
+            },
+            "required": ["plugins", "run", "next", "rollback", "unrecorded", "runRecord"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "check",
+          "symbol": "runtime_updates_check",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state", "cache"]
+              },
+              "hostId": { "type": "string", "minLength": 1 },
+              "now": { "type": "string", "minLength": 1 },
+              "settings": { "type": "object" },
+              "defaults": { "type": "object", "additionalProperties": { "type": "string" } },
+              "problems": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "version": { "type": "string" }
+                  },
+                  "required": ["id", "version"]
+                }
+              },
+              "platform": { "type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$" }
+            },
+            "required": ["places", "hostId", "now"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "checked": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "enum": ["skipped", "unchanged", "changed", "failed"] },
+                    "detail": { "type": "string" }
+                  },
+                  "required": ["kind"],
+                  "additionalProperties": false
+                }
+              },
+              "fetched": { "type": "array", "items": { "type": "string" } },
+              "refused": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "message": { "type": "string" },
+                    "fix": { "type": "string" }
+                  },
+                  "required": ["id", "message", "fix"],
+                  "additionalProperties": false
+                }
+              },
+              "removed": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["checked", "fetched", "refused", "removed"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "rollback",
+          "symbol": "runtime_updates_rollback",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state", "cache"]
+              },
+              "hostId": { "type": "string", "minLength": 1 },
+              "item": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "hostId", "item"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "run": { "type": "object", "additionalProperties": { "type": "string" } },
+              "next": { "type": "object", "additionalProperties": { "type": "string" } },
+              "rollback": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "required": ["run", "next", "rollback"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "boot",
+      "functions": [
+        {
+          "name": "read",
+          "symbol": "runtime_boot_read",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 }
+            },
+            "required": ["cache", "hostId"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "hint": {
+                "type": "object",
+                "properties": {
+                  "libraries": { "type": "object", "additionalProperties": { "type": "string" } },
+                  "host": { "type": "string" }
+                },
+                "required": ["libraries"],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "write",
+          "symbol": "runtime_boot_write",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 },
+              "libraries": { "type": "object", "additionalProperties": { "type": "string" } },
+              "host": { "type": "string", "minLength": 1 },
+              "state": { "type": "string", "minLength": 1 }
+            },
+            "required": ["cache", "hostId", "libraries"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "hint": {
+                "type": "object",
+                "properties": {
+                  "libraries": { "type": "object", "additionalProperties": { "type": "string" } },
+                  "host": { "type": "string" }
+                },
+                "required": ["libraries"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["hint"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "resolve",
+          "symbol": "runtime_boot_resolve",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "cache": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string" },
+              "arguments": { "type": "array", "items": { "type": "string" } },
+              "platform": { "type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$" }
+            },
+            "required": ["cache"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "executable": { "type": "string" },
+              "arguments": { "type": "array", "items": { "type": "string" } },
+              "version": { "type": "string" },
+              "directory": { "type": "string" }
+            },
+            "required": ["executable", "arguments", "version", "directory"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "processes",
+      "functions": [
+        {
+          "name": "hold",
+          "symbol": "runtime_processes_hold",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 },
+              "holder": { "type": "integer", "minimum": 1 },
+              "start": {
+                "type": "object",
+                "description": "How to start the host, built from the start its registration records: the absolute executable, its arguments, the environment that replaces the caller's, and the folder it runs in (state by default).",
+                "properties": {
+                  "executable": { "type": "string", "minLength": 1 },
+                  "arguments": { "type": "array", "items": { "type": "string" } },
+                  "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+                  "directory": { "type": "string", "minLength": 1 }
+                },
+                "required": ["executable"]
+              }
+            },
+            "required": ["state", "hostId", "holder", "start"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "pid": { "type": "integer", "minimum": 1 },
+              "started": { "type": "boolean" },
+              "outsideJob": { "type": "boolean" }
+            },
+            "required": ["pid", "started"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "release",
+          "symbol": "runtime_processes_release",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 },
+              "holder": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["state", "hostId", "holder"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "holders": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+            },
+            "required": ["holders"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "prune",
+          "symbol": "runtime_processes_prune",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 },
+              "self": { "type": "integer", "minimum": 1 },
+              "now": { "type": "number", "exclusiveMinimum": 0 },
+              "checkMilliseconds": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "required": ["state", "hostId", "self"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "exit": { "type": "boolean" }
+            },
+            "required": ["exit"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "recordRun",
+          "symbol": "runtime_processes_record_run",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 },
+              "run": { "type": "object", "additionalProperties": { "type": "string" } },
+              "checkMilliseconds": { "type": "number", "exclusiveMinimum": 0 },
+              "record": { "type": "string", "minLength": 1 }
+            },
+            "required": ["state", "hostId", "run"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "record": { "type": "string" }
+            },
+            "required": ["record"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "liveRuns",
+          "symbol": "runtime_processes_live_runs",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "minLength": 1 },
+              "now": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "required": ["state"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "runs": { "type": "array", "items": { "type": "object", "additionalProperties": { "type": "string" } } }
+            },
+            "required": ["runs"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "removeRuns",
+          "symbol": "runtime_processes_remove_runs",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "minLength": 1 },
+              "hostId": { "type": "string", "minLength": 1 },
+              "record": { "type": "string", "minLength": 1 }
+            },
+            "required": ["state", "hostId"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "hosts",
+      "functions": [
+        {
+          "name": "register",
+          "symbol": "runtime_hosts_register",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              },
+              "identity": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "version": { "type": "string", "minLength": 1 },
+                  "home": { "type": "string" },
+                  "application": { "type": "object" },
+                  "requiresCommand": { "type": "boolean" },
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": { "type": "string", "minLength": 1 },
+                        "target": { "type": "string", "minLength": 1 },
+                        "arguments": { "type": "array", "items": { "type": "string" } }
+                      },
+                      "required": ["name", "target"]
+                    }
+                  },
+                  "start": {
+                    "type": "object",
+                    "description": "How a launcher starts the host: the language runtime it needs and its entry, a relative path inside its installed bundle.",
+                    "properties": {
+                      "runtime": { "enum": ["javascript", "jvm", "native"] },
+                      "entry": { "type": "string", "minLength": 1 }
+                    },
+                    "required": ["runtime", "entry"]
+                  }
+                },
+                "required": ["id", "version", "requiresCommand", "commands"]
+              },
+              "provenance": { "type": "object" },
+              "environment": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "required": ["places", "identity", "provenance", "environment"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "provenance": { "type": "object" },
+              "commands": { "type": "array", "items": { "type": "string" } },
+              "refusedCommands": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "detail": { "type": "string" },
+                    "fix": { "type": "string" }
+                  },
+                  "required": ["name", "detail", "fix"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["provenance", "commands", "refusedCommands"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "list",
+          "symbol": "runtime_hosts_list",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              }
+            },
+            "required": ["places"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "registration": { "type": "object" },
+                    "orphan": { "type": "boolean" }
+                  },
+                  "required": ["registration", "orphan"],
+                  "additionalProperties": false
+                }
+              },
+              "unreadable": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["hosts", "unreadable"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "remove",
+          "symbol": "runtime_hosts_remove",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 },
+                  "cache": { "type": "string", "minLength": 1 }
+                },
+                "required": ["state", "cache"]
+              },
+              "id": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "id"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "reversed": { "type": "integer", "minimum": 0 },
+              "drifted": { "type": "array" },
+              "forgotten": { "type": "boolean" }
+            },
+            "required": ["reversed", "drifted", "forgotten"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "provenance",
+          "symbol": "runtime_hosts_provenance",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "object",
+                "properties": {
+                  "method": { "type": "string", "minLength": 1 },
+                  "package": { "type": "string" },
+                  "options": { "type": "object" },
+                  "version": { "type": "string" }
+                },
+                "required": ["method"]
+              },
+              "application": {
+                "type": "object",
+                "properties": { "binary": { "type": "string", "minLength": 1 } },
+                "required": ["binary"]
+              },
+              "home": { "type": "string", "minLength": 1 },
+              "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+              "now": { "type": "number", "minimum": 0 }
+            },
+            "required": ["origin", "application", "home", "environment"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "method": { "type": "string" },
+              "package": { "type": "string" },
+              "options": { "type": "object" },
+              "version": { "type": "string" },
+              "location": { "type": "string" },
+              "os": { "type": "string" },
+              "architecture": { "type": "string" },
+              "installedAt": { "type": "string" }
+            },
+            "required": ["method", "location", "os", "architecture", "installedAt"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "loader",
+      "functions": [
+        {
+          "name": "check",
+          "symbol": "runtime_loader_check",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": { "standard": {} },
+            "required": ["standard"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": { "type": "string" },
+                    "detail": { "type": "string" },
+                    "fix": { "type": "string" }
+                  },
+                  "required": ["path", "detail", "fix"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["issues"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "home",
+          "symbol": "runtime_loader_home",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "home": {
+                "type": "object",
+                "properties": {
+                  "envOverride": { "type": "string" },
+                  "nativeEnv": { "type": "string" },
+                  "xdgSubdir": { "type": "string" },
+                  "candidates": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+                },
+                "required": ["candidates"]
+              },
+              "environment": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "required": ["home", "environment"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "home": { "type": "string" },
+              "source": { "enum": ["override", "native", "xdg", "candidate", "default"] }
+            },
+            "required": ["home", "source"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "installed",
+          "symbol": "runtime_loader_installed",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "object",
+                "properties": { "cache": { "type": "string", "minLength": 1 } },
+                "required": ["cache"]
+              },
+              "id": { "type": "string", "minLength": 1 },
+              "version": { "type": "string", "minLength": 1 }
+            },
+            "required": ["places", "id", "version"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "standard": { "type": "object" } },
+            "required": ["standard"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "detect",
+      "functions": [
+        {
+          "name": "onPath",
+          "symbol": "runtime_detect_on_path",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "binary": { "type": "string", "minLength": 1 },
+              "environment": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "required": ["binary", "environment"]
+          },
+          "result": {
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "lists",
+      "functions": [
+        {
+          "name": "plugins",
+          "symbol": "runtime_lists_plugins",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "installed": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
+              "detected": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } },
+              "available": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] } }
+            },
+            "required": ["installed", "detected", "available"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "state": { "enum": ["installed", "detected", "available"] }
+                  },
+                  "required": ["id", "state"]
+                }
+              }
+            },
+            "required": ["items"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "applications",
+          "symbol": "runtime_lists_applications",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "catalog": {
+                "type": "object",
+                "properties": { "items": { "type": "object" } },
+                "required": ["items"]
+              },
+              "places": {
+                "type": "object",
+                "properties": { "state": { "type": "string", "minLength": 1 } },
+                "required": ["state"]
+              },
+              "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+              "detections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "method": { "type": "string" },
+                    "item": { "type": "string" },
+                    "package": { "type": "string" },
+                    "options": { "type": "object" },
+                    "answer": {
+                      "type": "object",
+                      "properties": { "installed": { "type": "boolean" }, "version": { "type": "string" } },
+                      "required": ["installed"]
+                    },
+                    "refused": { "type": "string" }
+                  },
+                  "required": ["method", "item"]
+                }
+              }
+            },
+            "required": ["catalog", "places", "environment", "detections"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "label": { "type": "string" },
+                    "state": { "enum": ["installed", "detected", "available"] }
+                  },
+                  "required": ["id", "state"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["items"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "ui",
+      "functions": [
+        {
+          "name": "navigation",
+          "symbol": "runtime_ui_navigation",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "descriptions": {
+                "type": "array",
+                "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+              },
+              "ui": { "type": "object" }
+            },
+            "required": ["descriptions", "ui"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "plugin": { "type": "string" },
+                    "kind": { "enum": ["view", "settings", "action"] },
+                    "id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "pinned": { "type": "boolean" }
+                  },
+                  "required": ["plugin", "kind", "id", "pinned"],
+                  "additionalProperties": false
+                }
+              },
+              "preferences": { "type": "object" }
+            },
+            "required": ["entries", "preferences"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "settingsView",
+          "symbol": "runtime_ui_settings_view",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "description": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+            },
+            "required": ["description"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "parent": { "type": "string" },
+                    "component": { "enum": ["form", "field"] },
+                    "field": { "type": "string" },
+                    "label": { "type": "string" }
+                  },
+                  "required": ["id", "component"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["title", "nodes"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "plan",
+          "symbol": "runtime_ui_plan",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "descriptions": {
+                "type": "array",
+                "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+              },
+              "screen": {
+                "type": "object",
+                "properties": {
+                  "plugin": { "type": "string" },
+                  "kind": { "enum": ["view", "settings", "action"] },
+                  "id": { "type": "string" }
+                },
+                "required": ["plugin", "kind"]
+              },
+              "answers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "plugin": { "type": "string" },
+                    "binding": {
+                      "type": "object",
+                      "properties": { "service": { "type": "string" }, "method": { "type": "string" } },
+                      "required": ["service", "method"]
+                    },
+                    "arguments": { "type": "object" },
+                    "answer": {},
+                    "checked": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "against": { "type": "string" },
+                          "members": { "type": "array", "items": { "type": "string" } },
+                          "issues": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "message": { "type": "string" },
+                                "fix": { "type": "string" },
+                                "path": { "type": "string" }
+                              },
+                              "required": ["message", "fix"]
+                            }
+                          }
+                        },
+                        "required": ["against", "issues"]
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": { "detail": { "type": "string" }, "fix": { "type": "string" } },
+                      "required": ["detail", "fix"]
+                    },
+                    "unavailable": { "const": true }
+                  },
+                  "required": ["plugin", "binding", "arguments"]
+                }
+              }
+            },
+            "required": ["descriptions", "screen"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "calls": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "plugin": { "type": "string" },
+                    "binding": {
+                      "type": "object",
+                      "properties": { "service": { "type": "string" }, "method": { "type": "string" } },
+                      "required": ["service", "method"],
+                      "additionalProperties": false
+                    },
+                    "arguments": { "type": "object" },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "against": { "type": "string" },
+                          "members": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["against"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["plugin", "binding", "arguments", "checks"],
+                  "additionalProperties": false
+                }
+              },
+              "done": { "const": true }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "render",
+          "symbol": "runtime_ui_render",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "descriptions": {
+                "type": "array",
+                "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+              },
+              "screen": {
+                "type": "object",
+                "properties": {
+                  "plugin": { "type": "string" },
+                  "kind": { "enum": ["view", "settings", "action"] },
+                  "id": { "type": "string" }
+                },
+                "required": ["plugin", "kind"]
+              },
+              "answers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "plugin": { "type": "string" },
+                    "binding": {
+                      "type": "object",
+                      "properties": { "service": { "type": "string" }, "method": { "type": "string" } },
+                      "required": ["service", "method"]
+                    },
+                    "arguments": { "type": "object" },
+                    "answer": {},
+                    "checked": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "against": { "type": "string" },
+                          "members": { "type": "array", "items": { "type": "string" } },
+                          "issues": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "message": { "type": "string" },
+                                "fix": { "type": "string" },
+                                "path": { "type": "string" }
+                              },
+                              "required": ["message", "fix"]
+                            }
+                          }
+                        },
+                        "required": ["against", "issues"]
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": { "detail": { "type": "string" }, "fix": { "type": "string" } },
+                      "required": ["detail", "fix"]
+                    },
+                    "unavailable": { "const": true }
+                  },
+                  "required": ["plugin", "binding", "arguments"]
+                }
+              }
+            },
+            "required": ["descriptions", "screen", "answers"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "plugin": { "type": "string" },
+              "kind": { "enum": ["view", "settings"] },
+              "view": { "type": "string" },
+              "title": { "type": "string" },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "component": { "type": "string" },
+                    "parent": { "type": "string" },
+                    "state": { "enum": ["ready", "error", "unavailable"] },
+                    "data": {},
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "detail": { "type": "string" },
+                        "fix": { "type": "string" },
+                        "path": { "type": "string" }
+                      },
+                      "required": ["detail", "fix"],
+                      "additionalProperties": false
+                    },
+                    "props": { "type": "object" }
+                  },
+                  "required": ["id", "component", "state", "props"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["plugin", "kind", "nodes"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "pluginList",
+          "symbol": "runtime_ui_plugin_list",
+          "kind": "json",
+          "argument": {
+            "type": "object",
+            "properties": {
+              "installed": {
+                "type": "array",
+                "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+              },
+              "detected": {
+                "type": "array",
+                "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+              },
+              "available": {
+                "type": "array",
+                "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] }
+              }
+            },
+            "required": ["installed", "detected", "available"]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "kind": { "const": "host" },
+              "title": { "type": "string" },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "component": { "const": "table" },
+                    "state": { "const": "ready" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string" },
+                              "state": { "enum": ["installed", "detected", "available"] },
+                              "unavailable": { "const": true },
+                              "install": { "const": true }
+                            },
+                            "required": ["id", "state"]
+                          }
+                        }
+                      },
+                      "required": ["items"],
+                      "additionalProperties": false
+                    },
+                    "props": { "type": "object" }
+                  },
+                  "required": ["id", "component", "state", "data", "props"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["kind", "title", "nodes"],
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  ]
+}
