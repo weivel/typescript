@@ -7,7 +7,7 @@ const MODEL_DEFINITION = /^https:\/\/weivel\.github\.io\/model\/([^#/]+)#\/defin
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const PRIMITIVE_TYPES: Readonly<Record<string, string>> = { string: "string", integer: "number", number: "number", boolean: "boolean" };
-const STRUCTURAL_KEYWORDS = new Set(["type", "properties", "required", "additionalProperties", "items", "enum", "const", "$ref"]);
+const STRUCTURAL_KEYWORDS = new Set(["type", "properties", "required", "additionalProperties", "items", "enum", "const", "$ref", "oneOf"]);
 const OBJECT_KEYWORDS = ["properties", "required", "additionalProperties"];
 
 /**
@@ -54,7 +54,7 @@ function propertyKey(name: string): string {
 function refuseUnsupportedKeywords(schema: Schema, path: string, generation: Generation): void {
   const unsupported = Object.keys(schema).find((keyword) => !STRUCTURAL_KEYWORDS.has(keyword) && !TYPE_NEUTRAL_KEYWORDS.has(keyword));
   if (unsupported !== undefined) {
-    refuse(generation, `${path}.${unsupported}`, "is not a schema form the generator supports", "use object, array, string, integer, number, boolean, enum, const, a $ref to a model definition, or {}");
+    refuse(generation, `${path}.${unsupported}`, "is not a schema form the generator supports", "use object, array, string, integer, number, boolean, enum, const, oneOf, a $ref to a model definition, or {}");
   }
 }
 
@@ -114,25 +114,72 @@ function requiredNames(schema: Schema, path: string, generation: Generation): Re
   return new Set(required);
 }
 
-function objectType(schema: Schema, path: string, generation: Generation): string {
-  const additional = schema.additionalProperties;
-  if (additional !== undefined && typeof additional !== "boolean") {
-    refuse(generation, `${path}.additionalProperties`, "is a schema, which the generator does not support", "set additionalProperties to true or false, or remove it");
-  }
+interface ObjectMember {
+  readonly key: string;
+  readonly optional: boolean;
+  readonly type: string;
+}
+
+function unionOf(types: readonly string[]): string {
+  const distinct = [...new Set(types.filter((type) => type !== "never"))];
+  if (distinct.includes("unknown")) return "unknown";
+  return distinct.length === 0 ? "never" : distinct.join(" | ");
+}
+
+/**
+ * The type of the index signature an object's additionalProperties declares.
+ *
+ * @implNote TypeScript requires every declared property to be assignable to the index signature, an
+ * optional one including undefined, so the additional type is widened by each of them.
+ */
+function indexSignatureType(additional: string, members: readonly ObjectMember[]): string {
+  const optional = members.some((member) => member.optional) ? ["undefined"] : [];
+  return unionOf([additional, ...members.map((member) => member.type), ...optional]);
+}
+
+function objectMembers(schema: Schema, path: string, generation: Generation): ObjectMember[] {
   const properties = schema.properties ?? {};
   if (!isSchema(properties)) refuse(generation, `${path}.properties`, "is not an object of schemas", "map each property name to its schema");
   const required = requiredNames(schema, path, generation);
-  const members = Object.entries(properties).map(([name, property]) => {
-    const optional = required.has(name) ? "" : "?";
-    return `${propertyKey(name)}${optional}: ${typeOf(property, `${path}.properties.${name}`, generation)}`;
-  });
+  const declared = Object.entries(properties).map(([name, property]) => ({
+    key: propertyKey(name),
+    optional: !required.has(name),
+    type: typeOf(property, `${path}.properties.${name}`, generation),
+  }));
   const undeclaredRequired = [...required].filter((name) => !Object.hasOwn(properties, name));
-  members.push(...undeclaredRequired.map((name) => `${propertyKey(name)}: unknown`));
-  if (additional !== false) members.push("[key: string]: unknown");
-  return members.length === 0 ? "{ [key: string]: never }" : `{ ${members.join("; ")} }`;
+  return [...declared, ...undeclaredRequired.map((name) => ({ key: propertyKey(name), optional: false, type: "unknown" }))];
+}
+
+function additionalType(schema: Schema, path: string, generation: Generation): string | undefined {
+  const additional = schema.additionalProperties;
+  if (additional === false) return undefined;
+  if (additional === undefined || additional === true) return "unknown";
+  if (!isSchema(additional)) {
+    refuse(generation, `${path}.additionalProperties`, "is not a boolean or a schema", "set additionalProperties to true, false, or the schema every undeclared property must match");
+  }
+  return typeOf(additional, `${path}.additionalProperties`, generation);
+}
+
+function objectType(schema: Schema, path: string, generation: Generation): string {
+  const members = objectMembers(schema, path, generation);
+  const lines = members.map((member) => `${member.key}${member.optional ? "?" : ""}: ${member.type}`);
+  const additional = additionalType(schema, path, generation);
+  if (additional !== undefined) lines.push(`[key: string]: ${indexSignatureType(additional, members)}`);
+  return lines.length === 0 ? "{ [key: string]: never }" : `{ ${lines.join("; ")} }`;
+}
+
+function oneOfType(schema: Schema, path: string, generation: Generation): string {
+  const sibling = Object.keys(schema).find((keyword) => keyword !== "oneOf" && STRUCTURAL_KEYWORDS.has(keyword));
+  if (sibling !== undefined) refuse(generation, `${path}.${sibling}`, "sits beside a oneOf", "move it into each branch of the oneOf");
+  const branches = schema.oneOf;
+  if (!Array.isArray(branches) || branches.length === 0) {
+    refuse(generation, `${path}.oneOf`, "is not a non-empty list of schemas", "list one schema per alternative");
+  }
+  return unionOf(branches.map((branch, index) => typeOf(branch, `${path}.oneOf[${index}]`, generation)));
 }
 
 function arrayType(schema: Schema, path: string, generation: Generation): string {
+  if (schema.items === undefined) return "unknown[]";
   if (!isSchema(schema.items) && typeof schema.items !== "boolean") refuse(generation, `${path}.items`, "is not one schema for every element", "give the array a single items schema");
   const element = typeOf(schema.items, `${path}.items`, generation);
   return element.includes("|") ? `(${element})[]` : `${element}[]`;
@@ -153,6 +200,7 @@ function typeOf(schema: unknown, path: string, generation: Generation): string {
   if (!isSchema(schema)) refuse(generation, path, "is not a schema object", "write the schema as an object; {} accepts anything");
   refuseUnsupportedKeywords(schema, path, generation);
   if ("$ref" in schema) return referenceType(schema, path, generation);
+  if ("oneOf" in schema) return oneOfType(schema, path, generation);
   refuseMisplacedKeywords(schema, path, generation);
   if ("const" in schema) return constType(schema, path, generation);
   if ("enum" in schema) return enumType(schema, path, generation);

@@ -236,14 +236,110 @@ export function consume(ctx: PluginContext): AppDescriptor | undefined {
   });
 
   it("refuses a schema form it does not support, naming the schema path", () => {
-    expect(() => generateLibraryTypes(declarationWithResult({ oneOf: [{ type: "string" }] }))).toThrow(/services\[0\]\.functions\[0\]\.result\.oneOf/);
+    expect(() => generateLibraryTypes(declarationWithResult({ allOf: [{ type: "string" }] }))).toThrow(/services\[0\]\.functions\[0\]\.result\.allOf/);
     expect(() => generateLibraryTypes(declarationWithResult({ type: ["string", "null"] }))).toThrow(/services\[0\]\.functions\[0\]\.result\.type/);
     expect(() =>
       generateLibraryTypes(declarationWithResult({ type: "object", properties: { nested: { type: "array", items: { anyOf: [] } } } })),
     ).toThrow(/services\[0\]\.functions\[0\]\.result\.properties\.nested\.items\.anyOf/);
-    expect(() => generateLibraryTypes(declarationWithResult({ type: "string" }, { type: "object", additionalProperties: { type: "string" } }))).toThrow(
-      /services\[0\]\.functions\[0\]\.argument\.additionalProperties/,
+    expect(() => generateLibraryTypes(declarationWithResult({ type: "string" }, { type: "object", additionalProperties: { not: {} } }))).toThrow(
+      /services\[0\]\.functions\[0\]\.argument\.additionalProperties\.not/,
     );
+  });
+
+  it("maps additionalProperties false to a closed object, which refuses a key it does not declare", () => {
+    const generated = generateLibraryTypes(
+      declarationWithResult({ type: "string" }, { type: "object", properties: { name: { type: "string" } }, required: ["name"], additionalProperties: false }),
+    );
+    expect(generated).toContain("get(argument: { name: string }): string;");
+    expect(generateLibraryTypes(declarationWithResult({ type: "object", additionalProperties: false }))).toContain("): { [key: string]: never };");
+    const consumer = `
+import type { PluginContext } from "@weivel/typescript";
+import { AppRegistry } from "./generated.js";
+export function consume(ctx: PluginContext): void {
+  const registry = ctx.services.get(AppRegistry)!;
+  registry.get({ name: "a" });
+  // @ts-expect-error the object is closed
+  registry.get({ name: "a", extra: 1 });
+}
+`;
+    expect(compileDiagnostics(generated, consumer)).toEqual([]);
+  });
+
+  it("maps an additionalProperties schema to an index signature widened over every declared property", () => {
+    const mapOnly = generateLibraryTypes(declarationWithResult({ type: "object", additionalProperties: { type: "string", minLength: 1 } }));
+    expect(mapOnly).toContain("): { [key: string]: string };");
+    const generated = generateLibraryTypes(
+      declarationWithResult(
+        { type: "string" },
+        {
+          type: "object",
+          properties: { count: { type: "integer" }, label: { type: "string" }, flag: { type: "boolean" } },
+          required: ["count", "flag"],
+          additionalProperties: { type: "boolean" },
+        },
+      ),
+    );
+    expect(generated).toContain("get(argument: { count: number; label?: string; flag: boolean; [key: string]: boolean | number | string | undefined }): string;");
+    const nested = generateLibraryTypes(declarationWithResult({ type: "object", additionalProperties: { type: "array", items: { type: "string" } } }));
+    expect(nested).toContain("): { [key: string]: string[] };");
+    const consumer = `
+import type { PluginContext } from "@weivel/typescript";
+import { AppRegistry } from "./generated.js";
+export function consume(ctx: PluginContext): void {
+  const registry = ctx.services.get(AppRegistry)!;
+  registry.get({ count: 1, flag: true, extra: false });
+  // @ts-expect-error an undeclared key carries the additionalProperties type
+  registry.get({ count: 1, flag: true, extra: [] });
+}
+`;
+    expect(compileDiagnostics(generated, consumer)).toEqual([]);
+  });
+
+  it("maps oneOf to the union of its branches, composing inside arrays and objects", () => {
+    const local = { type: "object", properties: { kind: { const: "local" }, path: { type: "string" } }, required: ["kind", "path"], additionalProperties: false };
+    const https = { type: "object", properties: { kind: { const: "https" }, url: { type: "string" } }, required: ["kind", "url"], additionalProperties: false };
+    expect(generateLibraryTypes(declarationWithResult({ oneOf: [{ type: "string" }, { type: "integer" }, { type: "number" }] }))).toContain("): string | number;");
+    const generated = generateLibraryTypes(
+      declarationWithResult(
+        { type: "object", properties: { sources: { type: "array", items: { oneOf: [local, https] } } }, required: ["sources"], additionalProperties: false },
+        { oneOf: [local, https], description: "annotations beside oneOf are ignored" },
+      ),
+    );
+    expect(generated).toContain(
+      'get(argument: { kind: "local"; path: string } | { kind: "https"; url: string }): { sources: ({ kind: "local"; path: string } | { kind: "https"; url: string })[] };',
+    );
+    const consumer = `
+import type { PluginContext } from "@weivel/typescript";
+import { AppRegistry } from "./generated.js";
+export function consume(ctx: PluginContext): string[] {
+  const registry = ctx.services.get(AppRegistry)!;
+  // @ts-expect-error a local source carries a path, not a url
+  registry.get({ kind: "local", url: "x" });
+  return registry.get({ kind: "https", url: "x" }).sources.map((source) => (source.kind === "local" ? source.path : source.url));
+}
+`;
+    expect(compileDiagnostics(generated, consumer)).toEqual([]);
+  });
+
+  it("maps an array without items to unknown elements, and still refuses a tuple form", () => {
+    expect(generateLibraryTypes(declarationWithResult({ type: "array" }))).toContain("): unknown[];");
+    expect(() => generateLibraryTypes(declarationWithResult({ type: "array", items: [{ type: "string" }] }))).toThrow(/result\.items is not one schema for every element/);
+  });
+
+  it("refuses a oneOf that is not a non-empty list of schemas, or sits beside a structural keyword", () => {
+    expect(() => generateLibraryTypes(declarationWithResult({ oneOf: [] }))).toThrow(/result\.oneOf is not a non-empty list of schemas/);
+    expect(() => generateLibraryTypes(declarationWithResult({ oneOf: { type: "string" } }))).toThrow(/result\.oneOf is not a non-empty list of schemas/);
+    expect(() => generateLibraryTypes(declarationWithResult({ oneOf: [{ type: "string" }, { allOf: [] }] }))).toThrow(/result\.oneOf\[1\]\.allOf/);
+    expect(() => generateLibraryTypes(declarationWithResult({ type: "object", oneOf: [{ type: "object" }] }))).toThrow(/result\.type sits beside a oneOf/);
+  });
+
+  it("generates the runtime library's declaration exactly as committed, and the result compiles", () => {
+    const fixtures = join(root, "src", "host", "__fixtures__", "library");
+    const declaration = parseDeclaration(readFileSync(join(fixtures, "runtime.library.json"), "utf8"));
+    const generated = generateLibraryTypes(declaration);
+    const expected = readFileSync(join(fixtures, "runtime.types.expected"), "utf8").replace(/\r\n/g, "\n");
+    expect(generated).toBe(expected);
+    expect(compileDiagnostics(generated, "export {};\n")).toEqual([]);
   });
 
   it("maps every supported form", () => {
