@@ -125,6 +125,7 @@ class HostState {
   private readonly capabilities = new Map<string, CapabilityRecord[]>();
   private readonly disposers = new Map<string, Set<() => void>>();
   private readonly revoked = new Set<string>();
+  private readonly importNames = new Map<string, string>();
 
   constructor(options: HostOptions) {
     this.descriptor = { api: options.api ?? API_VERSION, app: options.app, surfaces: [...(options.surfaces ?? [])] };
@@ -137,6 +138,7 @@ class HostState {
       handles: options.handles,
       wellKnown: options.wellKnownServices,
       vocabulary: options.constraintVocabulary,
+      namespaceOf: (pluginId) => this.importNames.get(pluginId) ?? pluginId,
       recorder: {
         provided: (pluginId, serviceId) => this.ledger.recordServiceProvided(pluginId, serviceId),
         consumed: (pluginId, serviceId) => this.ledger.recordServiceConsumed(pluginId, serviceId),
@@ -179,11 +181,12 @@ class HostState {
   private contextFor(manifest: PluginManifest, runtime: PluginRuntime): PluginContext {
     const pluginId = this.recordDeclared(manifest);
     this.revoked.delete(pluginId);
+    this.importNames.set(pluginId, importNameOf(manifest, pluginId));
     return contextOf({
       manifest,
       host: this.descriptor,
       runtime,
-      registry: this.hub.forConsumer(pluginId, this.fenceFor(pluginId, declaredServices(manifest))),
+      registry: this.hub.forConsumer(pluginId, this.fenceFor(pluginId, declaredServices(manifest), boundProviders(manifest))),
       events: this.recording(pluginId, runtime.events),
       provide: (capabilityId, implementation) => this.provide(pluginId, capabilityId, implementation),
     });
@@ -241,7 +244,7 @@ class HostState {
    * state on purpose, so a revoked plugin's `ids()` still lists what it declared, as a late `get`
    * is let through.
    */
-  private fenceFor(pluginId: string, declared: ReadonlySet<string>): Fence {
+  private fenceFor(pluginId: string, declared: ReadonlySet<string>, bound: ReadonlyMap<string, string>): Fence {
     const lateRefusal = (attempt: ServiceAttempt, id: string): PluginError | null => {
       if (attempt === "get" || !this.refuseLate(pluginId, `a late ${attempt} of service`, id)) return null;
       return stoppedWaiting(pluginId, id);
@@ -249,7 +252,8 @@ class HostState {
     return {
       refusal: (attempt, id) => {
         if (attempt !== "registration" && !declared.has(id)) return this.refuseUndeclared(pluginId, id);
-        return lateRefusal(attempt, id);
+        const mismatch = attempt === "registration" ? null : this.refuseWrongProvider(pluginId, id, bound.get(id));
+        return mismatch ?? lateRefusal(attempt, id);
       },
       reaches: (id) => declared.has(id),
     };
@@ -264,6 +268,27 @@ class HostState {
     );
     if (this.ledger.recordServiceRefused(pluginId, serviceId)) {
       this.diagnostics(`refused service "${serviceId}" to ${pluginId}, which does not declare it: ${refusal.fix}`);
+    }
+    return refusal;
+  }
+
+  /**
+   * Refuses a service owned by someone other than the provider the consumer is bound to, reporting
+   * it once per plugin and id.
+   *
+   * @implNote A bound service nobody provides is absence, never a mismatch, exactly as for an
+   * unbound consumer.
+   */
+  private refuseWrongProvider(pluginId: string, serviceId: string, provider: string | undefined): PluginError | null {
+    const owner = this.hub.ownerOf(serviceId);
+    if (provider === undefined || owner === undefined || owner === provider) return null;
+    const refusal = pluginError(
+      pluginId,
+      `reached for service "${serviceId}", which it binds to ${provider} but ${owner} provides`,
+      `install ${provider}, or remove "provider" from "${serviceId}" in services.consumes of its plugin.json`,
+    );
+    if (this.ledger.recordServiceRefused(pluginId, serviceId)) {
+      this.diagnostics(`refused service "${serviceId}" to ${pluginId}, which binds it to ${provider} while ${owner} provides it: ${refusal.fix}`);
     }
     return refusal;
   }
@@ -322,4 +347,18 @@ function declaredServices(manifest: PluginManifest): ReadonlySet<string> {
 
 function listOf<T>(declarations: readonly T[] | undefined): readonly T[] {
   return Array.isArray(declarations) ? declarations.filter((declaration) => declaration !== null && declaration !== undefined) : [];
+}
+
+function importNameOf(manifest: PluginManifest, pluginId: string): string {
+  return typeof manifest.importName === "string" && manifest.importName !== "" ? manifest.importName : pluginId;
+}
+
+/** The provider each bound consumed service is pinned to, read defensively like `declaredServices`. */
+function boundProviders(manifest: PluginManifest): ReadonlyMap<string, string> {
+  const bound = new Map<string, string>();
+  for (const declaration of listOf(manifest.services?.consumes)) {
+    const { id, provider } = readRequirement(declaration);
+    if (typeof id === "string" && provider !== undefined) bound.set(id, provider);
+  }
+  return bound;
 }

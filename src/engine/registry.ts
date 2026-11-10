@@ -55,6 +55,8 @@ export interface ServiceHubOptions {
   handles?: Handles;
   /** The constraint names this host understands. Absent means none, under which every constraint is unknown. */
   vocabulary?: readonly ConstraintEntry[];
+  /** The namespace a plugin's own service ids carry, which is its import name; absent means the id itself. */
+  namespaceOf?: (pluginId: string) => string;
 }
 
 /**
@@ -147,6 +149,7 @@ export class ServiceHub {
   private readonly recorder: Recorder | undefined;
   private readonly wellKnown: readonly string[];
   private readonly vocabulary: readonly ConstraintEntry[];
+  private readonly namespaceOf: (pluginId: string) => string;
   private readonly constrained = new Map<string, Set<ConstrainedWant>>();
   private readonly entries = new Map<string, Entry>();
   private readonly waiters = new Map<string, Set<Waiter>>();
@@ -160,6 +163,7 @@ export class ServiceHub {
     this.wellKnown = [...(options.wellKnown ?? [])];
     this.vocabulary = [...(options.vocabulary ?? [])];
     this.handles = options.handles ?? unwrappedHandles(options.diagnostics);
+    this.namespaceOf = options.namespaceOf ?? ((pluginId) => pluginId);
   }
 
   /**
@@ -222,6 +226,13 @@ export class ServiceHub {
     return [...this.entries.keys()];
   }
 
+  /** The plugin id that registered `serviceId`, "the host" for a host service, or undefined when nothing has. */
+  ownerOf(serviceId: string): string | undefined {
+    const owner = this.entries.get(serviceId)?.owner;
+    if (owner === undefined) return undefined;
+    return owner === HOST ? "the host" : owner;
+  }
+
   /**
    * Unregisters everything a consumer registered, stops the watchers it installed, and rejects the
    * wants it is still waiting on, so a released plugin is inert.
@@ -260,7 +271,7 @@ export class ServiceHub {
       throw pluginError(
         pluginId,
         `cannot register service "${id}", which is outside this plugin's namespace`,
-        `register it as "${pluginId}:${name}", or as one of the well-known ids: ${this.wellKnown.join(", ") || "(none)"}`,
+        `register it as "${this.namespaceOf(pluginId)}:${name}", or as one of the well-known ids: ${this.wellKnown.join(", ") || "(none)"}`,
       );
     }
     const existing = this.entries.get(id);
@@ -424,7 +435,7 @@ export class ServiceHub {
     if (this.wellKnown.includes(serviceId)) return true;
     const separator = serviceId.indexOf(":");
     if (separator <= 0 || separator === serviceId.length - 1) return false;
-    return serviceId.slice(0, separator) === pluginId;
+    return serviceId.slice(0, separator) === this.namespaceOf(pluginId);
   }
 }
 

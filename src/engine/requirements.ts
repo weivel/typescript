@@ -5,6 +5,8 @@ export interface ServiceRequirement {
   readonly optional: boolean;
   readonly degradable: boolean;
   readonly constraints: Readonly<Record<string, number>>;
+  /** The plugin id that must own the service; absent means any provider serves it. */
+  readonly provider?: string;
 }
 
 export interface ServiceOffer {
@@ -29,6 +31,7 @@ export function readRequirement(declaration: string | ManifestRequirement): Serv
     optional: flag(declaration.optional, true),
     degradable: flag(declaration.degradable, false),
     constraints: numbersOf(declaration.constraints),
+    ...(typeof declaration.provider === "string" ? { provider: declaration.provider } : {}),
   };
 }
 
