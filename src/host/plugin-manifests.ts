@@ -7,8 +7,13 @@ import type { PluginError, PluginManifest, SourceManifest } from "../index.js";
 /** Deploy writes this beside the bundles so Node parses the whole directory as ESM, which is why the name can never be a plugin id. */
 const ESM_MARKER_FILE = "package.json";
 
-/** Deploy writes who a plugin is beside its sidecar, as `<importName>.identity.json`. */
-const IDENTITY_SUFFIX = ".identity.json";
+/**
+ * Deploy writes who a plugin is beside its sidecar, as `<importName>_identity.json`.
+ *
+ * @implNote An import name never holds an underscore, so no plugin's own sidecar can land on
+ * another plugin's identity path; a dot suffix would let `calendar.identity` do exactly that.
+ */
+const IDENTITY_SUFFIX = "_identity.json";
 
 /**
  * One entry of a declared vocabulary, which is the shape every typed key already has.
@@ -69,13 +74,25 @@ function identityRefusal(filename: string, identityPath: string, problem: string
   return pluginError(
     filename,
     `${identityPath}: ${problem}`,
-    `redeploy the plugin so ${filename}.identity.json holds { "id": "<forge>:<repository id>", "name": "<repository name>" }`
+    `redeploy the plugin so ${filename}${IDENTITY_SUFFIX} holds { "id": "<forge>:<repository id>", "name": "<repository name>" }`
+  );
+}
+
+function identityPathFor(pluginDir: string, importName: string): string {
+  return join(pluginDir, `${importName}${IDENTITY_SUFFIX}`);
+}
+
+function repeatedIdRefusal(item: PendingSidecar, id: string, firstPath: string): PluginError {
+  return pluginError(
+    item.filename,
+    `${item.manifestPath}: identity id "${id}" is already held by ${firstPath}`,
+    "redeploy one of the two plugins from its own repository so the two identity files hold different ids"
   );
 }
 
 /** A missing identity file is a local plugin; a present one that cannot be trusted is refused, never read as local. */
 function readIdentity(pluginDir: string, importName: string): Identity | PluginError {
-  const identityPath = join(pluginDir, `${importName}${IDENTITY_SUFFIX}`);
+  const identityPath = identityPathFor(pluginDir, importName);
   if (!existsSync(identityPath)) return localIdentity(importName);
   let parsed: unknown;
   try {
@@ -160,6 +177,8 @@ export function readDeployedManifests(pluginDir: string, wellKnownServices?: Rea
     }
   }
 
+  pending.sort((left, right) => (left.filename < right.filename ? -1 : left.filename > right.filename ? 1 : 0));
+  const claimedIds = new Map<string, string>();
   for (const item of pending) {
     if (item.source.importName !== item.filename) {
       failed.push(mismatchRefusal(item, pending));
@@ -170,6 +189,12 @@ export function readDeployedManifests(pluginDir: string, wellKnownServices?: Rea
       failed.push(identity);
       continue;
     }
+    const firstClaimant = claimedIds.get(identity.id);
+    if (firstClaimant !== undefined) {
+      failed.push(repeatedIdRefusal(item, identity.id, firstClaimant));
+      continue;
+    }
+    claimedIds.set(identity.id, item.manifestPath);
     const manifest = resolveManifest(item.source, identity);
     loaded.push({ manifest, manifestPath: item.manifestPath, entryPath: entryFor(pluginDir, manifest) });
   }

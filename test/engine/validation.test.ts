@@ -89,4 +89,18 @@ describe("the fix for a bare provided id", () => {
     const [issue] = validateManifest(manifest, ["log", "clock"]);
     expect(issue.fix).toBe('rename it to "a:<name>", or use one of: log, clock');
   });
+
+  it("refuses a consumed provider that is not a repository id, including one with a trailing newline", () => {
+    for (const provider of ["calendar", "github:1\n"]) {
+      const manifest = { importName: "a", api: 2, services: { consumes: [{ id: "x:y", provider }] } };
+      expect(validateManifest(manifest).map((issue) => issue.path), provider).toEqual(["services.consumes[0].provider"]);
+    }
+  });
+
+  it("refuses a Windows reserved import name with or without a dot after it", () => {
+    for (const importName of ["nul", "nul.x", "con.foo"]) {
+      expect(validateManifest({ importName, api: 2 }).map((issue) => issue.path), importName).toEqual(["importName"]);
+    }
+    expect(validateManifest({ importName: "console.foo", api: 2 })).toEqual([]);
+  });
 });
