@@ -36,13 +36,13 @@ it("validates a manifest in a host that bans runtime code generation", () => {
   const engine = pathToFileURL(join(outDir, "engine", "index.js")).href;
   const result = underEvalBan(`
     const { validateManifest } = await import(${JSON.stringify(engine)});
-    console.log(JSON.stringify(validateManifest({ id: "Bad Id", api: "one" })));
+    console.log(JSON.stringify(validateManifest({ importName: "Bad Id", api: "one" })));
   `);
 
   expect(result.status, result.output).toBe(0);
   const issues = JSON.parse(result.output) as Array<{ path: string; fix: string }>;
-  expect(issues.map((issue) => issue.path).sort()).toEqual(["api", "id"]);
-  expect(issues.find((issue) => issue.path === "id")?.fix).toContain("lowercase words joined by single hyphens");
+  expect(issues.map((issue) => issue.path).sort()).toEqual(["api", "importName"]);
+  expect(issues.find((issue) => issue.path === "importName")?.fix).toContain("lowercase words joined by single hyphens");
 });
 
 it("checks a ui binding answer in a host that bans runtime code generation", () => {
