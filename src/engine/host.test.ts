@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ManualScheduler } from "../conformance/manual-scheduler.js";
 import type { ManifestRequirement, PluginContext, PluginManifest } from "../index.js";
+import { settledTurn } from "../conformance/ops/settlement.js";
 import { createHost } from "./host.js";
 import type { Host } from "./host.js";
 import type { PluginRuntime } from "./context.js";
@@ -63,5 +64,50 @@ describe("a bound service", () => {
     const consumer = consumerBoundTo(host, undefined);
     expect(consumer.services.get(consumer.service("calendar:events"))).toBeDefined();
     expect(host.ledger.refusals()).toEqual([]);
+  });
+});
+
+describe("a bound service that registers after the consumer asks", () => {
+  async function settledState(asked: Promise<unknown>): Promise<"settled" | "pending"> {
+    let state: "settled" | "pending" = "pending";
+    asked.then(() => (state = "settled"), () => {});
+    await settledTurn();
+    return state;
+  }
+
+  it("is not delivered to a want from the wrong provider, and is from the named one", async () => {
+    const host = newHost();
+    const consumer = consumerBoundTo(host, "github:1");
+    const asked = consumer.services.want(consumer.service("calendar:events"));
+    providerOfEvents(host, "github:2", "calendar");
+    expect(await settledState(asked)).toBe("pending");
+    expect(host.ledger.refusals()).toEqual([{ pluginId: "agenda", serviceId: "calendar:events" }]);
+    host.release("github:2");
+    providerOfEvents(host, "github:1", "calendar");
+    expect(await settledState(asked)).toBe("settled");
+  });
+
+  it("is not delivered to a watch from the wrong provider, and is from the named one", () => {
+    const host = newHost();
+    const consumer = consumerBoundTo(host, "github:1");
+    const heard: string[] = [];
+    consumer.services.watch(consumer.service("calendar:events"), (_service, event) => heard.push(event));
+    providerOfEvents(host, "github:2", "calendar");
+    expect(heard).toEqual([]);
+    host.release("github:2");
+    expect(heard).toEqual([]);
+    providerOfEvents(host, "github:1", "calendar");
+    expect(heard).toEqual(["register"]);
+  });
+
+  it("does not deliver a fake that replaces the real provider", () => {
+    const host = newHost();
+    providerOfEvents(host, "github:1", "calendar");
+    const consumer = consumerBoundTo(host, "github:1");
+    const heard: string[] = [];
+    consumer.services.watch(consumer.service("calendar:events"), (_service, event) => heard.push(event));
+    host.release("github:1");
+    providerOfEvents(host, "github:2", "calendar");
+    expect(heard).toEqual(["unregister"]);
   });
 });

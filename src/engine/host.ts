@@ -139,6 +139,7 @@ class HostState {
       wellKnown: options.wellKnownServices,
       vocabulary: options.constraintVocabulary,
       namespaceOf: (pluginId) => this.importNames.get(pluginId) ?? pluginId,
+      mismatch: (consumerId, serviceId, provider, owner) => this.refuseWrongProvider(consumerId, serviceId, provider, owner),
       recorder: {
         provided: (pluginId, serviceId) => this.ledger.recordServiceProvided(pluginId, serviceId),
         consumed: (pluginId, serviceId) => this.ledger.recordServiceConsumed(pluginId, serviceId),
@@ -180,13 +181,14 @@ class HostState {
 
   private contextFor(manifest: PluginManifest, runtime: PluginRuntime): PluginContext {
     const pluginId = this.recordDeclared(manifest);
+    const bound = boundProviders(manifest);
     this.revoked.delete(pluginId);
     this.importNames.set(pluginId, importNameOf(manifest, pluginId));
     return contextOf({
       manifest,
       host: this.descriptor,
       runtime,
-      registry: this.hub.forConsumer(pluginId, this.fenceFor(pluginId, declaredServices(manifest), boundProviders(manifest))),
+      registry: this.hub.forConsumer(pluginId, this.fenceFor(pluginId, declaredServices(manifest), bound), (serviceId) => bound.get(serviceId)),
       events: this.recording(pluginId, runtime.events),
       provide: (capabilityId, implementation) => this.provide(pluginId, capabilityId, implementation),
     });
@@ -252,7 +254,7 @@ class HostState {
     return {
       refusal: (attempt, id) => {
         if (attempt !== "registration" && !declared.has(id)) return this.refuseUndeclared(pluginId, id);
-        const mismatch = attempt === "registration" ? null : this.refuseWrongProvider(pluginId, id, bound.get(id));
+        const mismatch = attempt === "registration" ? null : this.refuseOwnedElsewhere(pluginId, id, bound.get(id));
         return mismatch ?? lateRefusal(attempt, id);
       },
       reaches: (id) => declared.has(id),
@@ -279,9 +281,13 @@ class HostState {
    * @implNote A bound service nobody provides is absence, never a mismatch, exactly as for an
    * unbound consumer.
    */
-  private refuseWrongProvider(pluginId: string, serviceId: string, provider: string | undefined): PluginError | null {
+  private refuseOwnedElsewhere(pluginId: string, serviceId: string, provider: string | undefined): PluginError | null {
     const owner = this.hub.ownerOf(serviceId);
     if (provider === undefined || owner === undefined || owner === provider) return null;
+    return this.refuseWrongProvider(pluginId, serviceId, provider, owner);
+  }
+
+  private refuseWrongProvider(pluginId: string, serviceId: string, provider: string, owner: string): PluginError {
     const refusal = pluginError(
       pluginId,
       `reached for service "${serviceId}", which it binds to ${provider} but ${owner} provides`,
