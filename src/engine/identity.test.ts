@@ -35,6 +35,7 @@ describe("isIdentityId", () => {
     expect(isIdentityId("github:1/.")).toBe(false);
     expect(isIdentityId("github:1/../calendar_identity")).toBe(false);
     expect(isIdentityId("github:1/a/../b")).toBe(false);
+    expect(isIdentityId("github:1/..\n")).toBe(false);
     expect(isIdentityId("github:1/.hidden")).toBe(true);
     expect(isIdentityId("github:1/a..b")).toBe(true);
   });
