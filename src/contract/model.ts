@@ -226,6 +226,20 @@ export interface PluginPaths {
   repos: string;
 }
 
+/** One plugin another plugin needs, located by a repository id or by an owner/name, never both. */
+export interface ManifestDependency {
+  /** The commit the dependency is pinned to. */
+  commit?: string;
+  /** The repository identity of the dependency, which survives a rename. */
+  id?: string;
+  /** The name the dependent plugin imports the dependency by. */
+  importName: string;
+  /** The owner and name of the dependency's repository, for one whose id is not known. */
+  name?: string;
+  /** The SHA-256 digest the dependency's artifact must match. */
+  sha256?: string;
+}
+
 /**
  * The contents of a repo's plugin.json, before the repository's identity is applied.
  *
@@ -298,6 +312,8 @@ export interface SourceManifest {
   pathCommands?: ManifestPathCommands;
   /** Operations a host offers the user, each a call into one of this plugin's own services. */
   actions?: Record<string, ActionDeclaration>;
+  /** The plugins this plugin needs installed beside it, each carrying exactly one of `id` or `name`. */
+  dependencies?: ManifestDependency[];
   /** Declared permissions, surfaced at install and in dashboards. Not sandbox-enforced. */
   permissions?: string[];
   publish?: ManifestPublish;
