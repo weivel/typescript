@@ -1,5 +1,5 @@
 {
-  "id": "demo-store",
+  "importName": "demo-store",
   "api": 1,
   "entry": "dist/index.js",
   "displayName": "Demo Store",

@@ -32,9 +32,8 @@ export function typedAsTheSchemaDeclares(): LibraryFunction[] {
 describe("LibraryDeclaration", () => {
   it("reads a function's declared context", () => {
     const declaration: LibraryDeclaration = {
-      id: "echo",
+      importName: "echo",
       version: "0.1.0",
-      binary: "echo",
       release: "echo_release",
       services: [{ id: "echo", functions: [CONTEXTUAL] }],
     };

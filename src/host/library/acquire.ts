@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isPluginError, pluginError } from "../../engine/index.js";
 import type { PluginError } from "../../index.js";
-import { parseDeclaration } from "./declaration.js";
+import { libraryBinaryName, parseDeclaration } from "./declaration.js";
 import type { LibraryDeclaration } from "./declaration.js";
 import { STRICT_UTF8 } from "./strict-utf8.js";
 
@@ -79,7 +79,7 @@ function pinnedDigest(pin: LibraryPin, key: string, missingFix: string): string 
 
 function binaryAssetFor(pin: LibraryPin, declaration: LibraryDeclaration, platformKey: string): string {
   const extension = BINARY_EXTENSION[platformKey.split("-")[0]];
-  if (extension) return `${declaration.importName}-${platformKey}.${extension}`;
+  if (extension) return `${libraryBinaryName(declaration.importName)}-${platformKey}.${extension}`;
   throw refusal(pin, `no shared-library format is known for platform ${platformKey}`, "run the host on Windows, Linux or macOS");
 }
 

@@ -40,7 +40,7 @@ function hostWith(options: Partial<HostOptions> = {}): { host: ReturnType<typeof
   return { host, reported };
 }
 
-const PROVIDER: PluginManifest = { id: "a", api: 2, capabilities: ["screens"] };
+const PROVIDER: PluginManifest = { id: "a", name: "a", importName: "a", api: 2, capabilities: ["screens"] };
 
 describe("two hosts in one process", () => {
   it("share neither services nor diagnostics", () => {
@@ -56,7 +56,7 @@ describe("two hosts in one process", () => {
     context.services.register(context.service("a:late"), {});
     expect(first.reported.some((line) => line.includes("a:late"))).toBe(true);
     expect(second.reported).toEqual([]);
-    const later = second.host.contextFor({ id: "b", api: 2 }, runtime());
+    const later = second.host.contextFor({ id: "b", name: "b", importName: "b", api: 2 }, runtime());
     second.host.release("b");
     later.services.register(later.service("b:late"), {});
     expect(second.reported.some((line) => line.includes("b:late"))).toBe(true);
@@ -101,7 +101,7 @@ describe("contextFor", () => {
     context.homes();
     context.homes();
     expect(calls).toBe(2);
-    expect(host.contextFor({ id: "b", api: 2 }, runtime()).homes()).toEqual([]);
+    expect(host.contextFor({ id: "b", name: "b", importName: "b", api: 2 }, runtime()).homes()).toEqual([]);
   });
 
   it("leaves secrets and the portable path absent on a host that offers neither", () => {
@@ -167,9 +167,9 @@ describe("the fence", () => {
 });
 
 describe("a consumer reaches only what it declared", () => {
-  const PROVIDING: PluginManifest = { id: "calendar", api: 2, services: { provides: ["calendar:events"] } };
-  const UNDECLARED: PluginManifest = { id: "notes", api: 2 };
-  const DECLARING: PluginManifest = { id: "agenda", api: 2, services: { consumes: ["calendar:events", "clock"] } };
+  const PROVIDING: PluginManifest = { id: "calendar", name: "calendar", importName: "calendar", api: 2, services: { provides: ["calendar:events"] } };
+  const UNDECLARED: PluginManifest = { id: "notes", name: "notes", importName: "notes", api: 2 };
+  const DECLARING: PluginManifest = { id: "agenda", name: "agenda", importName: "agenda", api: 2, services: { consumes: ["calendar:events", "clock"] } };
 
   function registered(host: ReturnType<typeof createHost>): void {
     const provider = host.contextFor(PROVIDING, runtime());
@@ -233,7 +233,7 @@ describe("a consumer reaches only what it declared", () => {
 
   it("refuses a revoked plugin's undeclared call as undeclared, and only its declared want as late", async () => {
     const { host, reported } = hostWith();
-    const agenda = host.contextFor({ id: "agenda", api: 2, services: { consumes: ["clock"] } }, runtime());
+    const agenda = host.contextFor({ id: "agenda", name: "agenda", importName: "agenda", api: 2, services: { consumes: ["clock"] } }, runtime());
     host.release("agenda");
     const undeclared: unknown = await agenda.services.want(agenda.service("calendar:events")).catch((failure: unknown) => failure);
     agenda.services.watch(agenda.service("locale"), () => {});
@@ -318,7 +318,7 @@ describe("verifyActivation", () => {
 });
 
 describe("applications", () => {
-  const elsewhere: PluginManifest = { id: "t", api: 2, targets: ["forebay"] };
+  const elsewhere: PluginManifest = { id: "t", name: "t", importName: "t", api: 2, targets: ["forebay"] };
 
   it("takes the app as the one application when absent", () => {
     expect(hostWith().host.supports(elsewhere)).not.toBeNull();
