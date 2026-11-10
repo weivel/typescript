@@ -86,7 +86,7 @@ export function readDeployedManifests(pluginDir: string, wellKnownServices?: Rea
     const manifestPath = join(pluginDir, name);
     const filename = basename(name, ".json");
     try {
-      const manifest = assertManifest(JSON.parse(readFileSync(manifestPath, "utf-8")), ids(wellKnownServices));
+      const manifest = assertManifest(JSON.parse(readFileSync(manifestPath, "utf-8")), ids(wellKnownServices)) as PluginManifest;
       pendingLoad.push({ manifestPath, filename, manifest });
     } catch (error) {
       let detail: string;

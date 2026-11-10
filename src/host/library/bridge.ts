@@ -69,7 +69,7 @@ function bindDeclared(native: koffi.IKoffiLib, declaration: LibraryDeclaration):
   const bound = new Map<string, BoundFunction>();
   for (const service of declaration.services) {
     for (const fn of service.functions) {
-      const nativeFunction = bindSymbol(native, declaration.id, fn.symbol, JSON_KIND_RESULT, JSON_KIND_PARAMETERS) as JsonFunction;
+      const nativeFunction = bindSymbol(native, declaration.importName, fn.symbol, JSON_KIND_RESULT, JSON_KIND_PARAMETERS) as JsonFunction;
       bound.set(fn.symbol, { label: `${service.id}.${fn.name}`, native: nativeFunction, declared: fn });
     }
   }
@@ -160,11 +160,11 @@ export function openLibrary(
   contextProvider: LibraryContextProvider = processLibraryContext,
   seams: BridgeSeams = {},
 ): LoadedLibrary {
-  const native = loadBinary(binaryPath, declaration.id);
+  const native = loadBinary(binaryPath, declaration.importName);
   let release: ReleaseFunction;
   let functions: Map<string, BoundFunction>;
   try {
-    const boundRelease = bindSymbol(native, declaration.id, declaration.release, RELEASE_RESULT, RELEASE_PARAMETERS) as ReleaseFunction;
+    const boundRelease = bindSymbol(native, declaration.importName, declaration.release, RELEASE_RESULT, RELEASE_PARAMETERS) as ReleaseFunction;
     release = seams.wrapRelease ? seams.wrapRelease(boundRelease) : boundRelease;
     functions = bindDeclared(native, declaration);
   } catch (error) {
@@ -178,13 +178,13 @@ export function openLibrary(
       const bound = functions.get(symbol);
       if (closed || !bound) {
         const reason = closed ? "the library is closed" : `${symbol} is not a declared function`;
-        throw pluginError(declaration.id, `${symbol} cannot be called: ${reason}`, "call a declared function of an open library");
+        throw pluginError(declaration.importName, `${symbol} cannot be called: ${reason}`, "call a declared function of an open library");
       }
       const out: [NativePointer] = [null];
       const outLength: [number | bigint] = [0];
-      const input = encodeArgument(declaration.id, bound.label, withDeclaredContext(declaration.id, bound.label, bound.declared, argument, contextProvider));
+      const input = encodeArgument(declaration.importName, bound.label, withDeclaredContext(declaration.importName, bound.label, bound.declared, argument, contextProvider));
       const status = bound.native(input, input.length, out, outLength);
-      return answerOf(declaration.id, bound.label, status, takeResult(out[0], outLength[0], release));
+      return answerOf(declaration.importName, bound.label, status, takeResult(out[0], outLength[0], release));
     },
     close(): void {
       if (closed) return;

@@ -253,7 +253,7 @@ function refuseCollidingNames(declaration: LibraryDeclaration, generation: Gener
 
 /** The header interpolates the id and version, and a line terminator in either would end its comment. */
 function refuseHeaderBreakout(declaration: LibraryDeclaration, generation: Generation): void {
-  for (const field of ["id", "version"] as const) {
+  for (const field of ["importName", "version"] as const) {
     if (CONTROL_CHARACTER.test(declaration[field])) {
       refuse(generation, field, `is ${JSON.stringify(declaration[field])}, which carries a control character`, `remove control characters from the declaration's ${field}`);
     }
@@ -269,12 +269,12 @@ function refuseHeaderBreakout(declaration: LibraryDeclaration, generation: Gener
  * ever executes beyond the keys.
  */
 export function generateLibraryTypes(declaration: LibraryDeclaration): string {
-  const generation: Generation = { libraryId: declaration.id, imports: new Set(["ServiceType"]) };
+  const generation: Generation = { libraryId: declaration.importName, imports: new Set(["ServiceType"]) };
   refuseHeaderBreakout(declaration, generation);
   const services = declaration.services.map((service, index) => serviceSource(service, index, generation));
   refuseCollidingNames(declaration, generation);
   return [
-    `// Generated from the library.json of ${declaration.id} ${declaration.version}; regenerate it from the declaration rather than editing it.`,
+    `// Generated from the library.json of ${declaration.importName} ${declaration.version}; regenerate it from the declaration rather than editing it.`,
     `import type { ${[...generation.imports].sort().join(", ")} } from "${PUBLIC_ENTRY}";`,
     "",
     services.join("\n\n"),

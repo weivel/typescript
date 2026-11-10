@@ -105,7 +105,9 @@ function messageOf(line: string | undefined): Refusal | null {
 }
 
 function manifestOf(plugin: Record<string, unknown>): PluginManifest {
-  return { id: String(plugin.id), api: 1, services: { consumes: declarationsOf(plugin.consumes), provides: stringsOf(plugin.provides) } };
+  const id = String(plugin.id);
+  const importName = String(plugin.importName ?? plugin.id);
+  return { importName, id, name: importName, api: 1, services: { consumes: declarationsOf(plugin.consumes), provides: stringsOf(plugin.provides) } };
 }
 
 function declarationsOf(value: unknown): (string | ManifestRequirement)[] {
