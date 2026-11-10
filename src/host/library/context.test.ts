@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isPluginError } from "../../engine/index.js";
 import type { PluginRuntime } from "../../engine/index.js";
 import type { Plugin, PluginContext, PluginError, PluginManifest } from "../../index.js";
-import { ECHO_PIN } from "../__fixtures__/echo-pin.js";
+import { ECHO_PIN, stagedCache } from "../__fixtures__/echo-pin.js";
 import { startPlugins } from "../plugin-host.js";
 import { acquireLibrary, openLibrary } from "./index.js";
 import type { LibraryContext, LibraryDeclaration, LibraryPin, LoadedLibrary } from "./index.js";
@@ -44,7 +44,9 @@ function hostRuntime(): PluginRuntime {
 
 const CONSUMER_ENTRY = "/home/plugin/consumer.js";
 const CONSUMER_MANIFEST: PluginManifest = {
-  id: "consumer",
+  id: "local:consumer",
+  name: "consumer",
+  importName: "consumer",
   api: 1,
   entry: "dist/index.js",
   capabilities: [],
@@ -76,7 +78,7 @@ describe("a library function's declared context", () => {
   const opened: LoadedLibrary[] = [];
 
   beforeAll(async () => {
-    ({ binaryPath, declaration } = await acquireLibrary(ECHO_PIN, mkdtempSync(join(tmpdir(), "weivel-context-"))));
+    ({ binaryPath, declaration } = await acquireLibrary(ECHO_PIN, stagedCache("weivel-context-")));
   }, NETWORK_TIMEOUT_MS);
 
   afterAll(() => opened.forEach((library) => library.close()));
@@ -185,7 +187,7 @@ describe("a library function's declared context", () => {
       libraryContext: () => FACTS,
     });
 
-    expect(loaded.started).toEqual(["consumer"]);
+    expect(loaded.started).toEqual(["local:consumer"]);
     expect(seen.echo?.contextual({ a: 1 })).toEqual({ argument: { a: 1 }, context: { home: "/h" } });
     await loaded.stop();
   }, NETWORK_TIMEOUT_MS);

@@ -1,8 +1,7 @@
 {
   "$schema": "https://weivel.github.io/model/library.schema.json",
-  "id": "runtime",
+  "importName": "runtime",
   "version": "0.1.0",
-  "binary": "runtime",
   "release": "runtime_release",
   "services": [
     {

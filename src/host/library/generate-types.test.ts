@@ -37,9 +37,8 @@ function echoDeclaration(): LibraryDeclaration {
 
 function declarationWithResult(result: object | boolean, argument: object | boolean = { type: "object" }): LibraryDeclaration {
   return {
-    id: "fixture",
+    importName: "fixture",
     version: "1.0.0",
-    binary: "fixture",
     release: "fixture_release",
     services: [{ id: "app-registry", functions: [{ name: "get", symbol: "fixture_get", kind: "json", argument, result }] }],
   };
@@ -387,13 +386,13 @@ export function consume(ctx: PluginContext): string[] {
     }
   });
 
-  it("refuses a control character in the id or version the header names", () => {
+  it("refuses a control character in the import name or version the header names", () => {
     for (const version of ["1.0.0\nexport const injected = 1;", "1.0.0 x", "1.0.0\r"]) {
       const declaration = { ...declarationWithResult({ type: "string" }), version };
       expect(() => generateLibraryTypes(declaration), JSON.stringify(version)).toThrow("cannot generate types: version");
     }
-    const declaration = { ...declarationWithResult({ type: "string" }), id: "fixture\n" };
-    expect(() => generateLibraryTypes(declaration)).toThrow("cannot generate types: id");
+    const declaration = { ...declarationWithResult({ type: "string" }), importName: "fixture\n" };
+    expect(() => generateLibraryTypes(declaration)).toThrow("cannot generate types: importName");
   });
 
   it("refuses two services whose names collide", () => {

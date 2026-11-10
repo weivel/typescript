@@ -6,9 +6,14 @@ export type { LibraryDeclaration, LibraryFunction, LibraryService } from "./decl
 
 const DECLARATION_FILE = "library.json";
 
-function declaredId(candidate: unknown): string {
-  const id = typeof candidate === "object" && candidate !== null ? (candidate as { id?: unknown }).id : undefined;
-  return typeof id === "string" && id ? id : "library";
+function declaredImportName(candidate: unknown): string {
+  const importName = typeof candidate === "object" && candidate !== null ? (candidate as { importName?: unknown }).importName : undefined;
+  return typeof importName === "string" && importName ? importName : "library";
+}
+
+/** @implNote A C symbol and a file stem cannot carry a hyphen or a dot, so both become underscores. */
+export function libraryBinaryName(importName: string): string {
+  return importName.replace(/[-.]/g, "_");
 }
 
 function parsedJson(text: string): unknown {
@@ -25,5 +30,5 @@ export function parseDeclaration(text: string): LibraryDeclaration {
   if (validateLibraryDeclaration(candidate)) return candidate as LibraryDeclaration;
   const issues = schemaIssues(validateLibraryDeclaration.errors ?? []);
   const detail = issues.map((issue) => issue.message).join("; ");
-  throw pluginError(declaredId(candidate), `${DECLARATION_FILE}: ${detail}`, issues[0]?.fix ?? "correct library.json against library.schema.json");
+  throw pluginError(declaredImportName(candidate), `${DECLARATION_FILE}: ${detail}`, issues[0]?.fix ?? "correct library.json against library.schema.json");
 }

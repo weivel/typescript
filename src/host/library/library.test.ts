@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { isPluginError } from "../../engine/index.js";
 import type { PluginRuntime } from "../../engine/index.js";
 import type { Plugin, PluginContext, PluginError, PluginManifest } from "../../index.js";
-import { ECHO_PIN } from "../__fixtures__/echo-pin.js";
+import { ECHO_PIN, stagedCache } from "../__fixtures__/echo-pin.js";
 import { startPlugins } from "../plugin-host.js";
 import { jsonOf } from "./bridge.js";
 import { acquireLibrary, currentPlatformKey, openLibrary, parseDeclaration } from "./index.js";
@@ -17,7 +17,7 @@ const NETWORK_TIMEOUT_MS = 60000;
 type EchoService = Record<"echo" | "fail" | "repeat" | "garbage", (argument: unknown) => unknown>;
 
 function freshCache(): string {
-  return mkdtempSync(join(tmpdir(), "weivel-library-"));
+  return stagedCache("weivel-library-");
 }
 
 function runtime(): PluginRuntime {
@@ -30,7 +30,7 @@ function runtime(): PluginRuntime {
 }
 
 function manifest(id: string, extra: Partial<PluginManifest> = {}): PluginManifest {
-  return { id, api: 1, entry: "dist/index.js", capabilities: [], ...extra };
+  return { id, name: id, importName: id, api: 1, entry: "dist/index.js", capabilities: [], ...extra };
 }
 
 function scanOf(...plugins: Array<{ manifest: PluginManifest; module: unknown }>) {
@@ -353,7 +353,7 @@ describe("acquireLibrary", () => {
   it("refuses a download that does not finish within its deadline, naming the URL", async () => {
     const refusal = await rejectionOf(acquireLibrary(ECHO_PIN, freshCache(), neverAnswers, currentPlatformKey(), { downloadDeadlineMs: 50 }));
 
-    expect(refusal.detail).toContain("https://github.com/weivel/bindings/releases/download/v0.1.1/library.json did not finish within 50 ms");
+    expect(refusal.detail).toMatch(/^https:\/\/github\.com\/weivel\/bindings\/releases\/download\/v0\.1\.1\/echo-\S+ did not finish within 50 ms$/);
   });
 
   it("refuses a platform key that is not <os>-<arch> in lowercase letters and digits", async () => {
@@ -373,8 +373,8 @@ describe("a library's answer", () => {
 
 describe("parseDeclaration", () => {
   it("names each schema violation in the refusal's detail", () => {
-    const refusal = refusalOf(() => parseDeclaration(JSON.stringify({ id: "Echo", version: "", binary: "echo", release: "echo_release", services: [] })));
-    expect(refusal.detail).toContain("id");
+    const refusal = refusalOf(() => parseDeclaration(JSON.stringify({ importName: "Echo", version: "", release: "echo_release", services: [] })));
+    expect(refusal.detail).toContain("importName");
     expect(refusal.detail).toContain("version");
     expect(refusal.detail).toContain("services");
   });

@@ -46,7 +46,7 @@ describe("loading a manifest-declared plugin end to end", () => {
   it("activates providers before consumers, from real sidecars and real imports", async () => {
     const loaded = await startPlugins({ app: "test", pluginDir: deployedHome(), runtimeFor });
 
-    expect(loaded.started).toEqual(["demo-store", "demo-reader"]);
+    expect(loaded.started).toEqual(["local:demo-store", "local:demo-reader"]);
     expect(loaded.host.service("demo-store:items")).toBeDefined();
   });
 
@@ -54,13 +54,13 @@ describe("loading a manifest-declared plugin end to end", () => {
     const loaded = await startPlugins({ app: "test", pluginDir: deployedHome(), runtimeFor });
 
     const [settings] = loaded.host.capability("settings");
-    expect(settings.pluginId).toBe("demo-store");
+    expect(settings.pluginId).toBe("local:demo-store");
     expect((settings.implementation as FixtureSettings).schema()).toEqual({
       fields: [{ key: "limit", type: "number", label: "Limit" }],
     });
 
     const [commands] = loaded.host.capability("commands");
-    expect(commands.pluginId).toBe("demo-reader");
+    expect(commands.pluginId).toBe("local:demo-reader");
     expect(await (commands.implementation as FixtureCommands).commands()).toEqual([
       { name: "demo", description: "demo over 2 items" },
     ]);
@@ -69,7 +69,7 @@ describe("loading a manifest-declared plugin end to end", () => {
   it("quarantines only the plugin that threw", async () => {
     const loaded = await startPlugins({ app: "test", pluginDir: deployedHome(), runtimeFor });
 
-    expect(loaded.quarantined.map((error) => error.pluginId)).toEqual(["demo-broken"]);
+    expect(loaded.quarantined.map((error) => error.pluginId)).toEqual(["local:demo-broken"]);
     expect(loaded.quarantined[0].detail).toContain("cannot reach its data directory");
     expect(loaded.host.capability("screens")).toEqual([]);
     expect(loaded.started).toHaveLength(2);
@@ -79,13 +79,13 @@ describe("loading a manifest-declared plugin end to end", () => {
     const loaded = await startPlugins({ app: "test", pluginDir: deployedHome(), runtimeFor });
     const rows = Object.fromEntries(ledgerRows(loaded).map((row) => [row.pluginId, row]));
 
-    expect(rows["demo-store"].status).toBe("active");
-    expect(rows["demo-store"].services.provides).toEqual(["demo-store:items"]);
-    expect(rows["demo-store"].topics).toEqual(["config.changed"]);
-    expect(rows["demo-store"].permissions).toEqual(["network"]);
-    expect(rows["demo-reader"].services.consumes).toEqual(["demo-store:items"]);
-    expect(rows["demo-reader"].unresolved).toEqual([]);
-    expect(rows["demo-broken"].status).toBe("broken");
+    expect(rows["local:demo-store"].status).toBe("active");
+    expect(rows["local:demo-store"].services.provides).toEqual(["demo-store:items"]);
+    expect(rows["local:demo-store"].topics).toEqual(["config.changed"]);
+    expect(rows["local:demo-store"].permissions).toEqual(["network"]);
+    expect(rows["local:demo-reader"].services.consumes).toEqual(["demo-store:items"]);
+    expect(rows["local:demo-reader"].unresolved).toEqual([]);
+    expect(rows["local:demo-broken"].status).toBe("broken");
   });
 
   it("runs a declared action through the bounded call path", async () => {
