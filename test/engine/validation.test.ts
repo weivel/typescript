@@ -23,7 +23,7 @@ describe("manifest validation", () => {
     expect(isPluginError(thrown)).toBe(true);
     const failure = thrown as { pluginId: string; detail: string; fix: string };
     expect(failure.pluginId).toBe("Bad Id");
-    expect(failure.detail).toContain("id");
+    expect(failure.detail).toContain("importName");
     expect(failure.detail).toContain("api");
     expect(failure.fix.length).toBeGreaterThan(0);
   });
