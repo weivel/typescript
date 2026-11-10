@@ -1,5 +1,5 @@
 import type { ErrorObject } from "ajv";
-import type { PluginManifest } from "../index.js";
+import type { SourceManifest } from "../index.js";
 import { descriptionIssues } from "./description.js";
 import { pluginError } from "./errors.js";
 import { validateAgainstSchema } from "./schema.generated.js";
@@ -15,7 +15,7 @@ type ServiceSide = "provides" | "consumes";
 const SERVICE_SIDES: readonly ServiceSide[] = ["provides", "consumes"];
 
 /**
- * Checks a manifest against the published schema, then against `VALIDATION.md` V1, V2 and V3.
+ * Checks a source manifest, one that states no identity, against the published schema, then against `VALIDATION.md` V1, V2 and V3.
  *
  * @remarks
  * V1 and V2 run only when the schema passes: once a field has the wrong type there is nothing
@@ -38,20 +38,20 @@ export function schemaIssues(errors: readonly ErrorObject[]): ValidationIssue[] 
   return firstPerPath(withoutAlternativeNoise([...errors]).flatMap(issueOf));
 }
 
-/** Returns the manifest itself, or throws a refusal attributed to its id carrying the first issue's fix. */
-export function assertManifest(manifest: unknown, wellKnownServices?: readonly string[]): PluginManifest {
+/** Returns the manifest itself, or throws a refusal attributed to its import name carrying the first issue's fix. */
+export function assertManifest(manifest: unknown, wellKnownServices?: readonly string[]): SourceManifest {
   const issues = validateManifest(manifest, wellKnownServices);
   const [first] = issues;
   if (first === undefined) {
-    return manifest as PluginManifest;
+    return manifest as SourceManifest;
   }
   const detail = issues.map((issue) => issue.message).join("; ");
   throw pluginError(declaredId(manifest), `plugin.json: ${detail}`, first.fix);
 }
 
 function declaredId(manifest: unknown): string {
-  const id = recordOf(manifest)?.id;
-  return typeof id === "string" ? id : "manifest";
+  const importName = recordOf(manifest)?.importName;
+  return typeof importName === "string" ? importName : "manifest";
 }
 
 /**

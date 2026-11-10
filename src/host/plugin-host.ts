@@ -305,8 +305,8 @@ function closeAll(libraries: readonly LoadedLibrary[]): void {
 
 function collisionRefusal(declaration: LibraryDeclaration, pin: LibraryPin, serviceId: string, existing: string): PluginError {
   return pluginError(
-    declaration.id,
-    `service "${serviceId}" is offered by both ${existing} and library ${declaration.id} (${pin.repository}@${pin.tag}), so the library is refused with every service it offers`,
+    declaration.importName,
+    `service "${serviceId}" is offered by both ${existing} and library ${declaration.importName} (${pin.repository}@${pin.tag}), so the library is refused with every service it offers`,
     `rename the service in one library's library.json, or stop ${existing} offering "${serviceId}"`,
   );
 }
@@ -340,7 +340,7 @@ async function openLibraries(
         quarantined.push(collisionRefusal(declaration, pin, colliding.id, providers.get(colliding.id) as string));
         continue;
       }
-      for (const service of offered) providers.set(service.id, `library ${declaration.id} (${pin.repository}@${pin.tag})`);
+      for (const service of offered) providers.set(service.id, `library ${declaration.importName} (${pin.repository}@${pin.tag})`);
       opened.libraries.push(library);
       opened.services.push(...offered);
     } catch (error) {

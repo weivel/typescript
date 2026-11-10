@@ -1,4 +1,4 @@
-import { createHost, isPluginError } from "../../engine/index.js";
+import { createHost, isPluginError, localIdentity } from "../../engine/index.js";
 import type { PluginRuntime } from "../../engine/index.js";
 import type { ConfigSetOptions, PluginConfig, PluginContext, PluginPaths, PluginSecrets } from "../../index.js";
 import type { Operation } from "../operation.js";
@@ -10,7 +10,7 @@ interface Written {
 
 type Refusal = { detail: string; fix: string } | { message: string };
 
-const MANIFEST = { id: "config-ledger", api: 2 };
+const MANIFEST = { ...localIdentity("config-ledger"), importName: "config-ledger", api: 2 };
 
 const UNUSED_SECRETS: PluginSecrets = {
   get: async () => undefined,

@@ -7,6 +7,8 @@ export { compatibility } from "./compatibility.js";
 export type { HostIdentity, Incompatibility } from "./compatibility.js";
 export { validateManifest, assertManifest, schemaIssues } from "./validation.js";
 export type { ValidationIssue } from "./validation.js";
+export { isIdentityId, localIdentity, resolveManifest, unboundServices } from "./identity.js";
+export type { Identity } from "./identity.js";
 export { readRequirement, readOffer } from "./requirements.js";
 export type { ServiceRequirement, ServiceOffer } from "./requirements.js";
 export { order, unitsFromManifests, activationOrder } from "./activation.js";

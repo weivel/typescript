@@ -79,7 +79,7 @@ function pinnedDigest(pin: LibraryPin, key: string, missingFix: string): string 
 
 function binaryAssetFor(pin: LibraryPin, declaration: LibraryDeclaration, platformKey: string): string {
   const extension = BINARY_EXTENSION[platformKey.split("-")[0]];
-  if (extension) return `${declaration.binary}-${platformKey}.${extension}`;
+  if (extension) return `${declaration.importName}-${platformKey}.${extension}`;
   throw refusal(pin, `no shared-library format is known for platform ${platformKey}`, "run the host on Windows, Linux or macOS");
 }
 

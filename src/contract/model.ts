@@ -227,14 +227,14 @@ export interface PluginPaths {
 }
 
 /**
- * The contents of a repo's plugin.json.
+ * The contents of a repo's plugin.json, before the repository's identity is applied.
  *
  * @remarks
  * No index signature and no additionalProperties: an author gets excess-property checking
  * while writing one, and the runtime validator still ignores fields it does not know, so a manifest
  * written against a later version loads on today's host.
  */
-export interface PluginManifest {
+export interface SourceManifest {
   /**
    * Pointer at the published manifest schema, for an editor's completion and validation.
    *
@@ -275,8 +275,8 @@ export interface PluginManifest {
    * learning what any of the ids name.
    */
   icons?: Record<string, string>;
-  /** The plugin's permanent identity, matching its repository name. */
-  id: string;
+  /** The name other plugins import this plugin by, fixed by the plugin itself. */
+  importName: string;
   /** The install method this listing is a provider for, for example `npm`. */
   installMethod?: string;
   /** What this manifest describes. Absent means a plugin; a loader is a host. */
@@ -541,6 +541,20 @@ export interface PluginSecrets {
   set(name: string, value: string): Promise<void>;
 }
 
+/**
+ * A manifest once its repository identity is applied.
+ *
+ * @remarks
+ * `id` and `name` come from outside the repository, never from its plugin.json, so a manifest cannot
+ * claim another plugin's identity.
+ */
+export interface PluginManifest extends SourceManifest {
+  /** The repository identity, for example `github:123`, supplied by whoever loaded the manifest. */
+  id: string;
+  /** The repository's name, supplied with the identity. */
+  name: string;
+}
+
 /** One service a plugin asks for, and what its absence or its shortfall costs. */
 export interface ManifestRequirement {
   /**
@@ -559,6 +573,8 @@ export interface ManifestRequirement {
    * is what writing the bare id means.
    */
   optional?: boolean;
+  /** The repository identity of the plugin this one takes the service from. Absent means any provider. */
+  provider?: string;
 }
 
 /** One service a plugin registers, with what it claims before it is running to answer for itself. */

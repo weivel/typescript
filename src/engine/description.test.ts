@@ -5,7 +5,7 @@ import { validateManifest } from "./validation.js";
 const call = { service: "demo:screens", method: "refresh" };
 
 function manifestWith(extra: Record<string, unknown>): Record<string, unknown> {
-  return { id: "demo", api: 2, services: { provides: ["demo:screens"] }, ...extra };
+  return { importName: "demo", api: 2, services: { provides: ["demo:screens"] }, ...extra };
 }
 
 function viewOf(...nodes: Record<string, unknown>[]): Record<string, unknown> {
