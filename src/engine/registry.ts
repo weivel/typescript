@@ -57,6 +57,8 @@ export interface ServiceHubOptions {
   vocabulary?: readonly ConstraintEntry[];
   /** The namespace a plugin's own service ids carry, which is its import name; absent means the id itself. */
   namespaceOf?: (pluginId: string) => string;
+  /** Told when a registration is withheld from a consumer bound to another provider; the host reports it once per consumer and service. */
+  mismatch?: (consumerId: string, serviceId: string, provider: string, owner: string) => void;
 }
 
 /**
@@ -125,12 +127,15 @@ class Entry {
 
 interface Waiter {
   readonly pluginId: string;
+  readonly provider: string | undefined;
   readonly resolve: (service: unknown) => void;
   readonly reject: (reason: unknown) => void;
   cancelTimer: () => void;
 }
 
 interface Watcher {
+  readonly pluginId: string;
+  readonly provider: string | undefined;
   readonly listener: WatchListener;
 }
 
@@ -150,6 +155,7 @@ export class ServiceHub {
   private readonly wellKnown: readonly string[];
   private readonly vocabulary: readonly ConstraintEntry[];
   private readonly namespaceOf: (pluginId: string) => string;
+  private readonly onMismatch: NonNullable<ServiceHubOptions["mismatch"]>;
   private readonly constrained = new Map<string, Set<ConstrainedWant>>();
   private readonly entries = new Map<string, Entry>();
   private readonly waiters = new Map<string, Set<Waiter>>();
@@ -164,6 +170,7 @@ export class ServiceHub {
     this.vocabulary = [...(options.vocabulary ?? [])];
     this.handles = options.handles ?? unwrappedHandles(options.diagnostics);
     this.namespaceOf = options.namespaceOf ?? ((pluginId) => pluginId);
+    this.onMismatch = options.mismatch ?? (() => {});
   }
 
   /**
@@ -175,14 +182,14 @@ export class ServiceHub {
    * `register` and `watch` are inert, a fenced `want` is rejected with the fence's own reason, and
    * `ids` lists only what the fence lets the consumer reach.
    */
-  forConsumer(pluginId: string, fence: Fence = OPEN): ConsumerRegistry {
+  forConsumer(pluginId: string, fence: Fence = OPEN, providerOf: (serviceId: string) => string | undefined = () => undefined): ConsumerRegistry {
     const want = (wanted: string | ServiceRequirement, limit?: number | Budget): Promise<unknown> => {
       const id = typeof wanted === "object" ? wanted.id : wanted;
       const refusal = fence.refusal("want", id);
       if (refusal !== null) return refusedWant(refusal);
       return typeof wanted === "object"
-        ? this.awaitUnderConstraints(pluginId, wanted, limit)
-        : this.awaitService(pluginId, wanted, typeof limit === "number" ? limit : undefined);
+        ? this.awaitUnderConstraints(pluginId, wanted, limit, providerOf(id))
+        : this.awaitService(pluginId, wanted, typeof limit === "number" ? limit : undefined, providerOf(id));
     };
     const register = (id: string, service: unknown, ...advertised: [Record<string, number> | null] | []): (() => void) => {
       if (fence.refusal("registration", id) !== null) return () => {};
@@ -197,7 +204,7 @@ export class ServiceHub {
         return this.get(id);
       },
       want,
-      watch: (id, listener) => (fence.refusal("watch", id) !== null ? () => {} : this.addWatcher(pluginId, id, listener)),
+      watch: (id, listener) => (fence.refusal("watch", id) !== null ? () => {} : this.addWatcher(pluginId, id, listener, providerOf(id))),
       register,
       ids: () => this.ids().filter((id) => fence.reaches(id)),
     };
@@ -296,23 +303,41 @@ export class ServiceHub {
   private announceArrival(id: string): void {
     const awaited = (this.waiters.get(id)?.size ?? 0) > 0;
     const watched = (this.watchers.get(id)?.size ?? 0) > 0;
-    if (!awaited && !watched) return;
+    const owner = this.entries.get(id)?.owner;
+    if ((!awaited && !watched) || owner === undefined) return;
     const service = this.get(id);
     if (service === undefined) return;
-    const pending = this.waiters.get(id);
-    this.waiters.delete(id);
-    for (const waiter of pending ?? []) {
+    const stillWaiting = new Set<Waiter>();
+    for (const waiter of this.waiters.get(id) ?? []) {
+      if (!this.accepts(waiter.pluginId, id, waiter.provider, owner)) {
+        stillWaiting.add(waiter);
+        continue;
+      }
       waiter.cancelTimer();
       waiter.resolve(service);
     }
-    this.notifyWatchers(id, service, "register");
+    if (stillWaiting.size > 0) this.waiters.set(id, stillWaiting);
+    else this.waiters.delete(id);
+    this.notifyWatchers(id, service, "register", owner);
+  }
+
+  /**
+   * Whether a registration by `owner` may reach a consumer bound to `provider`.
+   *
+   * @implNote A mismatch is handed to the host, which keeps the once-per-consumer-and-service
+   * ledger, so a consumer waiting through many wrong registrations is reported once.
+   */
+  private accepts(consumerId: string, serviceId: string, provider: string | undefined, owner: Owner): boolean {
+    if (provider === undefined || owner === provider) return true;
+    this.onMismatch(consumerId, serviceId, provider, owner === HOST ? "the host" : owner);
+    return false;
   }
 
   private unregister(entry: Entry): void {
     if (this.entries.get(entry.serviceId) !== entry) return;
     this.entries.delete(entry.serviceId);
     entry.revokeAll();
-    this.notifyWatchers(entry.serviceId, undefined, "unregister");
+    this.notifyWatchers(entry.serviceId, undefined, "unregister", entry.owner);
   }
 
   /**
@@ -320,13 +345,14 @@ export class ServiceHub {
    * pending want, and a plugin that asked and dropped the promise would otherwise crash Node with
    * an unhandled rejection. A caller that chains on it still sees the rejection.
    */
-  private awaitService(pluginId: string, id: string, timeoutMillis: number | undefined): Promise<unknown> {
+  private awaitService(pluginId: string, id: string, timeoutMillis: number | undefined, provider: string | undefined): Promise<unknown> {
     this.recorder?.consumed(pluginId, id);
-    const now = this.get(id);
+    const owner = this.entries.get(id)?.owner;
+    const now = owner !== undefined && this.accepts(pluginId, id, provider, owner) ? this.get(id) : undefined;
     const asked =
       now !== undefined
         ? Promise.resolve(now)
-        : new Promise<unknown>((resolve, reject) => this.enqueue(pluginId, id, timeoutMillis, resolve, reject));
+        : new Promise<unknown>((resolve, reject) => this.enqueue(pluginId, id, timeoutMillis, provider, resolve, reject));
     asked.catch(() => {});
     return asked;
   }
@@ -336,12 +362,17 @@ export class ServiceHub {
    * left running for a stopped plugin could resolve into a plugin that no longer exists. The no-op
    * catch is the plain `want`'s, for the same unhandled rejection.
    */
-  private awaitUnderConstraints(pluginId: string, requirement: ServiceRequirement, limit: number | Budget | undefined): Promise<unknown> {
+  private awaitUnderConstraints(
+    pluginId: string,
+    requirement: ServiceRequirement,
+    limit: number | Budget | undefined,
+    provider: string | undefined,
+  ): Promise<unknown> {
     this.recorder?.consumed(pluginId, requirement.id);
     const budget: Budget = typeof limit === "object" ? limit : { budgetMillis: 0, pollMillis: 0 };
     const running = this.constrained.get(pluginId) ?? new Set<ConstrainedWant>();
     this.constrained.set(pluginId, running);
-    const want: ConstrainedWant = new ConstrainedWant(this.wantSeam(), pluginId, requirement, budget, () => {
+    const want: ConstrainedWant = new ConstrainedWant(this.wantSeam(pluginId, provider), pluginId, requirement, budget, () => {
       running.delete(want);
       if (running.size === 0 && this.constrained.get(pluginId) === running) this.constrained.delete(pluginId);
     });
@@ -351,18 +382,18 @@ export class ServiceHub {
     return asked;
   }
 
-  private wantSeam(): WantSeam {
+  private wantSeam(pluginId: string, provider: string | undefined): WantSeam {
     return {
       scheduler: this.scheduler,
       diagnostics: this.diagnostics,
       vocabulary: this.vocabulary,
-      offering: (serviceId) => this.offeringOf(serviceId),
+      offering: (serviceId) => this.offeringOf(serviceId, pluginId, provider),
     };
   }
 
-  private offeringOf(serviceId: string): Offering | undefined {
+  private offeringOf(serviceId: string, consumerId: string, provider: string | undefined): Offering | undefined {
     const entry = this.entries.get(serviceId);
-    if (entry === undefined) return undefined;
+    if (entry === undefined || !this.accepts(consumerId, serviceId, provider, entry.owner)) return undefined;
     return {
       advertised: entry.advertised,
       attributes: () => entry.provider.attributes(),
@@ -374,10 +405,11 @@ export class ServiceHub {
     pluginId: string,
     id: string,
     timeoutMillis: number | undefined,
+    provider: string | undefined,
     resolve: (service: unknown) => void,
     reject: (reason: unknown) => void,
   ): void {
-    const waiter: Waiter = { pluginId, resolve, reject, cancelTimer: () => {} };
+    const waiter: Waiter = { pluginId, provider, resolve, reject, cancelTimer: () => {} };
     if (timeoutMillis !== undefined) {
       waiter.cancelTimer = this.scheduler.schedule(() => {
         this.waiters.get(id)?.delete(waiter);
@@ -396,9 +428,9 @@ export class ServiceHub {
     this.waiters.set(id, waiting);
   }
 
-  private addWatcher(pluginId: string, id: string, listener: WatchListener): () => void {
+  private addWatcher(pluginId: string, id: string, listener: WatchListener, provider: string | undefined): () => void {
     this.recorder?.consumed(pluginId, id);
-    const watcher: Watcher = { listener };
+    const watcher: Watcher = { pluginId, provider, listener };
     const installed = this.watchers.get(id) ?? new Set<Watcher>();
     installed.add(watcher);
     this.watchers.set(id, installed);
@@ -418,11 +450,15 @@ export class ServiceHub {
    * @implNote A watcher that throws is reported and the rest still hear, because one bad consumer
    * must not stop the others learning of a registration. One removed mid-iteration is skipped.
    */
-  private notifyWatchers(id: string, service: unknown, event: WatchEvent): void {
+  private notifyWatchers(id: string, service: unknown, event: WatchEvent, owner: Owner): void {
     const installed = this.watchers.get(id);
     if (installed === undefined) return;
     for (const watcher of [...installed]) {
       if (!installed.has(watcher)) continue;
+      if (watcher.provider !== undefined && watcher.provider !== owner) {
+        if (event === "register") this.accepts(watcher.pluginId, id, watcher.provider, owner);
+        continue;
+      }
       try {
         watcher.listener(service, event);
       } catch (failure) {
