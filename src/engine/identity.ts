@@ -6,9 +6,9 @@ export interface Identity {
   name: string;
 }
 
-const IDENTITY_ID = /^(local:[^/\s]+|[a-z][a-z0-9-]*(@[a-z0-9.-]+)?:[0-9]+)(\/[a-z0-9._-]+)*$/;
+const IDENTITY_ID = /^(local:[^/\s]+|[a-z][a-z0-9-]*(@[a-z0-9.-]+)?:[0-9]+)(\/(?!\.{1,2}(\/|(?![\s\S])))[a-z0-9._-]+)*(?![\s\S])/;
 
-/** True for `local:<name>`, or a forge (with an optional `@host`) and a numeric repository id, then any path segments. */
+/** True for `local:<name>`, or a forge (with an optional `@host`) and a numeric repository id, then any path segments, none of them `.` or `..`. */
 export function isIdentityId(value: string): boolean {
   return IDENTITY_ID.test(value);
 }

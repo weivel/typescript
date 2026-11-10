@@ -29,6 +29,15 @@ describe("isIdentityId", () => {
     expect(isIdentityId("github:")).toBe(false);
     expect(isIdentityId("GitHub:1")).toBe(false);
   });
+
+  it("refuses a dot segment and accepts a name that only contains dots", () => {
+    expect(isIdentityId("github:1/..")).toBe(false);
+    expect(isIdentityId("github:1/.")).toBe(false);
+    expect(isIdentityId("github:1/../calendar_identity")).toBe(false);
+    expect(isIdentityId("github:1/a/../b")).toBe(false);
+    expect(isIdentityId("github:1/.hidden")).toBe(true);
+    expect(isIdentityId("github:1/a..b")).toBe(true);
+  });
 });
 
 describe("unboundServices", () => {
