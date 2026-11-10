@@ -134,7 +134,6 @@ interface Waiter {
 }
 
 interface Watcher {
-  readonly pluginId: string;
   readonly provider: string | undefined;
   readonly listener: WatchListener;
 }
@@ -430,7 +429,7 @@ export class ServiceHub {
 
   private addWatcher(pluginId: string, id: string, listener: WatchListener, provider: string | undefined): () => void {
     this.recorder?.consumed(pluginId, id);
-    const watcher: Watcher = { pluginId, provider, listener };
+    const watcher: Watcher = { provider, listener };
     const installed = this.watchers.get(id) ?? new Set<Watcher>();
     installed.add(watcher);
     this.watchers.set(id, installed);
@@ -449,16 +448,15 @@ export class ServiceHub {
   /**
    * @implNote A watcher that throws is reported and the rest still hear, because one bad consumer
    * must not stop the others learning of a registration. One removed mid-iteration is skipped.
+   * @implNote A watcher bound to another provider is skipped without a report: watching is passive,
+   * and a report would turn a watch that is merely still waiting into a refused one.
    */
   private notifyWatchers(id: string, service: unknown, event: WatchEvent, owner: Owner): void {
     const installed = this.watchers.get(id);
     if (installed === undefined) return;
     for (const watcher of [...installed]) {
       if (!installed.has(watcher)) continue;
-      if (watcher.provider !== undefined && watcher.provider !== owner) {
-        if (event === "register") this.accepts(watcher.pluginId, id, watcher.provider, owner);
-        continue;
-      }
+      if (watcher.provider !== undefined && watcher.provider !== owner) continue;
       try {
         watcher.listener(service, event);
       } catch (failure) {
