@@ -21,7 +21,7 @@ export type { Fence, ServiceAttempt } from "./registry.js";
 export { budget } from "./constraints.js";
 export type { Budget, ConstraintEntry, ServiceProvider } from "./constraints.js";
 export { PluginLedger } from "./ledger.js";
-export type { LedgerError, LedgerRow, PluginStatus, ServiceRefusal } from "./ledger.js";
+export type { DeclarationRefusal, LedgerError, LedgerRow, PluginStatus } from "./ledger.js";
 export type { PluginRuntime, RuntimeEvents } from "./context.js";
 export { createHost, REAL_TIME } from "./host.js";
 export type { CapabilityRecord, Host, HostLedger, HostOptions } from "./host.js";

@@ -61,10 +61,20 @@ describe("manifest validation", () => {
   });
 
   it("reports every later occurrence of a repeated item", () => {
-    const paths = (capabilities: string[]) =>
-      validateManifest({ importName: "a", api: 2, entry: "x.js", capabilities }).map((issue) => issue.path);
-    expect(paths(["x", "x", "x"])).toEqual(["capabilities[1]", "capabilities[2]"]);
-    expect(paths(["a", "b", "a", "b"])).toEqual(["capabilities[2]", "capabilities[3]"]);
+    const paths = (provides: string[]) =>
+      validateManifest({ importName: "a", api: 2, entry: "x.js", capabilities: { provides } }).map((issue) => issue.path);
+    expect(paths(["x", "x", "x"])).toEqual(["capabilities.provides[1]", "capabilities.provides[2]"]);
+    expect(paths(["a", "b", "a", "b"])).toEqual(["capabilities.provides[2]", "capabilities.provides[3]"]);
+  });
+
+  it("refuses the flat capabilities list with a fix naming the object form", () => {
+    const issues = validateManifest({ importName: "a", api: 2, entry: "x.js", capabilities: ["screens"] });
+    expect(issues.map((issue) => issue.path)).toEqual(["capabilities"]);
+    expect(issues[0]!.fix).toContain("provides");
+  });
+
+  it("needs no entry for a plugin that only consumes capabilities", () => {
+    expect(validateManifest({ importName: "a", api: 2, capabilities: { consumes: ["screens"] } })).toEqual([]);
   });
 
   it("names a repeated bare service once when both rules refuse it", () => {

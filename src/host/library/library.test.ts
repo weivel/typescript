@@ -30,7 +30,7 @@ function runtime(): PluginRuntime {
 }
 
 function manifest(id: string, extra: Partial<PluginManifest> = {}): PluginManifest {
-  return { id, name: id, importName: id, api: 1, entry: "dist/index.js", capabilities: [], ...extra };
+  return { id, name: id, importName: id, api: 1, entry: "dist/index.js", capabilities: { provides: [] }, ...extra };
 }
 
 function scanOf(...plugins: Array<{ manifest: PluginManifest; module: unknown }>) {

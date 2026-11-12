@@ -3,5 +3,5 @@
   "api": 1,
   "entry": "dist/index.js",
   "displayName": "Demo Broken",
-  "capabilities": ["screens"]
+  "capabilities": { "provides": ["screens"] }
 }

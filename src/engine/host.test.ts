@@ -46,7 +46,7 @@ describe("a bound service", () => {
     providerOfEvents(host, "github:2", "calendar");
     const consumer = consumerBoundTo(host, "github:1");
     expect(consumer.services.get(consumer.service("calendar:events"))).toBeUndefined();
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "agenda", serviceId: "calendar:events" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "agenda", id: "calendar:events" }]);
     expect(diagnostics.join("\n")).toContain("github:1");
     expect(diagnostics.join("\n")).toContain("github:2");
   });
@@ -81,7 +81,7 @@ describe("a bound service that registers after the consumer asks", () => {
     const asked = consumer.services.want(consumer.service("calendar:events"));
     providerOfEvents(host, "github:2", "calendar");
     expect(await settledState(asked)).toBe("pending");
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "agenda", serviceId: "calendar:events" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "agenda", id: "calendar:events" }]);
     host.release("github:2");
     providerOfEvents(host, "github:1", "calendar");
     expect(await settledState(asked)).toBe("settled");

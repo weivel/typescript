@@ -45,6 +45,8 @@ export interface ManifestConfig {
  * of process without changing plugin code.
  */
 export interface PluginContext {
+  /** How this plugin sees the implementations of the capabilities it consumes. */
+  readonly capabilities: Capabilities;
   /**
    * The typed key for a capability id, so a plugin can provide one without linking the library
    * that mints it.
@@ -129,6 +131,33 @@ export interface Services {
    * consumer is still holding the old one, and only a watcher sees that.
    */
   watch<T>(type: ServiceType<T>, listener: ((a: T, b: string) => void)): () => void;
+}
+
+/**
+ * How a plugin sees the implementations of a capability it consumes.
+ *
+ * @remarks
+ * An implementation is answered from the moment its plugin's activation is verified, never from the
+ * moment it is provided, so a consumer is never handed one the host is about to quarantine for a
+ * declaration mismatch. Only the ids the manifest lists under `capabilities.consumes` or
+ * `capabilities.provides` are answered; any other id answers nothing and is reported.
+ */
+export interface Capabilities {
+  /**
+   * Every verified implementation of this capability right now, in the order their plugins'
+   * activations were verified. Empty means none right now.
+   */
+  all<T>(type: CapabilityType<T>): T[];
+  /**
+   * Reports every implementation of this capability that joins or leaves from now on, until the
+   * returned function is called. The listener is handed the implementation and either "provide" or
+   * "withdraw"; on the latter it is the implementation that left.
+   *
+   * @remarks
+   * Future changes only, as `Services.watch` reports them, so a consumer pairs it with `all` to
+   * learn what is already there.
+   */
+  watch<T>(type: CapabilityType<T>, listener: ((a: T, b: string) => void)): () => void;
 }
 
 /**
@@ -268,15 +297,15 @@ export interface SourceManifest {
    * this" answerable from the manifest alone, with no consumer naming a plugin.
    */
   app?: AppDescriptor;
-  /** Host-facing abilities this plugin provides at activation, declared statically so a host can answer what it can do without executing it. */
-  capabilities?: string[];
+  /** The capabilities this plugin provides at activation and the ones it consumes, declared statically so a host can answer what it can do without executing it. */
+  capabilities?: ManifestCapabilities;
   /** Slash commands this plugin contributes, which a host deploys without importing it. */
   commands?: ManifestCommand[];
   config?: ManifestConfig;
   /** Where this plugin keeps state that is not named after it. */
   data?: ManifestData;
   displayName?: string;
-  /** The built module a host imports. Required once `capabilities` is non-empty. */
+  /** The built module a host imports. Required once `capabilities.provides` is non-empty. */
   entry?: string;
   /** Path to a square-viewBox SVG mark, relative to the repo root. */
   icon?: string;
@@ -438,6 +467,21 @@ export interface ManifestServices {
    * written as bare ids or as {@link ManifestOffer} objects.
    */
   provides?: (string | ManifestOffer)[];
+}
+
+/**
+ * The host-facing contract: the abilities this plugin provides at activation, and the ones it asks
+ * to see the implementations of.
+ *
+ * @remarks
+ * Consuming is ids only, with no object form beside it: an empty answer already means "none right
+ * now", so there is nothing an `optional` or a `provider` would add until a consumer needs one.
+ */
+export interface ManifestCapabilities {
+  /** Capability ids this plugin asks to see the verified implementations of. */
+  consumes?: string[];
+  /** Capability ids this plugin provides at activation. */
+  provides?: string[];
 }
 
 /**
