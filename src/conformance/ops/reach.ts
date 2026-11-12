@@ -1,5 +1,5 @@
 import { createHost, isPluginError } from "../../engine/index.js";
-import type { Host, PluginRuntime } from "../../engine/index.js";
+import type { DeclarationRefusal, Host, PluginRuntime } from "../../engine/index.js";
 import type { ManifestRequirement, PluginContext, PluginManifest } from "../../index.js";
 import { ManualScheduler } from "../manual-scheduler.js";
 import type { Operation } from "../operation.js";
@@ -48,14 +48,14 @@ export const reach: Operation = async (given) => {
   await settledTurn();
   return {
     outcomes: answers.map((answer) => answer.outcome()),
-    reported: host.ledger.refusals().map((refusal) => [refusal.pluginId, refusal.serviceId]),
+    reported: serviceRefusals(host).map((refusal) => [refusal.pluginId, refusal.id]),
     refusal: answers.map((answer) => answer.refusal()).find((refusal) => refusal !== null) ?? null,
   };
 };
 
 function run(host: Host, pluginId: string, context: PluginContext, step: Record<string, unknown>, diagnostics: string[]): StepAnswer | undefined {
   const reported = (serviceId: string): boolean =>
-    host.ledger.refusals().some((refusal) => refusal.pluginId === pluginId && refusal.serviceId === serviceId);
+    serviceRefusals(host).some((refusal) => refusal.pluginId === pluginId && refusal.id === serviceId);
   if (typeof step.register === "string") {
     const serviceId = step.register;
     context.services.register(context.service(serviceId), { name: () => serviceId });
@@ -93,6 +93,10 @@ function run(host: Host, pluginId: string, context: PluginContext, step: Record<
     return { outcome: () => listed, refusal: () => null };
   }
   throw new Error(`unknown step ${JSON.stringify(step)}`);
+}
+
+function serviceRefusals(host: Host): DeclarationRefusal[] {
+  return host.ledger.refusals().filter((refusal) => refusal.kind === "service");
 }
 
 function wantOutcome(settlement: Settlement): Reach {

@@ -182,7 +182,7 @@ describe("a consumer reaches only what it declared", () => {
     const notes = host.contextFor(UNDECLARED, runtime());
     expect(notes.services.get(notes.service("calendar:events"))).toBeUndefined();
     expect(notes.services.get(notes.service("calendar:events"))).toBeUndefined();
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "notes", id: "calendar:events" }]);
     const lines = reported.filter((line) => line.includes("calendar:events"));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("notes");
@@ -196,7 +196,7 @@ describe("a consumer reaches only what it declared", () => {
     const agenda = host.contextFor(DECLARING, runtime());
     expect(notes.services.get(notes.service("clock"))).toBeUndefined();
     expect(agenda.services.get(agenda.service("clock"))).toBeDefined();
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "clock" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "notes", id: "clock" }]);
   });
 
   it("rejects an undeclared want with the fix rather than the late wording", async () => {
@@ -207,7 +207,7 @@ describe("a consumer reaches only what it declared", () => {
     expect(isPluginError(refusal)).toBe(true);
     expect((refusal as { fix: string }).fix).toContain("services.consumes");
     expect((refusal as { detail: string }).detail).not.toContain("stopped");
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "notes", id: "calendar:events" }]);
   });
 
   it("keeps an undeclared watch inert", () => {
@@ -217,7 +217,7 @@ describe("a consumer reaches only what it declared", () => {
     notes.services.watch(notes.service("calendar:events"), (service) => heard.push(service));
     registered(host);
     expect(heard).toEqual([]);
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "notes", id: "calendar:events" }]);
   });
 
   it("serves what a plugin consumes or provides, and reads a declared id nothing provides as absence", async () => {
@@ -239,8 +239,8 @@ describe("a consumer reaches only what it declared", () => {
     agenda.services.watch(agenda.service("locale"), () => {});
     const declared: unknown = await agenda.services.want(agenda.service("clock")).catch((failure: unknown) => failure);
     expect(host.ledger.refusals()).toEqual([
-      { pluginId: "agenda", serviceId: "calendar:events" },
-      { pluginId: "agenda", serviceId: "locale" },
+      { kind: "service", pluginId: "agenda", id: "calendar:events" },
+      { kind: "service", pluginId: "agenda", id: "locale" },
     ]);
     expect((undeclared as { fix: string }).fix).toContain("services.consumes");
     expect((declared as { detail: string }).detail).toContain("stopped while waiting");
@@ -268,7 +268,7 @@ describe("a consumer reaches only what it declared", () => {
     host.release("notes");
     const after = host.contextFor(UNDECLARED, runtime());
     expect(after.services.get(after.service("calendar:events"))).toBeUndefined();
-    expect(host.ledger.refusals()).toEqual([{ pluginId: "notes", serviceId: "calendar:events" }]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "service", pluginId: "notes", id: "calendar:events" }]);
     expect(reported.filter((line) => line.includes("calendar:events") && line.includes("services.consumes"))).toHaveLength(1);
   });
 

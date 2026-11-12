@@ -10,7 +10,7 @@ import { pluginError } from "./errors.js";
 import { factsOf } from "./facts.js";
 import type { Handles } from "./handles.js";
 import { PluginLedger } from "./ledger.js";
-import type { LedgerRow, ServiceRefusal } from "./ledger.js";
+import type { DeclarationRefusal, LedgerRow } from "./ledger.js";
 import { ServiceHub, stoppedWaiting } from "./registry.js";
 import type { Fence, ServiceAttempt } from "./registry.js";
 import { readOffer, readRequirement } from "./requirements.js";
@@ -47,8 +47,8 @@ export interface HostLedger {
   entries(): LedgerRow[];
   entry(pluginId: string): LedgerRow | undefined;
   recordDeclared(manifest: PluginManifest): void;
-  /** Every service a plugin reached for without declaring it, once per plugin and id, in the order reported. */
-  refusals(): ServiceRefusal[];
+  /** Every service or capability a plugin reached for without declaring it, once per kind, plugin and id, in the order reported. */
+  refusals(): DeclarationRefusal[];
 }
 
 /**

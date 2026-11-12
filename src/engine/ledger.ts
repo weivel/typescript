@@ -1,3 +1,5 @@
+import type { DeclarationKind } from "./activation.js";
+
 export type PluginStatus = "activating" | "active" | "broken" | "stopped";
 
 /** Why a broken plugin's row says it is broken. */
@@ -21,10 +23,17 @@ export interface LedgerRow {
   topics: string[];
 }
 
-/** One plugin refused a service it did not declare. */
-export interface ServiceRefusal {
+/**
+ * One plugin was refused a service or a capability it did not declare.
+ *
+ * @remarks
+ * Both kinds share one record so a reader sees every refused reach in the order reported; the kind
+ * keeps a service and a capability that share an id apart.
+ */
+export interface DeclarationRefusal {
+  kind: DeclarationKind;
   pluginId: string;
-  serviceId: string;
+  id: string;
 }
 
 interface Relationships {
@@ -80,7 +89,7 @@ function fresh(): Relationships {
  */
 export class PluginLedger {
   private readonly rows = new Map<string, Entry>();
-  private readonly refused: ServiceRefusal[] = [];
+  private readonly refused: DeclarationRefusal[] = [];
 
   /** Every row, as copies a caller may keep. */
   entries(): LedgerRow[] {
@@ -130,13 +139,17 @@ export class PluginLedger {
    * otherwise be reported again every time it restarts.
    */
   recordServiceRefused(pluginId: string, serviceId: string): boolean {
-    if (this.refused.some((entry) => entry.pluginId === pluginId && entry.serviceId === serviceId)) return false;
-    this.refused.push({ pluginId, serviceId });
+    return this.recordRefused("service", pluginId, serviceId);
+  }
+
+  private recordRefused(kind: DeclarationKind, pluginId: string, id: string): boolean {
+    if (this.refused.some((entry) => entry.kind === kind && entry.pluginId === pluginId && entry.id === id)) return false;
+    this.refused.push({ kind, pluginId, id });
     return true;
   }
 
   /** Every refusal, in the order first reported, as copies a caller may keep. */
-  refusals(): ServiceRefusal[] {
+  refusals(): DeclarationRefusal[] {
     return this.refused.map((entry) => ({ ...entry }));
   }
 
