@@ -193,7 +193,7 @@ function refusalBeforeOrdering(host: Host, deployed: DeployedPlugin): PluginErro
   return pluginError(
     manifest.id,
     manifest.entry ? "declares an entry but no bundle is deployed beside its manifest" : "declares no entry, so there is nothing to activate",
-    manifest.entry ? "deploy the plugin again so its bundle lands beside the sidecar" : "add \"entry\": \"dist/index.js\" to plugin.json if this plugin has capabilities",
+    manifest.entry ? "deploy the plugin again so its bundle lands beside the sidecar" : "add \"entry\": \"dist/index.js\" to plugin.json if this plugin provides capabilities",
   );
 }
 
