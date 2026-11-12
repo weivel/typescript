@@ -49,7 +49,7 @@ const CONSUMER_MANIFEST: PluginManifest = {
   importName: "consumer",
   api: 1,
   entry: "dist/index.js",
-  capabilities: [],
+  capabilities: { provides: [] },
   services: { consumes: [{ id: "echo", optional: false }] },
 };
 

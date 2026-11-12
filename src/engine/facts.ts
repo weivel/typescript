@@ -1,7 +1,8 @@
 export interface ManifestFacts {
   id: string;
   api: number;
-  capabilities: string[];
+  capabilitiesProvided: string[];
+  capabilitiesConsumed: string[];
   permissions: string[];
   targets: string[];
   payload: unknown;
@@ -21,11 +22,17 @@ export function factsOf(manifest: unknown): ManifestFacts {
   return {
     id: typeof fields.id === "string" ? fields.id : "",
     api: typeof fields.api === "number" ? fields.api : 0,
-    capabilities: stringsOf(fields.capabilities),
+    capabilitiesProvided: stringsOf(declaredCapabilities(fields).provides),
+    capabilitiesConsumed: stringsOf(declaredCapabilities(fields).consumes),
     permissions: stringsOf(fields.permissions),
     targets: stringsOf(fields.targets),
     payload: manifest,
   };
+}
+
+function declaredCapabilities(fields: Fields): Fields {
+  const { capabilities } = fields;
+  return typeof capabilities === "object" && capabilities !== null && !Array.isArray(capabilities) ? (capabilities as Fields) : {};
 }
 
 function stringsOf(value: unknown): string[] {

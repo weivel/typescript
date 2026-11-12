@@ -142,6 +142,11 @@ export class PluginLedger {
     return this.recordRefused("service", pluginId, serviceId);
   }
 
+  /** Records that a plugin was refused a capability, and answers whether this is the first time. */
+  recordCapabilityRefused(pluginId: string, capabilityId: string): boolean {
+    return this.recordRefused("capability", pluginId, capabilityId);
+  }
+
   private recordRefused(kind: DeclarationKind, pluginId: string, id: string): boolean {
     if (this.refused.some((entry) => entry.kind === kind && entry.pluginId === pluginId && entry.id === id)) return false;
     this.refused.push({ kind, pluginId, id });

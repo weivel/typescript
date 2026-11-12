@@ -1,4 +1,5 @@
 import type {
+  Capabilities,
   CapabilityType,
   ConfigSetOptions,
   Events,
@@ -36,6 +37,16 @@ export interface PluginRuntime {
   secrets?: PluginSecrets;
 }
 
+export type CapabilityEvent = "provide" | "withdraw";
+
+export type CapabilityListener = (implementation: unknown, event: CapabilityEvent) => void;
+
+/** The verified implementations a plugin may see, in ids and untyped implementations; the context attaches the types. */
+export interface ConsumedCapabilities {
+  all(id: string): unknown[];
+  watch(id: string, listener: CapabilityListener): () => void;
+}
+
 /** What the host opened for one plugin, from which its context is built. */
 export interface Session {
   readonly manifest: PluginManifest;
@@ -46,6 +57,8 @@ export interface Session {
   /** Already fenced, recording and released with the plugin. */
   readonly events: RuntimeEvents;
   provide(capabilityId: string, implementation: unknown): void;
+  /** Already fenced to what the plugin declares, and released with the plugin. */
+  readonly capabilities: ConsumedCapabilities;
 }
 
 /**
@@ -59,6 +72,7 @@ export interface Session {
 export function contextOf(session: Session): PluginContext {
   const { runtime } = session;
   return {
+    capabilities: capabilitiesOver(session.capabilities),
     capability: (id) => ({ id }),
     service: (id) => ({ id }),
     topic: (id) => ({ id }),
@@ -120,6 +134,18 @@ function servicesOver(registry: ConsumerRegistry): Services {
   };
 }
 
+function capabilitiesOver(consumed: ConsumedCapabilities): Capabilities {
+  function all<T>(type: CapabilityType<T>): T[];
+  function all(type: CapabilityType<unknown>): unknown[] {
+    return consumed.all(capabilityIdOf(type));
+  }
+  function watch<T>(type: CapabilityType<T>, listener: (a: T, b: string) => void): () => void;
+  function watch(type: CapabilityType<unknown>, listener: (a: unknown, b: string) => void): () => void {
+    return consumed.watch(capabilityIdOf(type), listener);
+  }
+  return { all, watch };
+}
+
 function eventsOver(bus: RuntimeEvents): Events {
   function subscribe<T>(topic: TopicType<T>, listener: (value: T) => void): () => void;
   function subscribe(topic: TopicType<unknown>, listener: (value: unknown) => void): () => void {
@@ -132,7 +158,7 @@ function eventsOver(bus: RuntimeEvents): Events {
 function capabilityIdOf(type: CapabilityType<unknown>): string {
   const id: unknown = typeof type === "object" && type !== null ? type.id : undefined;
   if (typeof id !== "string") {
-    throw new TypeError(`provide takes a typed key, and was handed ${typeof type}: pass context.capability(id)`);
+    throw new TypeError(`a capability call takes a typed key, and was handed ${typeof type}: pass context.capability(id)`);
   }
   return id;
 }

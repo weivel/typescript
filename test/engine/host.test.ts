@@ -40,7 +40,7 @@ function hostWith(options: Partial<HostOptions> = {}): { host: ReturnType<typeof
   return { host, reported };
 }
 
-const PROVIDER: PluginManifest = { id: "a", name: "a", importName: "a", api: 2, capabilities: ["screens"] };
+const PROVIDER: PluginManifest = { id: "a", name: "a", importName: "a", api: 2, capabilities: { provides: ["screens"] } };
 
 describe("two hosts in one process", () => {
   it("share neither services nor diagnostics", () => {
@@ -326,5 +326,231 @@ describe("applications", () => {
 
   it("hosts every application when explicitly empty", () => {
     expect(hostWith({ applications: [] }).host.supports(elsewhere)).toBeNull();
+  });
+});
+
+interface Screen {
+  readonly provider: string;
+}
+
+function plugin(id: string, capabilities: { provides?: string[]; consumes?: string[] }, services?: PluginManifest["services"]): PluginManifest {
+  return { id, name: id, importName: id, api: 2, capabilities, ...(services === undefined ? {} : { services }) };
+}
+
+function provideScreen(context: PluginContext, provider: string): Screen {
+  const screen: Screen = { provider };
+  context.provide(context.capability<Screen>("screens"), screen);
+  return screen;
+}
+
+function watching(context: PluginContext): Array<[string, string]> {
+  const heard: Array<[string, string]> = [];
+  context.capabilities.watch(context.capability<Screen>("screens"), (screen, event) => heard.push([screen.provider, event]));
+  return heard;
+}
+
+function providersOf(context: PluginContext): string[] {
+  return context.capabilities.all(context.capability<Screen>("screens")).map((screen) => screen.provider);
+}
+
+const CALENDAR = plugin("calendar", { provides: ["screens"] });
+const NOTES = plugin("notes", { provides: ["screens"] });
+const AGENDA = plugin("agenda", { consumes: ["screens"] });
+const OTHERS = plugin("others", {});
+
+describe("consuming a capability", () => {
+  it("answers an implementation only once its activation is verified", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const calendar = host.contextFor(CALENDAR, runtime());
+    const screen = provideScreen(calendar, "calendar");
+    expect(agenda.capabilities.all(agenda.capability<Screen>("screens"))).toEqual([]);
+    expect(host.capability("screens")).toEqual([{ pluginId: "calendar", implementation: screen }]);
+    expect(host.verifyActivation(CALENDAR)).toBeNull();
+    expect(agenda.capabilities.all(agenda.capability<Screen>("screens"))[0]).toBe(screen);
+  });
+
+  it("answers in the order activations were verified, not the order they provided", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const calendar = host.contextFor(CALENDAR, runtime());
+    const notes = host.contextFor(NOTES, runtime());
+    provideScreen(calendar, "calendar");
+    provideScreen(notes, "notes");
+    host.verifyActivation(NOTES);
+    host.verifyActivation(CALENDAR);
+    expect(providersOf(agenda)).toEqual(["notes", "calendar"]);
+  });
+
+  it("never answers or announces a provider whose activation was refused", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const heard = watching(agenda);
+    const greedy = plugin("calendar", { provides: ["screens", "tools"] });
+    const calendar = host.contextFor(greedy, runtime());
+    provideScreen(calendar, "calendar");
+    const refusal = host.verifyActivation(greedy);
+    expect(refusal).not.toBeNull();
+    expect(refusal?.fix).toContain("capabilities.provides");
+    host.markBroken("calendar", refusal!);
+    expect(providersOf(agenda)).toEqual([]);
+    expect(heard).toEqual([]);
+  });
+
+  it("tells a watcher once when a quarantined provider leaves, with the object it provided", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const objects: unknown[] = [];
+    agenda.capabilities.watch(agenda.capability<Screen>("screens"), (screen) => objects.push(screen));
+    const calendar = host.contextFor(CALENDAR, runtime());
+    const screen = provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    host.markBroken("calendar", pluginError("calendar", "broke", "mend it"));
+    host.release("calendar");
+    expect(objects).toEqual([screen, screen]);
+    expect(objects[1]).toBe(screen);
+    expect(providersOf(agenda)).toEqual([]);
+  });
+
+  it("reports future changes only, never replaying what is already there", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    const heard = watching(agenda);
+    host.release("calendar");
+    expect(heard).toEqual([["calendar", "withdraw"]]);
+  });
+
+  it("stops telling a watcher once its stop function is called", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const heard: string[] = [];
+    const stop = agenda.capabilities.watch(agenda.capability<Screen>("screens"), (_screen, event) => heard.push(event));
+    stop();
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(heard).toEqual([]);
+  });
+
+  it("refuses an undeclared all with an empty answer, and reports it once with the fix", () => {
+    const { host, reported } = hostWith();
+    const others = host.contextFor(OTHERS, runtime());
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(providersOf(others)).toEqual([]);
+    expect(providersOf(others)).toEqual([]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "capability", pluginId: "others", id: "screens" }]);
+    const lines = reported.filter((line) => line.includes("screens"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("capabilities.consumes");
+  });
+
+  it("keeps an undeclared watch inert, and reports it", () => {
+    const { host } = hostWith();
+    const others = host.contextFor(OTHERS, runtime());
+    const heard = watching(others);
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(heard).toEqual([]);
+    expect(host.ledger.refusals()).toEqual([{ kind: "capability", pluginId: "others", id: "screens" }]);
+  });
+
+  it("refuses an undeclared call from a released plugin as undeclared", () => {
+    const { host } = hostWith();
+    const others = host.contextFor(OTHERS, runtime());
+    host.release("others");
+    expect(providersOf(others)).toEqual([]);
+    watching(others);
+    expect(host.ledger.refusals()).toEqual([{ kind: "capability", pluginId: "others", id: "screens" }]);
+  });
+
+  it("lets a released plugin read all, and keeps its declared late watch inert and unrecorded", () => {
+    const { host, reported } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    host.release("agenda");
+    expect(providersOf(agenda)).toEqual(["calendar"]);
+    const heard = watching(agenda);
+    host.release("calendar");
+    expect(heard).toEqual([]);
+    expect(host.ledger.refusals()).toEqual([]);
+    expect(reported.some((line) => line.includes("late watch") && line.includes("screens"))).toBe(true);
+  });
+
+  it("reports a watcher that throws, and the others still hear", () => {
+    const { host, reported } = hostWith();
+    const bad = host.contextFor(plugin("bad", { consumes: ["screens"] }), runtime());
+    bad.capabilities.watch(bad.capability<Screen>("screens"), () => {
+      throw new Error("boom");
+    });
+    const agenda = host.contextFor(AGENDA, runtime());
+    const heard = watching(agenda);
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(heard).toEqual([["calendar", "provide"]]);
+    expect(reported.some((line) => line.includes("boom") && line.includes("screens"))).toBe(true);
+  });
+
+  it("lets a plugin reach a capability it provides, and see its own implementation", () => {
+    const { host } = hostWith();
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(providersOf(calendar)).toEqual(["calendar"]);
+    expect(host.ledger.refusals()).toEqual([]);
+  });
+
+  it("tells a provider watching its own capability that it withdrew", () => {
+    const { host } = hostWith();
+    const calendar = host.contextFor(CALENDAR, runtime());
+    const heard = watching(calendar);
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    host.release("calendar");
+    expect(heard).toEqual([
+      ["calendar", "provide"],
+      ["calendar", "withdraw"],
+    ]);
+  });
+
+  it("keeps a service refusal and a capability refusal that share an id apart", () => {
+    const { host } = hostWith();
+    const others = host.contextFor(OTHERS, runtime());
+    others.services.get(others.service("screens"));
+    providersOf(others);
+    expect(host.ledger.refusals()).toEqual([
+      { kind: "service", pluginId: "others", id: "screens" },
+      { kind: "capability", pluginId: "others", id: "screens" },
+    ]);
+  });
+
+  it("stops a released consumer hearing", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const heard = watching(agenda);
+    host.release("agenda");
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(heard).toEqual([]);
+  });
+
+  it("stops a quarantined consumer hearing", () => {
+    const { host } = hostWith();
+    const agenda = host.contextFor(AGENDA, runtime());
+    const heard = watching(agenda);
+    host.markBroken("agenda", pluginError("agenda", "broke", "mend it"));
+    const calendar = host.contextFor(CALENDAR, runtime());
+    provideScreen(calendar, "calendar");
+    host.verifyActivation(CALENDAR);
+    expect(heard).toEqual([]);
   });
 });

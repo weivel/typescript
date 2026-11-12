@@ -3,11 +3,12 @@ import type { HostDescriptor, PluginContext, PluginError, PluginManifest, Schedu
 import { compatibility } from "./compatibility.js";
 import type { ConstraintEntry } from "./constraints.js";
 import { contextOf } from "./context.js";
-import type { PluginRuntime, RuntimeEvents } from "./context.js";
+import type { CapabilityEvent, CapabilityListener, ConsumedCapabilities, PluginRuntime, RuntimeEvents } from "./context.js";
 import { DISCARD } from "./diagnostics.js";
 import type { DiagnosticSink } from "./diagnostics.js";
 import { pluginError } from "./errors.js";
 import { factsOf } from "./facts.js";
+import type { ManifestFacts } from "./facts.js";
 import type { Handles } from "./handles.js";
 import { PluginLedger } from "./ledger.js";
 import type { DeclarationRefusal, LedgerRow } from "./ledger.js";
@@ -68,7 +69,7 @@ export interface Host {
   contextFor(manifest: PluginManifest, runtime: PluginRuntime): PluginContext;
   /** Why what the plugin provided disagrees with what it declared, or null after marking it active. */
   verifyActivation(manifest: PluginManifest): PluginError | null;
-  /** Every implementation of a capability, in activation order. */
+  /** Every implementation of a capability, in the order provided, whether or not its activation is verified yet. */
   capability(id: string): CapabilityRecord[];
   service(id: string): unknown | undefined;
   /** Offers a service the host itself implements; owned by no plugin, so no quarantine takes it. */
@@ -123,6 +124,8 @@ class HostState {
   private readonly ledger = new PluginLedger();
   private readonly hub: ServiceHub;
   private readonly capabilities = new Map<string, CapabilityRecord[]>();
+  private readonly verified = new Map<string, CapabilityRecord[]>();
+  private readonly capabilityWatchers = new Map<string, Set<CapabilityWatcher>>();
   private readonly disposers = new Map<string, Set<() => void>>();
   private readonly revoked = new Set<string>();
   private readonly importNames = new Map<string, string>();
@@ -153,7 +156,9 @@ class HostState {
       ledger: {
         entries: () => this.ledger.entries(),
         entry: (pluginId) => this.ledger.entry(pluginId),
-        recordDeclared: (manifest) => this.recordDeclared(manifest),
+        recordDeclared: (manifest) => {
+        this.recordDeclared(manifest);
+      },
         refusals: () => this.ledger.refusals(),
       },
       supports: (manifest) => compatibility({ applications: this.applications, api: this.descriptor.api }, factsOf(manifest))?.refusal ?? null,
@@ -173,14 +178,15 @@ class HostState {
     };
   }
 
-  private recordDeclared(manifest: PluginManifest): string {
+  private recordDeclared(manifest: PluginManifest): ManifestFacts {
     const facts = factsOf(manifest);
-    this.ledger.recordDeclared(facts.id, facts.capabilities, facts.permissions);
-    return facts.id;
+    this.ledger.recordDeclared(facts.id, facts.capabilitiesProvided, facts.permissions);
+    return facts;
   }
 
   private contextFor(manifest: PluginManifest, runtime: PluginRuntime): PluginContext {
-    const pluginId = this.recordDeclared(manifest);
+    const facts = this.recordDeclared(manifest);
+    const pluginId = facts.id;
     const bound = boundProviders(manifest);
     this.revoked.delete(pluginId);
     this.importNames.set(pluginId, importNameOf(manifest, pluginId));
@@ -191,25 +197,33 @@ class HostState {
       registry: this.hub.forConsumer(pluginId, this.fenceFor(pluginId, declaredServices(manifest), bound), (serviceId) => bound.get(serviceId)),
       events: this.recording(pluginId, runtime.events),
       provide: (capabilityId, implementation) => this.provide(pluginId, capabilityId, implementation),
+      capabilities: this.consumed(pluginId, declaredCapabilities(facts)),
     });
   }
 
+  /**
+   * @implNote A plugin's implementations reach its consumers here and not at `provide`: until this
+   * check passes the host may still quarantine the plugin, and a consumer must never be handed an
+   * implementation about to be withdrawn for a declaration mismatch (invariant 14). They join in the
+   * order activations are verified, which is the order a consumer's answer keeps.
+   */
   private verifyActivation(manifest: PluginManifest): PluginError | null {
-    const { id, capabilities: declared } = factsOf(manifest);
+    const { id, capabilitiesProvided: declared } = factsOf(manifest);
     const provided = this.ledger.entry(id)?.capabilitiesProvided ?? [];
     const missing = declared.filter((capability) => !provided.includes(capability));
     if (missing.length > 0) {
       return pluginError(
         id,
         `capabilities declared but never provided: ${missing.join(", ")}`,
-        `call context.provide(context.capability("${missing[0]}"), ...) in activate, or remove it from "capabilities" in plugin.json`,
+        `call context.provide(context.capability("${missing[0]}"), ...) in activate, or remove it from capabilities.provides in plugin.json`,
       );
     }
     const extra = provided.filter((capability) => !declared.includes(capability));
     if (extra.length > 0) {
-      return pluginError(id, `capabilities provided but never declared: ${extra.join(", ")}`, `add "${extra[0]}" to "capabilities" in plugin.json`);
+      return pluginError(id, `capabilities provided but never declared: ${extra.join(", ")}`, `add "${extra[0]}" to capabilities.provides in plugin.json`);
     }
     this.ledger.recordStatus(id, "active");
+    this.admitVerified(id);
     return null;
   }
 
@@ -229,6 +243,7 @@ class HostState {
 
   private strip(pluginId: string): void {
     this.revoked.add(pluginId);
+    this.withdrawVerified(pluginId);
     for (const [id, records] of [...this.capabilities]) {
       const kept = records.filter((record) => record.pluginId !== pluginId);
       if (kept.length === 0) this.capabilities.delete(id);
@@ -237,6 +252,95 @@ class HostState {
     for (const dispose of [...(this.disposers.get(pluginId) ?? [])]) dispose();
     this.disposers.delete(pluginId);
     this.hub.release(pluginId);
+  }
+
+  /**
+   * @implNote The declaration is checked before lateness, as for services: an undeclared call is
+   * refused and reported as undeclared whether or not the plugin still runs. A late `all` is let
+   * through, since it installs nothing, while a late `watch` is inert and goes to the diagnostics
+   * only, the way a late service call does.
+   */
+  private consumed(pluginId: string, declared: ReadonlySet<string>): ConsumedCapabilities {
+    return {
+      all: (id) => {
+        if (!declared.has(id)) {
+          this.refuseUndeclaredCapability(pluginId, id);
+          return [];
+        }
+        return (this.verified.get(id) ?? []).map((record) => record.implementation);
+      },
+      watch: (id, listener) => {
+        if (!declared.has(id)) {
+          this.refuseUndeclaredCapability(pluginId, id);
+          return () => {};
+        }
+        if (this.refuseLate(pluginId, "a late watch of capability", id)) return () => {};
+        return this.tracked(pluginId, this.installCapabilityWatcher(id, listener));
+      },
+    };
+  }
+
+  private installCapabilityWatcher(id: string, listener: CapabilityListener): () => void {
+    const watcher: CapabilityWatcher = { listener };
+    const installed = this.capabilityWatchers.get(id) ?? new Set<CapabilityWatcher>();
+    installed.add(watcher);
+    this.capabilityWatchers.set(id, installed);
+    return () => {
+      installed.delete(watcher);
+      if (installed.size === 0 && this.capabilityWatchers.get(id) === installed) this.capabilityWatchers.delete(id);
+    };
+  }
+
+  private admitVerified(pluginId: string): void {
+    for (const [id, records] of [...this.capabilities]) {
+      for (const record of records) {
+        if (record.pluginId === pluginId && this.admit(id, record)) this.notifyCapabilityWatchers(id, record.implementation, "provide");
+      }
+    }
+  }
+
+  private admit(id: string, record: CapabilityRecord): boolean {
+    const records = this.verified.get(id) ?? [];
+    if (records.includes(record)) return false;
+    records.push(record);
+    this.verified.set(id, records);
+    return true;
+  }
+
+  private withdrawVerified(pluginId: string): void {
+    for (const [id, records] of [...this.verified]) {
+      const leaving = records.filter((record) => record.pluginId === pluginId);
+      if (leaving.length === 0) continue;
+      const kept = records.filter((record) => record.pluginId !== pluginId);
+      if (kept.length === 0) this.verified.delete(id);
+      else this.verified.set(id, kept);
+      for (const record of leaving) this.notifyCapabilityWatchers(id, record.implementation, "withdraw");
+    }
+  }
+
+  /**
+   * @implNote A watcher that throws is reported and the rest still hear, as for a service watcher;
+   * a watcher removed while the others are being told is skipped rather than called.
+   */
+  private notifyCapabilityWatchers(id: string, implementation: unknown, event: CapabilityEvent): void {
+    const installed = this.capabilityWatchers.get(id);
+    if (installed === undefined) return;
+    for (const watcher of [...installed]) {
+      if (!installed.has(watcher)) continue;
+      try {
+        watcher.listener(implementation, event);
+      } catch (failure) {
+        this.diagnostics(`a watcher of capability "${id}" threw while handling ${event}: ${String(failure)}`);
+      }
+    }
+  }
+
+  /** Refuses a capability the plugin did not declare, reporting it once per plugin and id (invariant 14). */
+  private refuseUndeclaredCapability(pluginId: string, capabilityId: string): void {
+    const fix = `add "${capabilityId}" to capabilities.consumes in its plugin.json`;
+    if (this.ledger.recordCapabilityRefused(pluginId, capabilityId)) {
+      this.diagnostics(`refused capability "${capabilityId}" to ${pluginId}, which does not declare it: ${fix}`);
+    }
   }
 
   /**
@@ -337,6 +441,16 @@ class HostState {
     owned.add(once);
     return once;
   }
+}
+
+/** One installed capability listener, an identity of its own so the same listener can be installed twice. */
+interface CapabilityWatcher {
+  readonly listener: CapabilityListener;
+}
+
+/** The capability ids a plugin may reach: what it consumes and what it provides itself. */
+function declaredCapabilities(facts: ManifestFacts): ReadonlySet<string> {
+  return new Set([...facts.capabilitiesConsumed, ...facts.capabilitiesProvided]);
 }
 
 /**
