@@ -30,16 +30,3 @@ gitignored validator module, so no copy of it is committed.
 
 The package is `@weivel/typescript`, private, and unpublished until the npm publishing blocker
 clears.
-
-## Running the conformance kit
-
-CI sits the whole kit on every push, in its own job, through `intisy/workflows`' shared
-`conformance.yml`: the kit and its runner stay outside this repository, which supplies only how
-to build and start its driver. Only `passed` counts: any `failed`, `errored` or `unwitnessed`
-vector fails the job. To sit it locally, build here and run the runner from a kit checkout:
-
-```bash
-npm ci && npm run build
-cd ../conformance && npm ci
-npx tsx runner/src/cli.ts run --driver "node ../typescript/dist/conformance/driver.js"
-```
