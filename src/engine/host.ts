@@ -157,8 +157,8 @@ class HostState {
         entries: () => this.ledger.entries(),
         entry: (pluginId) => this.ledger.entry(pluginId),
         recordDeclared: (manifest) => {
-        this.recordDeclared(manifest);
-      },
+          this.recordDeclared(manifest);
+        },
         refusals: () => this.ledger.refusals(),
       },
       supports: (manifest) => compatibility({ applications: this.applications, api: this.descriptor.api }, factsOf(manifest))?.refusal ?? null,
