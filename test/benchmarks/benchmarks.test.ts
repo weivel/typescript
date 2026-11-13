@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import koffi from "koffi";
 import { describe, expect, it } from "vitest";
 import {
@@ -5,8 +7,10 @@ import {
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   callsPerPath,
+  loadLanguageBudget,
   pairRatio,
   ratioBound,
+  readLanguageBudget,
   roundOrder,
   sameLanguageBound,
   tooNoisyToJudge,
@@ -23,6 +27,8 @@ import { echoLibraryPath } from "../host/world.ts";
 import { coreLibraryPath } from "../real-core.ts";
 
 const libraries = { coreLibraryPath };
+const kitBudgetPath = join(import.meta.dirname, "..", "..", "siblings", "conformance", "benchmarks", "typescript.txt");
+const budget = loadLanguageBudget(kitBudgetPath);
 const timeout = 120_000;
 /** Enough batches to tell a slowed path apart, or to count crossings, at a fraction of the gate's run time. */
 const briefSampling: Sampling = { warmupCalls: 1_000, callsPerBatch: 20, batches: 21 };
@@ -107,7 +113,7 @@ function reportFfiPair(name: string, summaries: FfiCallSummaries): number {
 
 /** The gate's bound on this platform; a platform no CI run has measured fails the gate rather than passing it. */
 function boundHere(gate: RatioGate): number {
-  const bound = ratioBound(gate);
+  const bound = ratioBound(budget, gate);
   if (bound === undefined) {
     throw new Error(`No CI run has measured ${gate} on ${process.platform}, so it has no bound and cannot pass.`);
   }
@@ -130,8 +136,8 @@ describe("a same-language service call through weivel", () => {
     const ratio = pairRatio(pair.throughWeivel, pair.direct);
     reportRatio("same-language-weivel", ratio);
 
-    expect(tooNoisyToJudge(noise), `the run was too noisy to judge: its two identical direct paths differed by ${noise.toFixed(4)}`).toBe(false);
-    expect(withinRatio(ratio, sameLanguageBound(noise))).toBe(true);
+    expect(tooNoisyToJudge(budget, noise), `the run was too noisy to judge: its two identical direct paths differed by ${noise.toFixed(4)}`).toBe(false);
+    expect(withinRatio(ratio, sameLanguageBound(budget, noise))).toBe(true);
   });
 
   it("is told apart from the direct call once it is slowed", { timeout }, () => {
@@ -141,7 +147,7 @@ describe("a same-language service call through weivel", () => {
       decorate: slowing("throughWeivel", 200),
     });
 
-    const bound = sameLanguageBound(pairRatio(pair.directAgain, pair.direct));
+    const bound = sameLanguageBound(budget, pairRatio(pair.directAgain, pair.direct));
 
     expect(withinRatio(pairRatio(pair.throughWeivel, pair.direct), bound)).toBe(false);
   });
@@ -215,21 +221,52 @@ describe("the measuring", () => {
   });
 
   it("widens the same-language bound to a noisy run's own noise, and never below the quiet noise", () => {
-    expect(sameLanguageBound(1)).toBeCloseTo(1.193, 3);
-    expect(sameLanguageBound(1 / 1.5)).toBeCloseTo(2.25, 3);
-    expect(sameLanguageBound(1.5)).toBeCloseTo(2.25, 3);
+    expect(sameLanguageBound(budget, 1)).toBeCloseTo(1 + budget.noiseMargin * budget.quietNoise, 6);
+    expect(sameLanguageBound(budget, 1 / 1.5)).toBeCloseTo(1 + budget.noiseMargin * 0.5, 6);
+    expect(sameLanguageBound(budget, 1.5)).toBeCloseTo(1 + budget.noiseMargin * 0.5, 6);
   });
 
-  it("refuses to judge a same-language run noisier than any measured on CI", () => {
-    expect(tooNoisyToJudge(1.5)).toBe(false);
-    expect(tooNoisyToJudge(1.6)).toBe(true);
-    expect(tooNoisyToJudge(1 / 1.6)).toBe(true);
+  it("refuses to judge a same-language run noisier than any the kit measured", () => {
+    expect(tooNoisyToJudge(budget, 1 + budget.worstNoise * 0.99)).toBe(false);
+    expect(tooNoisyToJudge(budget, 1 + budget.worstNoise * 1.01)).toBe(true);
+    expect(tooNoisyToJudge(budget, 1 / (1 + budget.worstNoise * 1.01))).toBe(true);
   });
+});
 
-  it("has a bound for each measured platform and none for a platform no CI run measured", () => {
-    for (const gate of ["controlCall", "libraryCall"] as const) {
-      expect(["linux", "win32", "darwin"].map((platform) => ratioBound(gate, platform) !== undefined)).toEqual([true, true, true]);
-      expect(ratioBound(gate, "freebsd")).toBeUndefined();
+describe("the bounds", () => {
+  const kitLines = new Map(
+    readFileSync(kitBudgetPath, "utf8")
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .map((line) => {
+        const fields = line.trim().split(" ");
+        return [fields.slice(0, -1).join(" "), Number(fields.at(-1))] as const;
+      }),
+  );
+
+  it("are the kit's: each gate's highest measured ratio on the kit's platform, times the kit's margin", () => {
+    const margin = kitLines.get("ratio-margin")!;
+    const nodePlatforms = { linux: "linux", win32: "windows", darwin: "macos" } as const;
+    for (const [gate, kitGate] of [["controlCall", "control-call"], ["libraryCall", "library-call"]] as const) {
+      for (const [nodePlatform, kitPlatform] of Object.entries(nodePlatforms)) {
+        expect(ratioBound(budget, gate, nodePlatform)).toBe(kitLines.get(`${kitGate} ${kitPlatform}`)! * margin);
+      }
+      expect(ratioBound(budget, gate, "freebsd")).toBeUndefined();
     }
+    const doubled = readLanguageBudget(readFileSync(kitBudgetPath, "utf8").replace(/^ratio-margin .*$/m, "ratio-margin 2"));
+    expect(ratioBound(doubled, "controlCall", "linux")).toBe(kitLines.get("control-call linux")! * 2);
+    expect([budget.quietNoise, budget.worstNoise, budget.noiseMargin]).toEqual([
+      kitLines.get("quiet-noise"),
+      kitLines.get("worst-noise"),
+      kitLines.get("noise-margin"),
+    ]);
+  });
+
+  it("refuse a budget missing a scalar, carrying a line the format does not define, or a number that is not positive", () => {
+    const text = readFileSync(kitBudgetPath, "utf8");
+
+    expect(() => readLanguageBudget(text.replace(/^noise-margin .*$/m, ""))).toThrow(/names no noiseMargin/);
+    expect(() => readLanguageBudget(`${text}\ndispatch-call linux 3\n`)).toThrow(/neither a gate/);
+    expect(() => readLanguageBudget(text.replace(/^ratio-margin .*$/m, "ratio-margin 0"))).toThrow(/not a positive number/);
   });
 });
