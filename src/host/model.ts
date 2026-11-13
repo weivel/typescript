@@ -51,6 +51,8 @@ export interface HostedPlugin {
   readonly manifestPath: string;
   /** The entry the standard resolved against the plugin's directory; null when the manifest names none. */
   readonly entryPath: string | null;
+  /** Whether the standard found the entry a regular file reached through no link; only then is it imported. */
+  readonly entryPresent: boolean;
 }
 
 /** A discovered plugin the core answered this host cannot load, with the core's answer as it stands. */

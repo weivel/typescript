@@ -1,4 +1,4 @@
-import { createCore, Status, type Core, type CoreEvent, type Manifest, type QuarantineReason, type Refusal } from "../core/index.js";
+import { createCore, Status, type Core, type CoreEvent, type Manifest, type ReachRefusedEvent, type QuarantineReason, type Refusal } from "../core/index.js";
 import {
   consoleLogger,
   failureOf,
@@ -80,8 +80,15 @@ export class Host {
   #dispatch(event: CoreEvent): void {
     if (event.kind === "log") {
       writeCoreLog(this.#log, event);
+    } else if (event.kind === "reach-refused") {
+      this.#log.warn(this.#reachRefusedText(event));
     }
     this.contexts.receive(event);
+  }
+
+  #reachRefusedText(event: ReachRefusedEvent): string {
+    const name = this.#plugins.lookup(event.plugin)?.hosted.manifest.importName ?? `plugin ${event.plugin}`;
+    return `${name} was refused ${event.id ?? "an id"}: ${event.refusal.detail ?? `code ${event.refusal.code}`}`;
   }
 
   /** Discovers the plugins in `directory`, reports the ones the core does not support, and registers the rest. */
@@ -183,7 +190,7 @@ export class Host {
   async #runActivate(record: PluginRecord, context: PluginContext): Promise<ActivationFailure | undefined> {
     let definition: Plugin;
     try {
-      definition = await importPlugin(record.hosted.entryPath);
+      definition = await importPlugin(record.hosted.entryPath, record.hosted.entryPresent);
     } catch (error) {
       return error instanceof ActivationFailure ? error : activateThrew(error);
     }
