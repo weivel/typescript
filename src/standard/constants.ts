@@ -24,8 +24,8 @@ export const IdentityKind = {
 } as const;
 export type IdentityKind = ValueOf<typeof IdentityKind> | number;
 
+/** The value 1 is retired and never reused. */
 export const FunctionKind = {
-  Json: 1,
   Bytes: 2,
 } as const;
 export type FunctionKind = ValueOf<typeof FunctionKind> | number;

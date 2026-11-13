@@ -10,7 +10,7 @@ import {
   type ServiceType,
 } from "../context/index.js";
 import { HandleTable } from "../handles/index.js";
-import { libraryBindingRefusal, loadStandard, type Standard } from "../standard/index.js";
+import { loadStandard, type Standard } from "../standard/index.js";
 import { CoreTimer } from "../timer/index.js";
 import { writeCoreLog } from "./core-log.js";
 import { discoverPlugins } from "./discovery.js";
@@ -147,10 +147,6 @@ export class Host {
         throw new Error(`weivel_standard_read_library answered status ${read.status}.`);
       }
       return { library: undefined, refusal: read.refusal };
-    }
-    const refusal = libraryBindingRefusal(read.value);
-    if (refusal !== undefined) {
-      return { library: undefined, refusal };
     }
     const bound = bindLibrary(libraryPath, read.value);
     const unregisters = [...bound.services].map(([id, service]) => this.registerHostService({ id }, service));

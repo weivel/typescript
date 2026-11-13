@@ -167,7 +167,7 @@ export class Standard {
     return compared.value ?? { status: compared.status, value: undefined, refusal: compared.refusal };
   }
 
-  /** Reads a C library's declaration; binding it is the layer's, and `libraryBindingRefusal` says whether it can. */
+  /** Reads a C library's declaration, which the host binds. */
   readLibrary(json: string): StandardAnswer<LibraryDeclaration> {
     const document = utf8(json);
     return this.#withStructAndRefusal("weivel_standard_library", "weivel_standard_library_release", (library, refusal) => {

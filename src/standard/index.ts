@@ -14,7 +14,6 @@ export type {
   LibraryService,
   LibraryDeclaration,
 } from "./answers.js";
-export { libraryBindingRefusal } from "./library.js";
 export type { Config, Secrets, Paths } from "./services.js";
 export {
   Standard,

@@ -24,6 +24,10 @@ const headers = readdirSync(headerDirectory)
   .join("\n");
 
 function fieldName(declaration: string): string {
+  const operation = /\(\s*\*\s*(\w+)\s*\)\s*\(/.exec(declaration);
+  if (operation !== null) {
+    return operation[1]!;
+  }
   const match = /(\w+)\s*(\[[^\]]*\])?\s*$/.exec(declaration);
   if (match === null) {
     throw new Error(`cannot read a field name from "${declaration}"`);
@@ -62,7 +66,7 @@ describe("the declarations of the standard's headers", () => {
   const structs = headerStructs();
 
   it("declare every struct the headers name, and nothing else", () => {
-    expect(structs.size).toBe(11);
+    expect(structs.size).toBe(20);
     expect(Object.keys(standardStructs).sort()).toEqual([...structs.keys()].sort());
   });
 
