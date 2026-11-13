@@ -10,13 +10,25 @@ import type { CoreEvent } from "../core/index.js";
 export class DeferredEvents {
   readonly #handle: (event: CoreEvent) => void;
   readonly #report: (error: unknown, event: CoreEvent) => void;
+  readonly #whenIdle: () => void;
   readonly #queue: CoreEvent[] = [];
   #callDepth = 0;
   #handling = false;
 
-  constructor(handle: (event: CoreEvent) => void, report: (error: unknown, event: CoreEvent) => void) {
+  constructor(handle: (event: CoreEvent) => void, report: (error: unknown, event: CoreEvent) => void, whenIdle: () => void) {
     this.#handle = handle;
     this.#report = report;
+    this.#whenIdle = whenIdle;
+  }
+
+  /**
+   * True when no call of this layer is in progress, no event waits here, and none is being handled.
+   *
+   * @remarks While an event is handled the core may still be dispatching, so events it queued before a call made
+   * from a handler may not have reached this queue yet.
+   */
+  get idle(): boolean {
+    return this.#callDepth === 0 && !this.#handling && this.#queue.length === 0;
   }
 
   receive(event: CoreEvent): void {
@@ -35,6 +47,9 @@ export class DeferredEvents {
       this.#callDepth -= 1;
       if (this.#callDepth === 0) {
         this.#handleQueued();
+        if (this.idle) {
+          this.#whenIdle();
+        }
       }
     }
   }

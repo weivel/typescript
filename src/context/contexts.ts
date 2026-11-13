@@ -3,7 +3,7 @@ import { HOST } from "../core/index.js";
 import { systemClock, type Clock } from "../timer/index.js";
 import { createCapabilities, provideCapability } from "./capabilities.js";
 import { handleEvent } from "./event-handlers.js";
-import type { CapabilityType, Logger, PluginContext, PluginEventListener, ServiceType } from "./model.js";
+import type { CapabilityType, Logger, PluginContext, PluginEventListener, RegisterOptions, ServiceType } from "./model.js";
 import { createServices, registerService } from "./services.js";
 import { ContextState } from "./state.js";
 
@@ -66,13 +66,35 @@ export class PluginContexts {
    *
    * @throws RefusalError when the core refuses it.
    */
-  registerHostService<Service>(type: ServiceType<Service>, service: Service): () => void {
-    return registerService(this.#state, HOST, type.id, service);
+  registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}): () => void {
+    return registerService(this.#state, HOST, type.id, service, options.capacity);
   }
 
   /** What `plugin` holds for the implementation handle the core handed it, or undefined once revoked. */
   held(plugin: bigint, implementation: bigint): unknown {
     return this.#state.holdings.lookup(plugin, implementation)?.implementation;
+  }
+
+  /**
+   * Ends the entries of a plugin the core has released or quarantined: every registration, implementation and watch
+   * the core ended with it. Their disposers then ask the core nothing, and their objects stay answerable only to
+   * the events the core queued before.
+   */
+  stopped(plugin: bigint): void {
+    const state = this.#state.plugins.get(plugin);
+    if (state === undefined || plugin === HOST) {
+      return;
+    }
+    for (const handle of [...state.handles]) {
+      this.#state.markEnded(plugin, handle);
+      this.#state.dropWatch(handle);
+    }
+    this.#state.dropEndedWhenIdle();
+  }
+
+  /** How many live handles of the plugin the contexts track: what `forget` would drop. */
+  tracked(plugin: bigint): number {
+    return this.#state.plugins.get(plugin)?.handles.size ?? 0;
   }
 
   /** Drops everything of a plugin the core has forgotten: its context, and every object behind its handles. */

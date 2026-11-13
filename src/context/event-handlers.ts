@@ -18,7 +18,7 @@ function settleWant(state: ContextState, event: WantSettledEvent): void {
   if (pending === undefined) {
     return;
   }
-  state.wants.drop(event.want);
+  state.dropWant(event.want);
   if (event.implementation === 0n) {
     pending.reject(new RefusalError(event.refusal));
     return;

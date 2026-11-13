@@ -1,5 +1,5 @@
 import { Choice, HandleCondition, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
-import type { ServiceListener, Services, ServiceType, WantOptions } from "./model.js";
+import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, WantOptions } from "./model.js";
 import { failureOf } from "./refusal.js";
 import type { ContextState } from "./state.js";
 
@@ -19,12 +19,18 @@ function answered(result: CallResult<bigint>): bigint | undefined {
 }
 
 /** Registers `object` under `id` for `owner`, a plugin or the host; the answer unregisters it. */
-export function registerService(state: ContextState, owner: bigint, id: string, object: unknown): () => void {
+export function registerService(
+  state: ContextState,
+  owner: bigint,
+  id: string,
+  object: unknown,
+  capacity?: CapacityProvider,
+): () => void {
   const result = state.call(() => {
     const registered = state.core.registerService(owner, id);
     const registration = answered(registered);
     if (registration !== undefined) {
-      state.services.add(registration, { id, object, owner });
+      state.services.add(registration, { id, object, owner, capacity });
       state.rememberHandle(owner, registration);
     }
     return registered;
@@ -33,16 +39,16 @@ export function registerService(state: ContextState, owner: bigint, id: string, 
   if (registration === undefined) {
     throw failureOf("weivel_register_service", result);
   }
-  return () => unregisterService(state, registration);
+  return () => unregisterService(state, owner, registration);
 }
 
-function unregisterService(state: ContextState, registration: bigint): void {
-  if (!state.services.has(registration)) {
+function unregisterService(state: ContextState, owner: bigint, registration: bigint): void {
+  if (!state.services.has(registration) || state.hasEnded(registration)) {
     return;
   }
   state.call(() => {
     state.core.unregister(registration);
-    state.services.drop(registration);
+    state.markEnded(owner, registration);
   });
 }
 
@@ -55,7 +61,7 @@ export function stopWatching(state: ContextState, watch: bigint): void {
     if (state.core.handleState(watch).value === HandleCondition.Watching) {
       state.core.unregister(watch);
     }
-    state.watches.drop(watch);
+    state.dropWatch(watch);
   });
 }
 
@@ -69,7 +75,7 @@ export function startWatching(
   const watchHandle = state.call(() => {
     const handle = answered(watch());
     if (handle !== undefined) {
-      state.watches.add(handle, { listener });
+      state.watches.add(handle, { plugin, listener });
       state.rememberHandle(plugin, handle);
     }
     return handle;
@@ -95,7 +101,7 @@ function want(state: ContextState, plugin: bigint, id: string, options: WantOpti
       const wanted = state.core.wantService(plugin, id, encodeWant(options, state.clock.now()));
       const wantHandle = answered(wanted);
       if (wantHandle !== undefined) {
-        state.wants.add(wantHandle, { id, resolve, reject });
+        state.wants.add(wantHandle, { plugin, id, resolve, reject });
         state.rememberHandle(plugin, wantHandle);
       }
       return wanted;
@@ -110,7 +116,8 @@ export function createServices(state: ContextState, plugin: bigint): Services {
   return {
     get: <Service>(type: ServiceType<Service>) => get(state, plugin, type.id) as Service | undefined,
     ids: () => state.call(() => state.core.serviceIds(plugin)).value ?? [],
-    register: <Service>(type: ServiceType<Service>, service: Service) => registerService(state, plugin, type.id, service),
+    register: <Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}) =>
+      registerService(state, plugin, type.id, service, options.capacity),
     want: <Service>(type: ServiceType<Service>, options: WantOptions = {}) =>
       want(state, plugin, type.id, options) as Promise<Service>,
     watch: <Service>(type: ServiceType<Service>, listener: ServiceListener<Service>) =>

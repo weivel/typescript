@@ -8,9 +8,8 @@ import {
 import type { CapacityProvider } from "./model.js";
 import type { ContextState } from "./state.js";
 
-function asCapacityProvider(object: unknown): CapacityProvider {
-  return (typeof object === "object" && object !== null) || typeof object === "function" ? (object as CapacityProvider) : {};
-}
+/** A registration that declared no capacity provider: no live attributes, and it serves every consumer. */
+const plainRegistration: CapacityProvider = {};
 
 function liveAttributes(provider: CapacityProvider): NamedNumber[] {
   if (typeof provider.attributes !== "function") {
@@ -53,7 +52,7 @@ export function answerCapacity(state: ContextState, event: CapacityWantedEvent):
   }
   let answer: CapacityAnswer | undefined;
   try {
-    answer = answerOf(asCapacityProvider(offered.object), event);
+    answer = answerOf(offered.capacity ?? plainRegistration, event);
   } catch (error) {
     state.logOf(offered.owner).error(`The provider of ${offered.id} threw while asked about its capacity.`, error);
     return;
