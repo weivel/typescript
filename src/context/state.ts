@@ -70,6 +70,11 @@ export class ContextState {
     this.#deferred.receive(event);
   }
 
+  /** Runs `step` once every event received so far has been handled. */
+  whenHandled(step: () => void): void {
+    this.#deferred.whenHandled(step);
+  }
+
   /** Makes a core call and records what it answered before any event it caused is handled. */
   call<Value>(callAndRecord: () => Value): Value {
     return this.#deferred.around(callAndRecord);

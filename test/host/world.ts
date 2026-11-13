@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
 import { EdgeSource, sharedLibraryFileName, type CoreOptions, type Refusal } from "../../src/core/index.ts";
 import type { PluginContext } from "../../src/context/index.ts";
-import { Host, type HostOptions } from "../../src/host/index.ts";
+import { Host, isHostDestroyed, type ActivationOutcome, type HostDestroyed, type HostOptions } from "../../src/host/index.ts";
+import type { ActivationPlan } from "../../src/core/index.ts";
 import { registrationOf, type DiscoveryFailure, type StandardRefusal } from "../../src/standard/index.ts";
 import type { Scheduler } from "../../src/timer/index.ts";
 import { ManualClock, recordingLogger, type RecordingLogger } from "../context/world.ts";
@@ -183,7 +184,7 @@ export function registerDirectory(world: HostWorld, directory: string): Director
   const refused: { manifestPath: string; refusal: Refusal }[] = [];
   for (const found of discovery.value?.plugins ?? []) {
     const { manifest, entry } = registrationOf(found);
-    const answer = world.host.register(manifest, entry);
+    const answer = alive(world.host.register(manifest, entry));
     if (answer.plugin === undefined) {
       refused.push({ manifestPath: found.manifestPath, refusal: answer.refusal });
     } else {
@@ -191,6 +192,20 @@ export function registerDirectory(world: HostWorld, directory: string): Director
     }
   }
   return { registered, refused, failures: discovery.value?.failures ?? [], refusal: discovery.refusal };
+}
+
+/** The answer of a call made on a host the test has not destroyed. */
+export function alive<Answer>(answer: Answer | HostDestroyed): Answer {
+  if (isHostDestroyed(answer)) {
+    throw new Error("the test called a host it had destroyed");
+  }
+  return answer;
+}
+
+/** Activates `plugins` and waits until every activate has settled: the plan, and every plugin's outcome. */
+export async function activated(host: Host, plugins: readonly bigint[]): Promise<{ plan: ActivationPlan; outcomes: readonly ActivationOutcome[] }> {
+  const started = alive(host.activate(plugins));
+  return { plan: started.plan, outcomes: await started.outcomes };
 }
 
 /** Lets every settled promise's callbacks run. */

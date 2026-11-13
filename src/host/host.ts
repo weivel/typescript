@@ -1,4 +1,4 @@
-import { createCore, Status, type Core, type CoreEvent, type Manifest, type ReachRefusedEvent, type QuarantineReason, type Refusal } from "../core/index.js";
+import { createCore, Status, type Core, type CoreEvent, type Manifest, type QuarantineReason, type ReachRefusedEvent, type Refusal } from "../core/index.js";
 import {
   consoleLogger,
   failureOf,
@@ -13,24 +13,31 @@ import { HandleTable } from "../handles/index.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
 import { CoreTimer } from "../timer/index.js";
+import { activationFailureOf, type ActivationFailure } from "./activation-failure.js";
 import { writeCoreLog } from "./core-log.js";
 import { bindLibrary } from "./libraries.js";
-import { activationFailureOf, messageOf, type ActivationFailure } from "./activation-failure.js";
-import type {
-  ActivationOutcome,
-  ActivationReport,
-  ActivationState,
-  HostedPlugin,
-  HostOptions,
-  LoadedLibrary,
-  Plugin,
-  RegisterAnswer,
+import {
+  hostDestroyed,
+  type ActivationOutcome,
+  type ActivationStart,
+  type ActivationState,
+  type HostDestroyed,
+  type HostedPlugin,
+  type HostOptions,
+  type LoadedLibrary,
+  type Plugin,
+  type RegisterAnswer,
 } from "./model.js";
+import { afterSettling, isThenable, settledCall } from "./settling.js";
 
 interface PluginRecord {
   readonly hosted: HostedPlugin;
-  /** The entry once its activate has been called, until its deactivate is. */
-  definition: Plugin | undefined;
+  /** Whether its activate has been called, so its deactivate is owed. */
+  activated: boolean;
+  /** Settles the outcome its activation answers, once. */
+  settleOutcome: ((outcome: ActivationOutcome) => void) | undefined;
+  /** Its release, once one began; a later release answers the same. */
+  release: Promise<void> | undefined;
 }
 
 function refuseUnboundKinds(declaration: LibraryDeclaration): void {
@@ -53,6 +60,9 @@ function succeeded(call: string, result: { status: Status; events: readonly Core
  * to them. Every decision is the core's; the host carries its answers out. It never needs the standard: reading
  * manifests, discovering plugins on disk and reading library declarations are the standard module's, which feeds
  * `register` and `loadLibrary`.
+ *
+ * What goes wrong in code the host calls, a deactivate, a release or an unload, goes to the error sink and never to
+ * the caller. Once destroyed, every call answers `hostDestroyed` as a value, quietly.
  */
 export class Host {
   readonly core: Core;
@@ -62,8 +72,8 @@ export class Host {
   readonly #timer: CoreTimer;
   readonly #plugins = new HandleTable<PluginRecord>();
   readonly #hostServiceCounts = new Map<string, number>();
-  /** Every plugin the core verified active and the host has not released, the latest activated last. */
-  readonly #activeOrder: bigint[] = [];
+  /** Every plugin the host opened and has not released, in the order it opened them. */
+  readonly #opened: PluginRecord[] = [];
   readonly #libraryUnloads = new Set<() => void>();
   #destroyed = false;
   #destruction: Promise<void> | undefined;
@@ -86,6 +96,11 @@ export class Host {
     this.#timer = new CoreTimer(core, { clock: options.clock, scheduler: options.scheduler, onMove: options.onTimerMove });
   }
 
+  /** Whether `destroy` has begun its work; every call from then on answers `hostDestroyed`. */
+  get destroyed(): boolean {
+    return this.#destroyed;
+  }
+
   /**
    * @remarks A refusal event is not reported here: it is the answer of the call that queued it, which that call's
    * caller reads, so an activation check the host answers with a quarantine is never also a refusal of the run.
@@ -104,15 +119,23 @@ export class Host {
     return `${name} was refused ${event.id ?? "an id"}: ${event.refusal.detail ?? `code ${event.refusal.code}`}`;
   }
 
+  #sink(error: unknown): void {
+    this.core.reportListenerError(error);
+  }
+
   /**
    * Registers a plugin from its manifest and the entry its caller hands in, answering its handle or the core's refusal.
    *
    * @throws Error when the core answers the call malformed, which is a defect of this layer, not the caller's.
    */
-  register(manifest: Manifest, entry: Plugin): RegisterAnswer {
+  register(manifest: Manifest, entry: Plugin): RegisterAnswer | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
     const registered = this.core.registerManifest(manifest);
     if (registered.status === Status.Ok && registered.value !== undefined) {
-      this.#plugins.add(registered.value, { hosted: { plugin: registered.value, manifest, entry }, definition: undefined });
+      const hosted = { plugin: registered.value, manifest, entry };
+      this.#plugins.add(registered.value, { hosted, activated: false, settleOutcome: undefined, release: undefined });
       return { plugin: registered.value, refusal: undefined };
     }
     const failure = failureOf("weivel_register_manifest", registered);
@@ -128,7 +151,10 @@ export class Host {
   }
 
   /** Registers a service the host itself supplies under WEIVEL_HOST; the answer unregisters it. */
-  registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}): () => void {
+  registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}): (() => void) | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
     const unregister = this.contexts.registerHostService(type, service, options);
     this.#countHostService(type.id, 1);
     let registered = true;
@@ -157,10 +183,13 @@ export class Host {
    * @throws Error when a function is of a kind other than bytes, the library file is missing, or it lacks a symbol
    * its declaration names.
    */
-  loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary {
+  loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
     refuseUnboundKinds(declaration);
     const bound = bindLibrary(libraryPath, declaration);
-    const unregisters = [...bound.services].map(([id, service]) => this.registerHostService({ id }, service));
+    const unregisters = [...bound.services].map(([id, service]) => this.registerHostService({ id }, service) as () => void);
     const unload = (): void => {
       this.#libraryUnloads.delete(unload);
       unregisters.splice(0).forEach((unregister) => unregister());
@@ -171,55 +200,60 @@ export class Host {
   }
 
   /**
-   * Plans the activation of `plugins` with the core, then starts each plugin of the plan's order in turn: opens it,
-   * imports its entry and calls its `activate`, without waiting for the previous plugin's `activate` to settle. Each
-   * plugin's activation is checked with the core when its own `activate` settles, and the answer comes once every one
-   * has.
+   * Plans the activation of `plugins` with the core, then starts each plugin of the plan's order in that order: opens
+   * it, builds its context and calls its entry's activate, never waiting for one to finish before starting the next.
+   * It answers the plan at once; `outcomes` settles once every activate has, each verified or quarantined as it settles.
    *
-   * @implNote A plugin whose `activate` awaits a want of a service a later plugin registers would otherwise hold back
-   * every plugin behind it for good, and the core sets no default timeout on a want. So a provider's `activate` may
-   * still be running when its consumer's starts: a consumer that needs the service wants it.
+   * @implNote A plugin whose activate awaits a want of a service a later plugin registers would otherwise hold back
+   * every plugin behind it for good, and the core sets no default timeout on a want; and a host whose activation
+   * waited for every activate could never be destroyed while one waits on a want nothing provides.
    */
-  async activate(plugins: readonly bigint[]): Promise<ActivationReport> {
+  activate(plugins: readonly bigint[]): ActivationStart | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
     const planned = this.core.planActivation(plugins, this.#options.edgeSource, [...this.#hostServiceCounts.keys()]);
     if (planned.value === undefined) {
       throw failureOf("weivel_plan_activation", planned);
     }
-    const settling: Promise<ActivationOutcome>[] = [];
-    for (const plugin of planned.value.order) {
-      settling.push((await this.#startActivation(plugin)).settled);
-    }
-    return { plan: planned.value, outcomes: await Promise.all(settling) };
+    const outcomes = planned.value.order.map((plugin) => this.#startActivation(this.#record(plugin)));
+    return { plan: planned.value, outcomes: Promise.all(outcomes) };
   }
 
-  /** Answers once the plugin's `activate` has been called; `settled` is its outcome once that `activate` settles. */
-  async #startActivation(plugin: bigint): Promise<{ readonly settled: Promise<ActivationOutcome> }> {
-    const record = this.#record(plugin);
+  #startActivation(record: PluginRecord): Promise<ActivationOutcome> {
     let context: PluginContext;
     try {
-      context = this.open(plugin);
+      context = this.#open(record);
     } catch (error) {
       if (error instanceof RefusalError) {
-        return { settled: Promise.resolve(this.#outcome(record, "refused", error)) };
+        return Promise.resolve(this.#outcome(record, "refused", error));
       }
       throw error;
     }
-    const failure = this.#callActivate(record, record.hosted.entry, context);
-    return { settled: failure.then((settledFailure) => this.#checkActivation(record, settledFailure)) };
+    return new Promise((resolve) => {
+      record.settleOutcome = resolve;
+      record.activated = true;
+      const activating = settledCall(() => record.hosted.entry.activate(context));
+      Promise.resolve(activating).then(
+        () => this.#activationSettled(record, undefined),
+        (error: unknown) => this.#activationSettled(record, activationFailureOf(error)),
+      );
+    });
   }
 
-  async #callActivate(record: PluginRecord, definition: Plugin, context: PluginContext): Promise<ActivationFailure | undefined> {
-    record.definition = definition;
-    try {
-      await definition.activate(context);
-      return undefined;
-    } catch (error) {
-      return activationFailureOf(error);
+  /** Verifies or quarantines a plugin whose activate settled, unless it was released or the host destroyed since. */
+  #activationSettled(record: PluginRecord, failure: ActivationFailure | undefined): void {
+    if (record.release !== undefined || this.#destroyed) {
+      return;
     }
+    const outcome = failure === undefined ? this.#verify(record) : this.#quarantine(record, failure.reason);
+    this.#settleOutcome(record, outcome);
   }
 
-  #checkActivation(record: PluginRecord, failure: ActivationFailure | undefined): ActivationOutcome {
-    return failure === undefined ? this.verify(record.hosted.plugin) : this.#quarantine(record, failure.reason);
+  #settleOutcome(record: PluginRecord, outcome: ActivationOutcome): void {
+    const settle = record.settleOutcome;
+    record.settleOutcome = undefined;
+    settle?.(outcome);
   }
 
   /**
@@ -227,9 +261,17 @@ export class Host {
    *
    * @throws RefusalError when the core refuses to open it.
    */
-  open(plugin: bigint): PluginContext {
-    const record = this.#record(plugin);
+  open(plugin: bigint): PluginContext | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
+    return this.#open(this.#record(plugin));
+  }
+
+  #open(record: PluginRecord): PluginContext {
+    const plugin = record.hosted.plugin;
     succeeded("weivel_open_plugin", this.core.openPlugin(plugin, plugin));
+    this.#opened.push(record);
     return this.contexts.create(plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
   }
 
@@ -238,21 +280,32 @@ export class Host {
   }
 
   /** Checks a plugin's activation with the core, and quarantines it in the same step when the core refuses. */
-  verify(plugin: bigint): ActivationOutcome {
-    const record = this.#record(plugin);
-    const verified = this.core.verifyActivation(plugin);
+  verify(plugin: bigint): ActivationOutcome | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
+    return this.#verify(this.#record(plugin));
+  }
+
+  #verify(record: PluginRecord): ActivationOutcome {
+    const verified = this.core.verifyActivation(record.hosted.plugin);
     if (verified.status !== Status.Ok) {
       return this.#quarantine(record, undefined);
     }
-    this.#activeOrder.push(plugin);
     return this.#outcome(record, "active", undefined);
   }
 
-  /** With no reason, the plugin's ledger row shows the refusal its activation check answered. */
+  /**
+   * Quarantines a plugin, its entries ending once the events its quarantine queued have reached it. With no reason,
+   * its ledger row shows the refusal its activation check answered.
+   */
   #quarantine(record: PluginRecord, reason: QuarantineReason | undefined): ActivationOutcome {
     const plugin = record.hosted.plugin;
-    succeeded("weivel_quarantine_plugin", this.core.quarantinePlugin(plugin, reason));
-    this.contexts.stopped(plugin);
+    const quarantined = this.core.quarantinePlugin(plugin, reason);
+    if (quarantined.status !== Status.Ok) {
+      this.#sink(failureOf("weivel_quarantine_plugin", quarantined));
+    }
+    this.contexts.whenEventsHandled(() => this.contexts.stopped(plugin));
     return this.#outcome(record, "quarantined", this.core.ledgerEntry(plugin).value?.refusal);
   }
 
@@ -261,44 +314,68 @@ export class Host {
   }
 
   /**
-   * Deactivates a plugin, releases it in the core, then forgets it, dropping it from every table once the events of
-   * its forgetting are handled.
+   * Releases a plugin: calls its deactivate while it is still whole, releases it in the core, lets every event that
+   * release queued reach it, then ends its entries, forgets it and drops it from every table. A plugin whose activate
+   * is still running is released the same way, and its activate settling later does nothing.
    *
-   * @remarks Every core call here follows an await, so none runs inside the core's dispatch, where events queued
-   * before it would still wait and a pending want would be dropped unsettled.
+   * @remarks Inside a dispatch the release's events cannot be dispatched before the call returns, so ending the
+   * entries and forgetting wait as a step behind them; the promise settles once that step has run.
    */
-  async release(plugin: bigint): Promise<void> {
-    const record = this.#record(plugin);
-    await this.#deactivate(record);
-    this.#dropFromActiveOrder(plugin);
-    succeeded("weivel_release_plugin", this.core.releasePlugin(plugin));
+  release(plugin: bigint): Promise<void | HostDestroyed> {
+    if (this.#destroyed) {
+      return Promise.resolve(hostDestroyed);
+    }
+    const record = this.#plugins.lookup(plugin);
+    return record === undefined ? Promise.resolve() : this.#release(record);
+  }
+
+  #release(record: PluginRecord): Promise<void> {
+    record.release ??= this.#beginRelease(record);
+    return record.release;
+  }
+
+  #beginRelease(record: PluginRecord): Promise<void> {
+    this.#dropFromOpened(record);
+    this.#settleOutcome(record, this.#outcome(record, "released", undefined));
+    return afterSettling(this.#deactivate(record), () => this.#releaseInCore(record));
+  }
+
+  #dropFromOpened(record: PluginRecord): void {
+    const index = this.#opened.indexOf(record);
+    if (index !== -1) {
+      this.#opened.splice(index, 1);
+    }
+  }
+
+  /** Calls the entry's deactivate when its activate was called; what it throws or rejects with goes to the sink. */
+  #deactivate(record: PluginRecord): unknown {
+    const entry = record.hosted.entry;
+    if (!record.activated || typeof entry.deactivate !== "function") {
+      return undefined;
+    }
+    record.activated = false;
+    const deactivating = settledCall(() => entry.deactivate!());
+    return isThenable(deactivating) ? Promise.resolve(deactivating).catch((error: unknown) => this.#sink(error)) : deactivating;
+  }
+
+  #releaseInCore(record: PluginRecord): Promise<void> {
+    const plugin = record.hosted.plugin;
+    const released = this.core.releasePlugin(plugin);
+    if (released.status !== Status.Ok) {
+      this.#sink(failureOf("weivel_release_plugin", released));
+    }
+    return new Promise((resolve) => this.contexts.whenEventsHandled(() => resolve(this.#forget(plugin))));
+  }
+
+  /** Ends a released plugin's entries, calling nothing in the core for them, then forgets it. */
+  #forget(plugin: bigint): void {
     this.contexts.stopped(plugin);
-    succeeded("weivel_forget_plugin", this.core.forgetPlugin(plugin));
+    const forgotten = this.core.forgetPlugin(plugin);
+    if (forgotten.status !== Status.Ok) {
+      this.#sink(failureOf("weivel_forget_plugin", forgotten));
+    }
     this.contexts.forget(plugin);
     this.#plugins.drop(plugin);
-  }
-
-  #dropFromActiveOrder(plugin: bigint): void {
-    const index = this.#activeOrder.indexOf(plugin);
-    if (index !== -1) {
-      this.#activeOrder.splice(index, 1);
-    }
-  }
-
-  async #deactivate(record: PluginRecord): Promise<void> {
-    const definition = record.definition;
-    record.definition = undefined;
-    if (typeof definition?.deactivate !== "function") {
-      return;
-    }
-    try {
-      await definition.deactivate();
-    } catch (error) {
-      this.#pluginLog(record.hosted.manifest).error(
-        `${record.hosted.manifest.importName}'s deactivate threw: ${messageOf(error)}`,
-        error,
-      );
-    }
   }
 
   #record(plugin: bigint): PluginRecord {
@@ -310,36 +387,35 @@ export class Host {
   }
 
   /**
-   * Releases every active plugin, the latest activated first, unloads every C library the host loaded, stops the
-   * timer and destroys the core. A later call answers the first call's promise.
-   *
-   * The promise rejects with an AggregateError of every release that failed, once the rest of the shutdown has run.
+   * Releases every plugin the host opened and has not released, the last opened first and one whose activate is in
+   * flight included, lets every event and step those releases left run, unloads every C library, stops the timer and
+   * destroys the core. Inside a dispatch it waits as a step behind what is already queued. A later call answers the
+   * first one's promise, which never rejects: what fails goes to the error sink.
    */
   destroy(): Promise<void> {
-    this.#destruction ??= this.#shutDown();
+    this.#destruction ??= new Promise((resolve) => this.contexts.whenEventsHandled(() => resolve(this.#shutDown())));
     return this.#destruction;
   }
 
   async #shutDown(): Promise<void> {
-    const failures = await this.#releaseEveryActivePlugin();
-    [...this.#libraryUnloads].forEach((unload) => unload());
-    this.#timer.stop();
     this.#destroyed = true;
-    this.core.destroy();
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "Releasing a plugin failed while the host was destroyed.");
+    for (const record of [...this.#opened].reverse()) {
+      await this.#release(record);
     }
+    await new Promise<void>((resolve) => this.contexts.whenEventsHandled(resolve));
+    this.#unloadEveryLibrary();
+    this.#timer.stop();
+    this.core.destroy();
   }
 
-  async #releaseEveryActivePlugin(): Promise<unknown[]> {
-    const failures: unknown[] = [];
-    for (const plugin of [...this.#activeOrder].reverse()) {
+  #unloadEveryLibrary(): void {
+    for (const unload of [...this.#libraryUnloads]) {
       try {
-        await this.release(plugin);
+        unload();
       } catch (error) {
-        failures.push(error);
+        this.#libraryUnloads.delete(unload);
+        this.#sink(error);
       }
     }
-    return failures;
   }
 }

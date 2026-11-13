@@ -172,6 +172,11 @@ export function drainEvents(
   }
 }
 
+/** A step queued among the events to dispatch, run when the dispatch reaches it. */
+class DeferredStep {
+  constructor(readonly step: () => void) {}
+}
+
 function allocateZeroed(name: CoreStructName): object {
   return allocateSized(coreStructs[name]);
 }
@@ -192,7 +197,7 @@ export class Core {
   readonly #drainListeners = new Set<DrainListener>();
   #deadlineReader: DeadlineReader | undefined;
   readonly #pending = new Uint32Array(1);
-  readonly #undispatched: CoreEvent[] = [];
+  readonly #undispatched: (CoreEvent | DeferredStep)[] = [];
   #settling = false;
   readonly #onListenerError: ListenerErrorSink;
 
@@ -225,6 +230,20 @@ export class Core {
   /** Sets the one reader told of every deadline announcement at drain time; undefined removes it. */
   setDeadlineReader(reader: DeadlineReader | undefined): void {
     this.#deadlineReader = reader;
+  }
+
+  /**
+   * Runs `step` once every event drained so far has been dispatched: at once outside a dispatch, and inside one as a
+   * step queued behind the events already waiting, since the dispatcher is never re-entered. What it throws goes to
+   * the listener error sink.
+   */
+  whenDispatched(step: () => void): void {
+    const deferred = new DeferredStep(step);
+    if (this.#settling) {
+      this.#undispatched.push(deferred);
+    } else {
+      this.#runStep(deferred);
+    }
   }
 
   get destroyed(): boolean {
@@ -497,12 +516,28 @@ export class Core {
   }
 
   #dispatchUndispatched(): void {
-    for (let event = this.#undispatched.shift(); event !== undefined; event = this.#undispatched.shift()) {
-      try {
-        this.#dispatcher?.(event);
-      } catch (error) {
-        this.reportListenerError(error, event);
+    for (let next = this.#undispatched.shift(); next !== undefined; next = this.#undispatched.shift()) {
+      if (next instanceof DeferredStep) {
+        this.#runStep(next);
+      } else {
+        this.#dispatchOne(next);
       }
+    }
+  }
+
+  #dispatchOne(event: CoreEvent): void {
+    try {
+      this.#dispatcher?.(event);
+    } catch (error) {
+      this.reportListenerError(error, event);
+    }
+  }
+
+  #runStep(deferred: DeferredStep): void {
+    try {
+      deferred.step();
+    } catch (error) {
+      this.reportListenerError(error);
     }
   }
 
