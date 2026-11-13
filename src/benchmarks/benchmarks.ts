@@ -1,14 +1,17 @@
-import { EdgeSource, Status, type Manifest } from "../core/index.js";
-import type { Logger, PluginContext } from "../context/index.js";
+import koffi from "koffi";
+import { coreStructs, createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
+import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
 import { Host } from "../host/index.js";
-import { busyWait, measureInterleaved, type MeasuredPath, type Sampling, type Summary } from "./measure.js";
+import { measureInterleaved, type MeasuredPath, type PathDecorator, type Sampling, type Summary } from "./measure.js";
 
 export interface BenchmarkOptions {
   readonly coreLibraryPath?: string;
+  /** The bound core library to call through; loaded from `coreLibraryPath` when absent. */
+  readonly coreLibrary?: CoreLibrary;
   readonly standardLibraryPath?: string;
   readonly sampling?: Partial<Sampling>;
-  /** Spins this long inside every call through weivel: only a red proof, which needs a slowed path, sets it. */
-  readonly addedNanoseconds?: number;
+  /** Wraps each measured path, named as the benchmark's summaries name it. */
+  readonly decorate?: PathDecorator;
 }
 
 export interface LibraryBenchmarkOptions extends BenchmarkOptions {
@@ -32,61 +35,58 @@ export const defaultSamplings = {
   libraryCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
 } as const satisfies Record<string, Sampling>;
 
-/** A host on the real core with a provider and a consumer opened in it, each with its context. */
-class BenchmarkWorld {
-  readonly host: Host;
-  readonly consumer: bigint;
-  readonly consumerContext: PluginContext;
-  readonly providerContext: PluginContext;
+function samplingOf(defaults: Sampling, options: BenchmarkOptions): Sampling {
+  return { ...defaults, ...options.sampling };
+}
+
+interface OpenedPlugin {
+  readonly plugin: bigint;
+  readonly context: PluginContext;
+}
+
+function openPlugin(core: Core, contexts: PluginContexts, manifest: Manifest): OpenedPlugin {
+  const registered = core.registerManifest(manifest);
+  if (registered.value === undefined || core.openPlugin(registered.value).status !== Status.Ok) {
+    throw new Error(`The core would not register and open ${manifest.importName}.`);
+  }
+  return { plugin: registered.value, context: contexts.create(registered.value, manifest, silentLogger) };
+}
+
+const providerManifest: Manifest = { importName: "provider", services: { provides: [{ id: arithmeticId }] } };
+const consumerManifest: Manifest = { importName: "consumer", services: { consumes: [{ id: arithmeticId }, { id: echoId }] } };
+
+/** A core and its contexts, as a host composes them, with a provider and a consumer opened in it. */
+class CoreWorld {
+  readonly library: CoreLibrary;
+  readonly core: Core;
+  readonly provider: OpenedPlugin;
+  readonly consumer: OpenedPlugin;
 
   constructor(options: BenchmarkOptions) {
-    this.host = Host.create({
-      edgeSource: EdgeSource.Capabilities,
-      ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
-      ...(options.standardLibraryPath === undefined ? {} : { standardLibraryPath: options.standardLibraryPath }),
-      log: silentLogger,
-    });
-    const provider = this.#open({ importName: "provider", services: { provides: [{ id: arithmeticId }] } });
-    this.providerContext = provider.context;
-    const consumer = this.#open({ importName: "consumer", services: { consumes: [{ id: arithmeticId }, { id: echoId }] } });
-    this.consumer = consumer.plugin;
-    this.consumerContext = consumer.context;
-  }
-
-  #open(manifest: Manifest): { plugin: bigint; context: PluginContext } {
-    const registered = this.host.core.registerManifest(manifest);
-    if (registered.value === undefined || this.host.core.openPlugin(registered.value).status !== Status.Ok) {
-      throw new Error(`The core would not register and open ${manifest.importName}.`);
+    this.library = options.coreLibrary ?? loadCoreLibrary(options.coreLibraryPath);
+    const created = createCore({ library: this.library });
+    if (created.value === undefined) {
+      throw new Error(`weivel_core_create answered status ${created.status}.`);
     }
-    return { plugin: registered.value, context: this.host.contexts.create(registered.value, manifest, silentLogger) };
+    this.core = created.value;
+    const contexts = new PluginContexts(this.core, { log: silentLogger });
+    this.core.setDispatcher((event) => contexts.receive(event));
+    this.provider = openPlugin(this.core, contexts, providerManifest);
+    this.consumer = openPlugin(this.core, contexts, consumerManifest);
   }
 
   destroy(): void {
-    this.host.destroy();
+    this.core.destroy();
   }
 }
 
-function withWorld<Answer>(options: BenchmarkOptions, measure: (world: BenchmarkWorld) => Answer): Answer {
-  const world = new BenchmarkWorld(options);
+function withCoreWorld<Answer>(options: BenchmarkOptions, measure: (world: CoreWorld) => Answer): Answer {
+  const world = new CoreWorld(options);
   try {
     return measure(world);
   } finally {
     world.destroy();
   }
-}
-
-function slowed(path: MeasuredPath, addedNanoseconds: number | undefined): MeasuredPath {
-  if (addedNanoseconds === undefined || addedNanoseconds <= 0) {
-    return path;
-  }
-  return (call) => {
-    busyWait(addedNanoseconds);
-    return path(call);
-  };
-}
-
-function samplingOf(defaults: Sampling, options: BenchmarkOptions): Sampling {
-  return { ...defaults, ...options.sampling };
 }
 
 export interface SameLanguageCallSummaries {
@@ -103,10 +103,10 @@ export interface SameLanguageCallSummaries {
  * directly. The resolved service is the provider's own object, so after the lookup the call is a plain call.
  */
 export function benchmarkSameLanguageCall(options: BenchmarkOptions = {}): SameLanguageCallSummaries {
-  return withWorld(options, (world) => {
+  return withCoreWorld(options, (world) => {
     const arithmetic: Arithmetic = { add: (left, right) => left + right };
-    world.providerContext.services.register(world.providerContext.service<Arithmetic>(arithmeticId), arithmetic);
-    const resolved = world.consumerContext.services.get(world.consumerContext.service<Arithmetic>(arithmeticId));
+    world.provider.context.services.register(world.provider.context.service<Arithmetic>(arithmeticId), arithmetic);
+    const resolved = world.consumer.context.services.get(world.consumer.context.service<Arithmetic>(arithmeticId));
     if (resolved !== arithmetic) {
       throw new Error("services.get did not answer the provider's own object.");
     }
@@ -115,27 +115,47 @@ export function benchmarkSameLanguageCall(options: BenchmarkOptions = {}): SameL
       {
         direct: (call) => target.add(call, 1),
         directAgain: (call) => target.add(call, 1),
-        throughWeivel: slowed((call) => resolved.add(call, 1), options.addedNanoseconds),
+        throughWeivel: (call) => resolved.add(call, 1),
       },
       samplingOf(defaultSamplings.sameLanguageCall, options),
+      options.decorate,
     );
   });
 }
 
-/** Times weivel_get_service through koffi and the wrapper's drain, the control call the kit's C benchmark times. */
-export function benchmarkControlCall(options: BenchmarkOptions = {}): Summary {
-  return withWorld(options, (world) => {
-    world.providerContext.services.register(world.providerContext.service<Arithmetic>(arithmeticId), { add: (left, right) => left + right });
-    const core = world.host.core;
-    const consumer = world.consumer;
-    const getService: MeasuredPath = () => {
-      const answer = core.getService(consumer, arithmeticId);
-      if (answer.status !== Status.Ok) {
-        throw new Error(`weivel_get_service answered status ${answer.status}.`);
-      }
-      return answer.value;
-    };
-    return measureInterleaved({ getService: slowed(getService, options.addedNanoseconds) }, samplingOf(defaultSamplings.controlCall, options)).getService;
+export interface FfiCallSummaries {
+  /** A call that does no work, through the same koffi binding: the bare cost of crossing into C. */
+  readonly bareCall: Summary;
+  /** The call weivel makes. */
+  readonly weivelCall: Summary;
+}
+
+/**
+ * Times weivel_get_service through koffi and the wrapper's drain, the control call the kit's C benchmark times,
+ * against weivel_support_release on an all-zero answer through the same bound library, which the core answers as a
+ * no-op.
+ */
+export function benchmarkControlCall(options: BenchmarkOptions = {}): FfiCallSummaries {
+  return withCoreWorld(options, (world) => {
+    world.provider.context.services.register(world.provider.context.service<Arithmetic>(arithmeticId), { add: (left, right) => left + right });
+    const core = world.core;
+    const consumer = world.consumer.plugin;
+    const emptyAnswer = Buffer.alloc(koffi.sizeof(coreStructs.weivel_support));
+    const releaseEmpty = world.library.functions.weivel_support_release;
+    return measureInterleaved(
+      {
+        bareCall: () => releaseEmpty(emptyAnswer),
+        weivelCall: () => {
+          const answer = core.getService(consumer, arithmeticId);
+          if (answer.status !== Status.Ok) {
+            throw new Error(`weivel_get_service answered status ${answer.status}.`);
+          }
+          return answer.value;
+        },
+      },
+      samplingOf(defaultSamplings.controlCall, options),
+      options.decorate,
+    );
   });
 }
 
@@ -146,18 +166,37 @@ const echoDeclaration = JSON.stringify({
   services: [{ id: echoId, functions: [{ name: "echo", symbol: "echo_echo", kind: "bytes" }] }],
 });
 
-/** Times a call into a C library through the host's bytes binding: 16 bytes in, the same 16 bytes back. */
-export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Summary {
-  return withWorld(options, (world) => {
-    const answer = world.host.loadLibrary(echoDeclaration, options.echoLibraryPath);
+/**
+ * Times a call into a C library through the host's bytes binding, 16 bytes in and the same 16 back, against
+ * `echo_release(NULL)`, which frees nothing, bound by koffi the way the host binds a library's release.
+ */
+export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): FfiCallSummaries {
+  const host = Host.create({
+    edgeSource: EdgeSource.Capabilities,
+    ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
+    ...(options.standardLibraryPath === undefined ? {} : { standardLibraryPath: options.standardLibraryPath }),
+    log: silentLogger,
+  });
+  const bareLibrary = koffi.load(options.echoLibraryPath);
+  try {
+    const answer = host.loadLibrary(echoDeclaration, options.echoLibraryPath);
     if (answer.library === undefined) {
       throw new Error(`The echo declaration was refused: ${answer.refusal.detail}`);
     }
-    const echo = world.consumerContext.services.get(world.consumerContext.service<{ echo(input: Uint8Array): Uint8Array }>(echoId));
+    const consumer = openPlugin(host.core, host.contexts, consumerManifest).context;
+    const echo = consumer.services.get(consumer.service<{ echo(input: Uint8Array): Uint8Array }>(echoId));
     if (echo === undefined) {
       throw new Error("The consumer could not reach the echo library's service.");
     }
+    const releaseNothing = bareLibrary.func("echo_release", "void", ["void *"]) as (buffer: null) => void;
     const input = new Uint8Array(16).fill(7);
-    return measureInterleaved({ echo: slowed(() => echo.echo(input), options.addedNanoseconds) }, samplingOf(defaultSamplings.libraryCall, options)).echo;
-  });
+    return measureInterleaved(
+      { bareCall: () => releaseNothing(null), weivelCall: () => echo.echo(input) },
+      samplingOf(defaultSamplings.libraryCall, options),
+      options.decorate,
+    );
+  } finally {
+    bareLibrary.unload();
+    host.destroy();
+  }
 }
