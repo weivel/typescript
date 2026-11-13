@@ -92,6 +92,17 @@ describe("a C library loaded as host services", () => {
     expect(() => held.echo!(new Uint8Array([1]))).toThrow("echo_echo belongs to a C library that has been unloaded.");
   });
 
+  it("unload once, so a second unload leaves another load of the same file working", () => {
+    const world = createHostWorld();
+    const first = world.host.loadLibrary(declaration(), echoLibraryPath).library!;
+    const second = world.host.loadLibrary(declaration(), echoLibraryPath).library!;
+
+    first.unload();
+    first.unload();
+
+    expect(second.services.get("echo")!.echo!(new Uint8Array([9]))).toEqual(new Uint8Array([9]));
+  });
+
   it("refuses a json function by its field path, binding and registering nothing", () => {
     const world = createHostWorld();
     const withJson = [echoFunctions[0]!, { name: "repeat", symbol: "echo_echo", kind: "json", argument: true, result: true }];
