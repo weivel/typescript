@@ -113,7 +113,11 @@ export interface SameLanguageCallSummaries {
 
 /**
  * Times a call on a service a consumer resolved through weivel against the same call made on the provider's object
- * directly. The resolved service is the provider's own object, so after the lookup the call is a plain call.
+ * directly.
+ *
+ * @remarks Both timed paths run the same code, a call on the provider's own object, so the timing can show only
+ * noise. The proof that weivel puts nothing between a consumer and a provider of the same language is the identity
+ * check before it: the object `services.get` resolved is the provider's object itself, or the benchmark throws.
  */
 export function benchmarkSameLanguageCall(options: BenchmarkOptions = {}): SameLanguageCallSummaries {
   return withCoreWorld(options, (world) => {
