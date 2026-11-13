@@ -220,6 +220,11 @@ export class Host {
     return { plan: planned.value, outcomes: Promise.all(outcomes) };
   }
 
+  /**
+   * @implNote An open that fails for a reason other than the core's refusal is a defect of this layer, so it goes to
+   * the error sink; answering it as that plugin's outcome, rather than throwing, keeps the plan and the plugins
+   * already started in the caller's hands.
+   */
   #startActivation(record: PluginRecord): Promise<ActivationOutcome> {
     let context: PluginContext;
     try {
@@ -228,7 +233,8 @@ export class Host {
       if (error instanceof RefusalError) {
         return Promise.resolve(this.#outcome(record, "refused", error));
       }
-      throw error;
+      this.#sink(error);
+      return Promise.resolve(this.#outcome(record, "refused", undefined));
     }
     return new Promise((resolve) => {
       record.settleOutcome = resolve;
@@ -364,7 +370,15 @@ export class Host {
     if (released.status !== Status.Ok) {
       this.#sink(failureOf("weivel_release_plugin", released));
     }
-    return new Promise((resolve) => this.contexts.whenEventsHandled(() => resolve(this.#forget(plugin))));
+    return new Promise((resolve) =>
+      this.contexts.whenEventsHandled(() => {
+        try {
+          this.#forget(plugin);
+        } finally {
+          resolve();
+        }
+      }),
+    );
   }
 
   /** Ends a released plugin's entries, calling nothing in the core for them, then forgets it. */
@@ -399,13 +413,16 @@ export class Host {
 
   async #shutDown(): Promise<void> {
     this.#destroyed = true;
-    for (const record of [...this.#opened].reverse()) {
-      await this.#release(record);
+    try {
+      for (const record of [...this.#opened].reverse()) {
+        await this.#release(record).catch((error: unknown) => this.#sink(error));
+      }
+      await new Promise<void>((resolve) => this.contexts.whenEventsHandled(resolve));
+    } finally {
+      this.#unloadEveryLibrary();
+      this.#timer.stop();
+      this.core.destroy();
     }
-    await new Promise<void>((resolve) => this.contexts.whenEventsHandled(resolve));
-    this.#unloadEveryLibrary();
-    this.#timer.stop();
-    this.core.destroy();
   }
 
   #unloadEveryLibrary(): void {
