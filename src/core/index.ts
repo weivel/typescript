@@ -1,1 +1,55 @@
 export { sharedLibraryFileName } from "./library-file.js";
+export * from "./constants.js";
+export {
+  coreStructs,
+  coreFunctionNames,
+  sizeOf,
+  offsetOf,
+  type CoreStructName,
+  type CoreFunctionName,
+  type CoreFunctions,
+} from "./declarations.js";
+export type {
+  CoreEvent,
+  LogEvent,
+  RefusalEvent,
+  WantSettledEvent,
+  WatchEvent,
+  RevokedEvent,
+  ReachRefusedEvent,
+  CapacityWantedEvent,
+  CapabilityEvent,
+} from "./events.js";
+export type {
+  Refusal,
+  NamedNumber,
+  ServiceOffer,
+  ServiceWant,
+  Manifest,
+  ConstraintEntry,
+  CoreOptions,
+  WantOptions,
+  QuarantineReason,
+  CapacityAnswer,
+} from "./values.js";
+export type {
+  Support,
+  ActivationEdge,
+  PluginRefusal,
+  ActivationPlan,
+  CapabilityImplementation,
+  LedgerRow,
+  DeclarationRefusal,
+  LedgerSnapshot,
+} from "./answers.js";
+export {
+  Core,
+  createCore,
+  loadCoreLibrary,
+  defaultCoreLibraryPath,
+  type CallResult,
+  type CoreLibrary,
+  type CreateCoreOptions,
+  type DrainListener,
+  type EventDispatcher,
+} from "./core.js";
