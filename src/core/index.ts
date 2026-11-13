@@ -50,6 +50,7 @@ export {
   defaultCoreLibraryPath,
   defaultListenerErrorSink,
   type CallResult,
+  type ClockReading,
   type CoreLibrary,
   type CreateCoreOptions,
   type DeadlineReader,

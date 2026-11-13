@@ -51,6 +51,7 @@ export class CoreTimer {
     this.#scheduler = options.scheduler ?? systemScheduler;
     this.#onMove = options.onMove;
     core.setDeadlineReader((deadline) => this.#move(deadline));
+    core.setClock(() => this.#clock.now());
   }
 
   /** The deadline the timer is armed for, or undefined when the core waits on no time. */
@@ -60,6 +61,7 @@ export class CoreTimer {
 
   stop(): void {
     this.#core.setDeadlineReader(undefined);
+    this.#core.setClock(undefined);
     this.#cancel();
   }
 

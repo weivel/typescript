@@ -16,6 +16,7 @@ import {
 } from "./answers.js";
 import { Status, type EdgeSource, type HandleCondition } from "./constants.js";
 import { bindCoreFunctions, coreStructs, type CoreFunctions, type CoreStructName } from "./declarations.js";
+import { DeferredStep } from "./deferred-step.js";
 import { copyEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
 import { allocateSized, toBigInt } from "./memory.js";
@@ -54,6 +55,9 @@ export type DrainListener = () => void;
  * @implNote Read at drain time and not at dispatch, because a dispatch can run after a newer announcement was drained.
  */
 export type DeadlineReader = (deadline: number | undefined) => void;
+
+/** The caller's monotonic time in whole milliseconds, read by the wrapper before each call. */
+export type ClockReading = () => number;
 
 /**
  * Receives what a dispatcher, a drain listener or a timer-driven call threw, with the event being dispatched when
@@ -172,11 +176,6 @@ export function drainEvents(
   }
 }
 
-/** A step queued among the events to dispatch, run when the dispatch reaches it. */
-class DeferredStep {
-  constructor(readonly step: () => void) {}
-}
-
 function allocateZeroed(name: CoreStructName): object {
   return allocateSized(coreStructs[name]);
 }
@@ -196,6 +195,8 @@ export class Core {
   #dispatcher: EventDispatcher | undefined;
   readonly #drainListeners = new Set<DrainListener>();
   #deadlineReader: DeadlineReader | undefined;
+  #clock: ClockReading | undefined;
+  #announcedDeadline: number | undefined;
   readonly #pending = new Uint32Array(1);
   readonly #undispatched: (CoreEvent | DeferredStep)[] = [];
   #settling = false;
@@ -246,6 +247,17 @@ export class Core {
     }
   }
 
+  /**
+   * Sets the clock the wrapper reads before each call, so a deadline that has fallen due is handed to the core before
+   * the call is made; undefined, the wrapper makes no such check.
+   *
+   * @implNote The timer firing is not enough on its own: the clock can pass the deadline before the language's
+   * scheduler takes its turn, and a registration made then would serve a want the core should already have timed out.
+   */
+  setClock(clock: ClockReading | undefined): void {
+    this.#clock = clock;
+  }
+
   get destroyed(): boolean {
     return this.#core === null;
   }
@@ -268,7 +280,7 @@ export class Core {
   }
 
   advance(now: number): CallResult<undefined> {
-    return this.#invoke((core, pending) => this.#functions.weivel_advance(core, now, pending));
+    return this.#callAndDrain(this.#liveCore(), (core, pending) => this.#functions.weivel_advance(core, now, pending));
   }
 
   supports(manifest: Manifest): CallResult<Support> {
@@ -441,13 +453,30 @@ export class Core {
   }
 
   /**
-   * The one function every call taking a core goes through: it makes the call, reads the call's value when the
-   * status is OK, drains what the core said waits, and dispatches what it drained. The drain runs whatever the call
-   * or the read throws, so a call's events always belong to it; a call that threw before the core answered says
-   * nothing of the queue, which is then drained until the core answers NONE.
+   * The one function every call taking a core goes through: it first hands the core a deadline that has fallen due,
+   * then makes the call, reads the call's value when the status is OK, drains what the core said waits, and
+   * dispatches what it drained. The drain runs whatever the call or the read throws, so a call's events always belong
+   * to it; a call that threw before the core answered says nothing of the queue, which is then drained until the core
+   * answers NONE.
    */
   #invoke<Value>(call: (core: object, pending: Uint32Array) => number, readValue?: () => Value): CallResult<Value> {
-    const core = this.#liveCore();
+    this.#advanceToDueDeadline(this.#liveCore());
+    return this.#callAndDrain(this.#liveCore(), call, readValue);
+  }
+
+  /** Advances the core to the clock when it has reached the announced deadline; the advance itself is not checked. */
+  #advanceToDueDeadline(core: object): void {
+    const deadline = this.#announcedDeadline;
+    if (this.#clock === undefined || deadline === undefined) {
+      return;
+    }
+    const now = this.#clock();
+    if (now >= deadline) {
+      this.#callAndDrain(core, (live, pending) => this.#functions.weivel_advance(live, now, pending));
+    }
+  }
+
+  #callAndDrain<Value>(core: object, call: (core: object, pending: Uint32Array) => number, readValue?: () => Value): CallResult<Value> {
     const events: CoreEvent[] = [];
     let answered = false;
     try {
@@ -486,6 +515,7 @@ export class Core {
   }
 
   #readDeadline(event: DeadlineEvent): void {
+    this.#announcedDeadline = event.at;
     try {
       this.#deadlineReader?.(event.at);
     } catch (error) {

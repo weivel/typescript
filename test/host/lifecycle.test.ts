@@ -84,6 +84,33 @@ describe("activation", () => {
     expect(world.errors).toEqual([]);
     expect(world.hostLog.entries.filter((entry) => entry.level === "error")).toEqual([]);
   });
+
+  it("answers an open that fails for a reason other than a refusal as refused, to the sink, and starts the rest", async () => {
+    const world = sinkingWorld();
+    const trace: Trace = [];
+    const contexts = new Map<string, PluginContext>();
+    const failure = new Error("context failed");
+    const broken = registered(world, "broken", recordingEntry(trace, "broken", contexts));
+    const sound = registered(world, "sound", recordingEntry(trace, "sound", contexts));
+    const create = world.host.contexts.create.bind(world.host.contexts);
+    world.host.contexts.create = (plugin, ...rest) => {
+      if (plugin === broken) {
+        throw failure;
+      }
+      return create(plugin, ...rest);
+    };
+
+    const started = alive(world.host.activate([broken, sound]));
+    const outcomes = await started.outcomes;
+
+    expect(started.plan.order).toEqual([broken, sound]);
+    expect(outcomes.map((outcome) => [outcome.importName, outcome.state, outcome.refusal])).toEqual([
+      ["broken", "refused", undefined],
+      ["sound", "active", undefined],
+    ]);
+    expect(trace).toEqual(["activate sound"]);
+    expect(world.errors).toEqual([failure]);
+  });
 });
 
 describe("release", () => {
@@ -102,6 +129,23 @@ describe("release", () => {
 
     expect(world.errors).toEqual([failure]);
     expect(world.host.plugin(plugin)).toBeUndefined();
+  });
+
+  it("settles a release whose forget throws, the throw reported to the error sink", async () => {
+    const world = sinkingWorld();
+    const failure = new Error("forget failed");
+    const plugin = registered(world, "forgetful", { activate() {} });
+    await alive(world.host.activate([plugin])).outcomes;
+    world.host.contexts.forget = () => {
+      throw failure;
+    };
+    let releaseSettled = false;
+
+    void world.host.release(plugin).then(() => (releaseSettled = true));
+    await settle();
+
+    expect(releaseSettled).toBe(true);
+    expect(world.errors).toEqual([failure]);
   });
 
   it("made inside a dispatch, lets the events of its release reach the plugin before its entries end", async () => {
@@ -245,6 +289,21 @@ describe("destroy", () => {
     ]);
     expect(world.host.core.destroyed).toBe(true);
     expect(world.errors).toEqual([]);
+  });
+
+  it("destroys the core whatever a release did, the failure reported to the error sink", async () => {
+    const world = sinkingWorld();
+    const failure = new Error("release failed");
+    const plugin = registered(world, "stubborn", { activate() {} });
+    await alive(world.host.activate([plugin])).outcomes;
+    world.host.core.releasePlugin = () => {
+      throw failure;
+    };
+
+    await expect(world.host.destroy()).resolves.toBeUndefined();
+
+    expect(world.errors).toEqual([failure]);
+    expect(world.host.core.destroyed).toBe(true);
   });
 
   it("reports an unload that throws to the error sink, unloads the rest and still destroys the core", async () => {
