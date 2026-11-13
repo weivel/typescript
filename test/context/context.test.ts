@@ -340,6 +340,94 @@ describe("consume/a-throwing-listener-does-not-silence-the-others", () => {
   });
 });
 
+describe("a registration ended while its events still wait", () => {
+  const otherId = "alpha:other";
+  const alphaWithOther: Manifest = { importName: "alpha", services: { provides: [{ id: greetingId }, { id: otherId }] } };
+
+  it("still hands its object to a want settled before a listener unregistered it, then revokes it", async () => {
+    const world = createWorld();
+    const alpha = world.open(alphaWithOther);
+    const gamma = world.open(consumer("gamma", greetingId, otherId));
+    const service = greeting();
+    const unregister = alpha.context.services.register(alpha.context.service<Greeting>(greetingId), service);
+    let wanted = track(Promise.resolve<Greeting | undefined>(undefined));
+    gamma.context.services.watch(gamma.context.service(otherId), () => {
+      wanted = track(gamma.context.services.want(gamma.context.service<Greeting>(greetingId)));
+      unregister();
+      unregister();
+    });
+    const gammaHeard: PluginEvent[] = [];
+    gamma.context.events.listen((event) => gammaHeard.push(event));
+
+    alpha.context.services.register(alpha.context.service(otherId), {});
+    await settle();
+
+    expect(wanted.value).toBe(service);
+    expect(gammaHeard).toEqual([{ kind: "revoked", reach: ReachKind.Service, id: greetingId, implementation: service }]);
+    expect(world.dispatched.filter((event) => event.kind === "refusal")).toEqual([]);
+    expect(world.contexts.tracked(alpha.plugin)).toBe(1);
+  });
+
+  it("does so too when the listener runs inside the core's own dispatch", async () => {
+    const world = createWorld();
+    const alpha = world.open(provider);
+    const calendar = world.open(screensProvider("calendar"));
+    const gamma = world.open({ importName: "gamma", services: { consumes: [{ id: greetingId }] }, capabilities: { consumes: ["screens"] } });
+    const service = greeting();
+    const unregister = alpha.context.services.register(alpha.context.service<Greeting>(greetingId), service);
+    let wanted = track(Promise.resolve<Greeting | undefined>(undefined));
+    gamma.context.capabilities.watch(gamma.context.capability("screens"), () => {
+      wanted = track(gamma.context.services.want(gamma.context.service<Greeting>(greetingId)));
+      unregister();
+    });
+    calendar.context.provide(calendar.context.capability("screens"), {});
+
+    world.core.verifyActivation(calendar.plugin);
+    await settle();
+
+    expect(wanted.value).toBe(service);
+    expect(world.contexts.tracked(alpha.plugin)).toBe(0);
+  });
+});
+
+describe("the handles a context tracks", () => {
+  it("stay bounded across many wants, registrations and watches", async () => {
+    const world = createWorld();
+    const alpha = world.open(provider);
+    const beta = world.open(consumer("beta"));
+    const key = alpha.context.service<Greeting>(greetingId);
+
+    for (let round = 0; round < 20; round += 1) {
+      const wanted = beta.context.services.want(beta.context.service<Greeting>(greetingId));
+      const unregister = alpha.context.services.register(key, greeting());
+      await wanted;
+      const stop = beta.context.services.watch(beta.context.service(greetingId), () => {});
+      stop();
+      unregister();
+    }
+
+    expect(world.contexts.tracked(alpha.plugin)).toBe(0);
+    expect(world.contexts.tracked(beta.plugin)).toBe(0);
+  });
+});
+
+describe("a plugin the core stopped", () => {
+  it("leaves a registration disposer that asks the core nothing, and its entries cleared", () => {
+    const world = createWorld();
+    const alpha = world.open(provider);
+    const unregister = alpha.context.services.register(alpha.context.service(greetingId), greeting());
+    alpha.context.services.watch(alpha.context.service(greetingId), () => {});
+    world.core.releasePlugin(alpha.plugin);
+    world.contexts.stopped(alpha.plugin);
+    const refusalsBefore = world.dispatched.filter((event) => event.kind === "refusal").length;
+
+    unregister();
+
+    expect(world.dispatched.filter((event) => event.kind === "refusal")).toHaveLength(refusalsBefore);
+    expect(world.contexts.tracked(alpha.plugin)).toBe(0);
+  });
+});
+
 describe("revocation", () => {
   it("drops the held object when the core revokes it, tells the plugin, and later gets answer absent", () => {
     const world = createWorld();
@@ -374,7 +462,7 @@ describe("log", () => {
       { level: "info", message: "ready" },
       { level: "error", message: "failed", cause: "because" },
     ]);
-    expect(alpha.context.manifest).toBe(alpha.context.manifest);
+    expect(alpha.context.manifest).toBe(provider);
   });
 });
 
@@ -403,7 +491,7 @@ describe("a constrained want", () => {
         return true;
       },
     };
-    alpha.context.services.register(alpha.context.service(storeId), store);
+    alpha.context.services.register(alpha.context.service(storeId), store, { capacity: store });
 
     const wanted = track(beta.context.services.want(beta.context.service<typeof store>(storeId), { pollMillis: 100 }));
     await settle();
@@ -419,13 +507,35 @@ describe("a constrained want", () => {
     expect(wanted.value).toBe(store);
   });
 
+  it("asks nothing of an object registered without a capacity provider, so its advertised attributes stand", async () => {
+    const world = createWorld(vocabulary);
+    const alpha = world.open(storeProvider);
+    const beta = world.open(storeConsumer);
+    let asked = 0;
+    const store = {
+      attributes: () => {
+        asked += 1;
+        return { replicas: 3 };
+      },
+    };
+    alpha.context.services.register(alpha.context.service(storeId), store);
+
+    const wanted = track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
+    world.clock.time = 100;
+    world.core.advance(100);
+    await settle();
+
+    expect(asked).toBe(0);
+    expect(wanted.settled).toBe(false);
+  });
+
   it("is not served while the provider answers no", async () => {
     const world = createWorld(vocabulary);
     const alpha = world.open(storeProvider);
     const beta = world.open(storeConsumer);
     let serving = false;
     const store = { attributes: () => ({ replicas: 5 }), serves: () => serving };
-    alpha.context.services.register(alpha.context.service(storeId), store);
+    alpha.context.services.register(alpha.context.service(storeId), store, { capacity: store });
 
     const wanted = track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
     await settle();
@@ -448,7 +558,7 @@ describe("a constrained want", () => {
         return { replicas: 3 };
       },
     };
-    alpha.context.services.register(alpha.context.service(storeId), store);
+    alpha.context.services.register(alpha.context.service(storeId), store, { capacity: store });
 
     const wanted = track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
     await settle();
@@ -469,7 +579,7 @@ describe("a constrained want", () => {
         return { replicas: 3 };
       },
     };
-    alpha.context.services.register(alpha.context.service(storeId), store);
+    alpha.context.services.register(alpha.context.service(storeId), store, { capacity: store });
 
     const wanted = track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
     await settle();

@@ -13,6 +13,7 @@ export type {
   PluginEventListener,
   PluginEvents,
   ReachRefusedPluginEvent,
+  RegisterOptions,
   RevokedPluginEvent,
   ServiceChange,
   ServiceListener,

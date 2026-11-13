@@ -31,6 +31,15 @@ export interface WantOptions {
   readonly pollMillis?: number;
 }
 
+/** How a service is registered. */
+export interface RegisterOptions {
+  /**
+   * What answers a constrained want's questions about this registration. Without it the registration adds no live
+   * attributes, so its manifest's advertised attributes stand, and it serves every consumer.
+   */
+  readonly capacity?: CapacityProvider;
+}
+
 export type ServiceChange = "register" | "unregister";
 export type ImplementationChange = "provide" | "withdraw";
 
@@ -51,7 +60,7 @@ export interface Services {
    *
    * @throws RefusalError when the core refuses the registration.
    */
-  register<Service>(type: ServiceType<Service>, service: Service): () => void;
+  register<Service>(type: ServiceType<Service>, service: Service, options?: RegisterOptions): () => void;
   /** Settles once, when the core settles the want: with the provider's object, or rejected with a RefusalError. */
   want<Service>(type: ServiceType<Service>, options?: WantOptions): Promise<Service>;
   /** Hears every later registration and removal the core reports for the id, until the answered function is called. */
@@ -100,7 +109,8 @@ export interface PluginEvents {
 }
 
 /**
- * What a provider's object may answer when a constrained want asks about it; both are optional.
+ * What answers a constrained want's questions about a registration that declared it; both methods are optional, and
+ * the provider's object may be its own capacity provider.
  *
  * @remarks `attributes` answers what the provider offers now, laid by the core over what its manifest advertises;
  * left out, the advertised attributes stand. `serves` answers whether it serves a consumer under those constraints;
