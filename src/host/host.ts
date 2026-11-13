@@ -222,8 +222,8 @@ export class Host {
 
   /**
    * @implNote An open that fails for a reason other than the core's refusal is a defect of this layer, so it goes to
-   * the error sink; answering it as that plugin's outcome, rather than throwing, keeps the plan and the plugins
-   * already started in the caller's hands.
+   * the error sink; answering it as that plugin's `failed` outcome, rather than throwing, keeps the plan and the
+   * plugins already started in the caller's hands.
    */
   #startActivation(record: PluginRecord): Promise<ActivationOutcome> {
     let context: PluginContext;
@@ -234,7 +234,8 @@ export class Host {
         return Promise.resolve(this.#outcome(record, "refused", error));
       }
       this.#sink(error);
-      return Promise.resolve(this.#outcome(record, "refused", undefined));
+      const failed = this.#outcome(record, "failed", undefined);
+      return this.#releaseIfOpened(record).then(() => failed);
     }
     return new Promise((resolve) => {
       record.settleOutcome = resolve;
@@ -254,6 +255,19 @@ export class Host {
     }
     const outcome = failure === undefined ? this.#verify(record) : this.#quarantine(record, failure.reason);
     this.#settleOutcome(record, outcome);
+  }
+
+  /**
+   * Releases and forgets a plugin whose open failed after the core opened it, by the release steps that still apply.
+   *
+   * @implNote Its activate was never called, so no deactivate is owed; left alone it would stay open in the core
+   * until destroy with no outcome of its own.
+   */
+  #releaseIfOpened(record: PluginRecord): Promise<void> {
+    if (!this.#opened.includes(record)) {
+      return Promise.resolve();
+    }
+    return this.#release(record).catch((error: unknown) => this.#sink(error));
   }
 
   #settleOutcome(record: PluginRecord, outcome: ActivationOutcome): void {

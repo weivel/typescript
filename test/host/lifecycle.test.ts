@@ -85,7 +85,7 @@ describe("activation", () => {
     expect(world.hostLog.entries.filter((entry) => entry.level === "error")).toEqual([]);
   });
 
-  it("answers an open that fails for a reason other than a refusal as refused, to the sink, and starts the rest", async () => {
+  it("answers an open that fails after the core opened the plugin as failed, to the sink, releases and forgets it at once, and starts the rest", async () => {
     const world = sinkingWorld();
     const trace: Trace = [];
     const contexts = new Map<string, PluginContext>();
@@ -105,11 +105,48 @@ describe("activation", () => {
 
     expect(started.plan.order).toEqual([broken, sound]);
     expect(outcomes.map((outcome) => [outcome.importName, outcome.state, outcome.refusal])).toEqual([
-      ["broken", "refused", undefined],
+      ["broken", "failed", undefined],
       ["sound", "active", undefined],
     ]);
     expect(trace).toEqual(["activate sound"]);
     expect(world.errors).toEqual([failure]);
+    expect(world.host.destroyed).toBe(false);
+    expect(world.host.core.ledger().value!.rows.map((row) => row.importName)).toEqual(["sound"]);
+    expect(world.host.core.ledgerEntry(broken).value).toBeUndefined();
+    expect(world.host.plugin(broken)).toBeUndefined();
+  });
+
+  it("answers an open that fails before the core opened the plugin as failed, to the sink, releasing nothing", async () => {
+    const world = sinkingWorld();
+    const trace: Trace = [];
+    const contexts = new Map<string, PluginContext>();
+    const failure = new Error("open failed");
+    const broken = registered(world, "broken", recordingEntry(trace, "broken", contexts));
+    const sound = registered(world, "sound", recordingEntry(trace, "sound", contexts));
+    const openPlugin = world.host.core.openPlugin.bind(world.host.core);
+    world.host.core.openPlugin = (plugin, ...rest) => {
+      if (plugin === broken) {
+        throw failure;
+      }
+      return openPlugin(plugin, ...rest);
+    };
+    const releasePlugin = world.host.core.releasePlugin.bind(world.host.core);
+    const releasedInCore: bigint[] = [];
+    world.host.core.releasePlugin = (plugin) => {
+      releasedInCore.push(plugin);
+      return releasePlugin(plugin);
+    };
+
+    const outcomes = await alive(world.host.activate([broken, sound])).outcomes;
+
+    expect(outcomes.map((outcome) => [outcome.importName, outcome.state, outcome.refusal])).toEqual([
+      ["broken", "failed", undefined],
+      ["sound", "active", undefined],
+    ]);
+    expect(trace).toEqual(["activate sound"]);
+    expect(world.errors).toEqual([failure]);
+    expect(releasedInCore).toEqual([]);
+    expect(world.host.plugin(broken)?.manifest.importName).toBe("broken");
   });
 });
 
