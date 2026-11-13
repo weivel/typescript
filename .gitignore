@@ -3,7 +3,6 @@ dist/
 native/
 build/
 siblings/
-package-lock.json
 *.log
 .idea/
 
