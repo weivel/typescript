@@ -1,8 +1,0 @@
-{
-  "importName": "demo-reader",
-  "api": 1,
-  "entry": "dist/index.js",
-  "displayName": "Demo Reader",
-  "capabilities": { "provides": ["commands"] },
-  "services": { "consumes": ["demo-store:items"] }
-}

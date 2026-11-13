@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "importName": "typescript",
+  "description": "The TypeScript language implementation of weivel: a binding of the C core and the C standard that decides nothing itself.",
+  "topics": [
+    "weivel"
+  ],
+  "dependencies": [
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "ed90318c5a69c214fcc863d1ab6d711a976d67da"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "4bacd0372af0ed686bc2777a9883090953f3ad9b"
+    },
+    {
+      "id": "github:1426141679",
+      "importName": "conformance",
+      "commit": "1660023456030f99770efb576b92fa3e684c6760"
+    }
+  ]
+}

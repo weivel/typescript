@@ -5,9 +5,15 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["test", "src/**/*.test.ts"],
-  "exclude": ["model", "conformance", "java", "dist", "node_modules"]
+  "include": [
+    "src",
+    "scripts",
+    "test"
+  ]
 }

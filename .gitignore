@@ -1,12 +1,11 @@
 node_modules/
 dist/
+native/
+build/
+siblings/
+package-lock.json
 *.log
 .idea/
-src/engine/schema.generated.ts
-src/host/library/declaration.generated.ts
-src/host/library/model-definitions.generated.ts
-src/host/ui-data.generated.ts
-src/host/install-method.generated.ts
 
 # Generated on the default branch by the readme job.
 README.md
