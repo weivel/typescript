@@ -9,7 +9,7 @@ import type {
 } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
 import type { DiscoveryFailure, LibraryDeclaration, StandardRefusal } from "../standard/index.js";
-import type { Clock, Scheduler } from "../timer/index.js";
+import type { Clock, Scheduler, TimerMoveListener } from "../timer/index.js";
 
 /** What a plugin's entry module exports as its default. */
 export interface Plugin {
@@ -36,6 +36,8 @@ export interface HostOptions {
    * @remarks The default timer is not unref'd, so a want waiting on time keeps Node alive until it settles.
    */
   readonly scheduler?: Scheduler;
+  /** Told of every move the host's timer makes, as the core announces its deadline. */
+  readonly onTimerMove?: TimerMoveListener;
   /** Where the core's logs and what goes wrong in the host's own objects go; the console by default. */
   readonly log?: Logger;
   /** The log a plugin's context forwards to; the host's log by default. */

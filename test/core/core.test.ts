@@ -97,6 +97,27 @@ describe("every bound call", () => {
     expect(order).toEqual(["refusal", "nested call answered 1 event", "refusal"]);
   });
 
+  it("dispatches a nested call's events after every event drained before them, first in, first out", () => {
+    const { core } = createRecordedCore();
+    const alpha = openPlugin(core, provider);
+    const beta = openPlugin(core, consumer("beta"));
+    const gamma = openPlugin(core, consumer("gamma"));
+    const registration = core.registerService(alpha, "alpha:greeting").value!;
+    core.getService(beta, "alpha:greeting");
+    core.getService(gamma, "alpha:greeting");
+    const order: string[] = [];
+    core.setDispatcher((event) => {
+      order.push(event.kind === "revoked" ? `revoked ${event.plugin === beta ? "beta" : "gamma"}` : event.kind);
+      if (order.length === 1) {
+        core.registerService(HOST, "");
+      }
+    });
+
+    core.unregister(registration);
+
+    expect(order).toEqual(["revoked beta", "revoked gamma", "refusal"]);
+  });
+
   it("copies every string out, so an event outlives its release and its core", () => {
     const { core } = createRecordedCore();
     const answer = core.registerService(HOST, "");

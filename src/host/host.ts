@@ -75,7 +75,7 @@ export class Host {
     this.#log = options.log ?? consoleLogger;
     this.contexts = new PluginContexts(core, { clock: options.clock, log: this.#log });
     core.setDispatcher((event) => this.#dispatch(event));
-    this.#timer = new CoreTimer(core, { clock: options.clock, scheduler: options.scheduler });
+    this.#timer = new CoreTimer(core, { clock: options.clock, scheduler: options.scheduler, onMove: options.onTimerMove });
   }
 
   /**

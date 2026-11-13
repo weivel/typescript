@@ -172,9 +172,12 @@ describe("a timer-driven call that throws", () => {
     });
     const scheduled: (() => void)[] = [];
     const scheduler: Scheduler = { schedule: (callback) => scheduled.push(callback), cancel: () => undefined };
-    new CoreTimer(core, { clock: { now: () => 0 }, scheduler });
+    const clock = { time: 0, now: () => clock.time };
+    new CoreTimer(core, { clock, scheduler });
     const beta = openPlugin(core, { importName: "beta", services: { consumes: [{ id: "alpha:greeting" }] } });
     core.wantService(beta, "alpha:greeting", { timed: Choice.Yes, now: 0, timeoutMillis: 10 });
+
+    clock.time = 10;
 
     expect(() => scheduled.at(-1)!()).not.toThrow();
     expect(sunk).toEqual([{ error: failure, event: undefined }]);

@@ -176,8 +176,7 @@ describe("a core control call through koffi", () => {
     expect(paths.calls.get("weivelCall")).toBe(callsPerPath(briefSampling));
     expect(crossings.get("weivel_get_service")).toBe(paths.calls.get("weivelCall"));
     expect(crossings.get("weivel_support_release")).toBe(paths.calls.get("bareCall"));
-    expect(crossings.get("weivel_next_deadline")).toBeGreaterThan(0);
-    expect(crossings.get("weivel_next_deadline")).toBeLessThan(callsPerPath(briefSampling));
+    expect(crossings.get("weivel_next_deadline") ?? 0).toBe(0);
     expect(crossings.get("weivel_next_event") ?? 0).toBeLessThan(callsPerPath(briefSampling));
   });
 });

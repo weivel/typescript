@@ -19,6 +19,7 @@ export type {
   ReachRefusedEvent,
   CapacityWantedEvent,
   CapabilityEvent,
+  DeadlineEvent,
 } from "./events.js";
 export type {
   Refusal,
@@ -51,7 +52,7 @@ export {
   type CallResult,
   type CoreLibrary,
   type CreateCoreOptions,
-  type DeadlineListener,
+  type DeadlineReader,
   type DrainListener,
   type EventDispatcher,
   type ListenerErrorSink,
