@@ -14,7 +14,7 @@ export type {
   LibraryService,
   LibraryDeclaration,
 } from "./answers.js";
-export type { Config, Secrets, Paths } from "./services.js";
+export { ServiceRefusal, serviceOperations, type Config, type Paths, type Secrets, type SettingValue } from "./services.js";
 export {
   Standard,
   loadStandard,
