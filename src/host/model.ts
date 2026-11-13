@@ -51,7 +51,8 @@ export type RegisterAnswer =
   | { readonly plugin: bigint; readonly refusal: undefined }
   | { readonly plugin: undefined; readonly refusal: Refusal };
 
-export type ActivationState = "active" | "quarantined" | "refused";
+/** Where an activation ended; `released` for a plugin released before its activate settled. */
+export type ActivationState = "active" | "quarantined" | "refused" | "released";
 
 /** Where one plugin's activation ended, and why when it did not end active. */
 export interface ActivationOutcome {
@@ -62,11 +63,23 @@ export interface ActivationOutcome {
   readonly refusal: Refusal | undefined;
 }
 
-export interface ActivationReport {
-  /** The core's plan, cycles and refusals included, exactly as answered. */
+/** What `activate` answers once every activate has been started, before any has settled. */
+export interface ActivationStart {
+  /** The core's plan, cycles and refusals included, exactly as answered; its order is the order activates started. */
   readonly plan: ActivationPlan;
-  /** One outcome per plugin of the plan's order, in that order. */
-  readonly outcomes: readonly ActivationOutcome[];
+  /** One outcome per plugin of the plan's order, in that order, once every activate has settled. */
+  readonly outcomes: Promise<readonly ActivationOutcome[]>;
+}
+
+/** What every call on a destroyed host answers, as a value: it neither throws nor writes anywhere. */
+export interface HostDestroyed {
+  readonly destroyed: true;
+}
+
+export const hostDestroyed: HostDestroyed = Object.freeze({ destroyed: true });
+
+export function isHostDestroyed(answer: unknown): answer is HostDestroyed {
+  return answer === hostDestroyed;
 }
 
 /** A C library bound as host services. */

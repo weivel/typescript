@@ -39,6 +39,14 @@ export class PluginContexts {
     this.#state.plugins.set(HOST, { log: hostLog, eventListeners: new Set(), handles: new Set() });
   }
 
+  /**
+   * Runs `step` once every event the core has drained so far has reached the contexts and been handled, so a step
+   * that ends a plugin's entries never runs ahead of the events its own call queued for it.
+   */
+  whenEventsHandled(step: () => void): void {
+    this.#state.core.whenDispatched(() => this.#state.whenHandled(step));
+  }
+
   /** Builds the context of a plugin the core has opened, its log forwarded to `log`. */
   create(plugin: bigint, manifest: Manifest, log: Logger): PluginContext {
     const handles = this.#state.plugins.get(plugin)?.handles ?? new Set<bigint>();

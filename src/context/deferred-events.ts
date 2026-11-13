@@ -7,15 +7,20 @@ import type { CoreEvent } from "../core/index.js";
  * @remarks The core wrapper dispatches a call's events before the call returns, so a want settled by the call that
  * registered its service would otherwise arrive before the layer knows which object that registration stands for.
  */
+/** A step queued among the events to handle, run when the handling reaches it. */
+class DeferredStep {
+  constructor(readonly step: () => void) {}
+}
+
 export class DeferredEvents {
   readonly #handle: (event: CoreEvent) => void;
-  readonly #report: (error: unknown, event: CoreEvent) => void;
+  readonly #report: (error: unknown, event: CoreEvent | undefined) => void;
   readonly #whenIdle: () => void;
-  readonly #queue: CoreEvent[] = [];
+  readonly #queue: (CoreEvent | DeferredStep)[] = [];
   #callDepth = 0;
   #handling = false;
 
-  constructor(handle: (event: CoreEvent) => void, report: (error: unknown, event: CoreEvent) => void, whenIdle: () => void) {
+  constructor(handle: (event: CoreEvent) => void, report: (error: unknown, event: CoreEvent | undefined) => void, whenIdle: () => void) {
     this.#handle = handle;
     this.#report = report;
     this.#whenIdle = whenIdle;
@@ -33,6 +38,14 @@ export class DeferredEvents {
 
   receive(event: CoreEvent): void {
     this.#queue.push(event);
+    if (this.#callDepth === 0) {
+      this.#handleQueued();
+    }
+  }
+
+  /** Runs `step` once every event received so far has been handled: at once when idle, else queued behind them. */
+  whenHandled(step: () => void): void {
+    this.#queue.push(new DeferredStep(step));
     if (this.#callDepth === 0) {
       this.#handleQueued();
     }
@@ -68,11 +81,15 @@ export class DeferredEvents {
     }
   }
 
-  #handleOne(event: CoreEvent): void {
+  #handleOne(next: CoreEvent | DeferredStep): void {
     try {
-      this.#handle(event);
+      if (next instanceof DeferredStep) {
+        next.step();
+      } else {
+        this.#handle(next);
+      }
     } catch (error) {
-      this.#report(error, event);
+      this.#report(error, next instanceof DeferredStep ? undefined : next);
     }
   }
 }

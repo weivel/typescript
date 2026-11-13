@@ -5,6 +5,8 @@ import { EdgeSource, LogLevel, PluginStatus, RefusalCode } from "../../src/core/
 import { RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { StandardRefusalCode } from "../../src/standard/index.ts";
 import {
+  activated,
+  alive,
   createHostWorld,
   directoryContents,
   entrySource,
@@ -59,8 +61,8 @@ describe("registration", () => {
       },
     };
 
-    const answer = world.host.register({ importName: "inline", api: 1 }, entry);
-    const report = await world.host.activate([answer.plugin!]);
+    const answer = alive(world.host.register({ importName: "inline", api: 1 }, entry));
+    const report = await activated(world.host, [answer.plugin!]);
 
     expect(answer.refusal).toBeUndefined();
     expect(world.host.plugin(answer.plugin!)).toEqual({ plugin: answer.plugin, manifest: { importName: "inline", api: 1 }, entry });
@@ -71,9 +73,9 @@ describe("registration", () => {
 
   it("answers the core's refusal to register a plugin as data", () => {
     const world = createHostWorld();
-    world.host.register({ importName: "alpha", api: 1 }, { activate() {} });
+    alive(world.host.register({ importName: "alpha", api: 1 }, { activate() {} }));
 
-    const answer = world.host.register({ importName: "alpha", api: 1 }, { activate() {} });
+    const answer = alive(world.host.register({ importName: "alpha", api: 1 }, { activate() {} }));
 
     expect(answer.plugin).toBeUndefined();
     expect(answer.refusal?.code).toBe(RefusalCode.NameTaken);
@@ -142,10 +144,10 @@ describe("activation", () => {
     ]);
     const handles = discovered(world, directory);
 
-    const report = await world.host.activate([handleOf(handles, "agenda"), handleOf(handles, "calendar")]);
+    const report = await activated(world.host, [handleOf(handles, "agenda"), handleOf(handles, "calendar")]);
 
     expect(report.plan.order).toEqual([handleOf(handles, "calendar"), handleOf(handles, "agenda")]);
-    expect(probe().activated).toEqual(["calendar", "agenda"]);
+    expect([...probe().activated].sort()).toEqual(["agenda", "calendar"]);
     expect(report.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
       ["calendar", "active"],
       ["agenda", "active"],
@@ -170,14 +172,14 @@ describe("activation", () => {
     const order = [handleOf(handles, "early"), handleOf(handles, "late")];
 
     const report = await Promise.race([
-      world.host.activate(order),
+      activated(world.host, order),
       new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 2000)),
     ]);
 
     expect(report).not.toBe("hung");
     const settled = report as Exclude<typeof report, "hung">;
     expect(settled.plan.order).toEqual(order);
-    expect(probe().activated).toEqual(["early", "late"]);
+    expect([...probe().activated].sort()).toEqual(["early", "late"]);
     expect(settled.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
       ["early", "active"],
       ["late", "active"],
@@ -189,7 +191,7 @@ describe("activation", () => {
     const directory = pluginDirectory([plugin({ importName: "typed" }, "", "ts"), plugin({ importName: "plain" })]);
     const handles = discovered(world, directory);
 
-    const report = await world.host.activate([...handles.values()]);
+    const report = await activated(world.host, [...handles.values()]);
 
     expect(report.outcomes.map((outcome) => outcome.state)).toEqual(["active", "active"]);
     expect([...probe().activated].sort()).toEqual(["plain", "typed"]);
@@ -203,7 +205,7 @@ describe("activation", () => {
     ]);
     const handles = discovered(world, directory);
 
-    const report = await world.host.activate([handleOf(handles, "angry"), handleOf(handles, "calm")]);
+    const report = await activated(world.host, [handleOf(handles, "angry"), handleOf(handles, "calm")]);
 
     expect(report.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
       ["angry", "quarantined"],
@@ -231,7 +233,7 @@ describe("activation", () => {
     ]);
     const handles = discovered(world, directory);
 
-    const report = await world.host.activate([...handles.values()]);
+    const report = await activated(world.host, [...handles.values()]);
 
     expect(report.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
       ["absent", "quarantined"],
@@ -255,7 +257,7 @@ describe("activation", () => {
     linkDirectory(elsewhere, join(directory, "lib"));
     const handles = discovered(world, directory);
 
-    const report = await world.host.activate([handleOf(handles, "linked")]);
+    const report = await activated(world.host, [handleOf(handles, "linked")]);
 
     expect(report.outcomes[0]).toMatchObject({
       state: "quarantined",
@@ -268,12 +270,12 @@ describe("activation", () => {
     const world = createHostWorld();
     const directory = pluginDirectory([plugin({ importName: "changing" }, "probe.version = 1;")]);
     const first = handleOf(discovered(world, directory), "changing");
-    await world.host.activate([first]);
+    await activated(world.host, [first]);
     await world.host.release(first);
     writeFileSync(join(directory, "changing.js"), entrySource("changing", "probe.version = 2;"));
 
     const second = handleOf(discovered(world, directory), "changing");
-    const report = await world.host.activate([second]);
+    const report = await activated(world.host, [second]);
 
     expect(report.outcomes[0]?.state).toBe("active");
     expect(probe().activated).toEqual(["changing", "changing"]);
@@ -287,7 +289,7 @@ describe("activation", () => {
       pluginDirectory([plugin({ importName: "reacher" }, "context.services.get(context.service('other:thing'));")]),
     );
 
-    await world.host.activate([handleOf(handles, "reacher")]);
+    await activated(world.host, [handleOf(handles, "reacher")]);
 
     const warnings = world.hostLog.entries.filter((entry) => entry.level === "warn").map((entry) => entry.message);
     expect(warnings).toHaveLength(1);
@@ -297,9 +299,9 @@ describe("activation", () => {
   it("answers the core's refusal of a plugin it will not open as data", async () => {
     const world = createHostWorld();
     const handles = discovered(world, pluginDirectory([plugin({ importName: "twice" })]));
-    world.host.open(handleOf(handles, "twice"));
+    alive(world.host.open(handleOf(handles, "twice")));
 
-    const report = await world.host.activate([handleOf(handles, "twice")]);
+    const report = await activated(world.host, [handleOf(handles, "twice")]);
 
     expect(report.outcomes).toEqual([
       expect.objectContaining({ importName: "twice", state: "refused", refusal: expect.objectContaining({ code: RefusalCode.PluginState }) }),
@@ -312,7 +314,7 @@ describe("a refused activation check", () => {
     const world = createHostWorld();
     const handles = discovered(world, pluginDirectory([plugin({ importName: "liar", capabilities: { provides: ["screens"] } })]));
 
-    const report = await world.host.activate([handleOf(handles, "liar")]);
+    const report = await activated(world.host, [handleOf(handles, "liar")]);
 
     expect(report.outcomes[0]).toMatchObject({ state: "quarantined", refusal: { code: RefusalCode.ActivationMismatch, subject: "liar" } });
     expect(quarantinedNames(world)).toEqual(["liar"]);
@@ -333,7 +335,7 @@ describe("release", () => {
     const world = createHostWorld();
     const handles = discovered(world, pluginDirectory([waiter]));
     const handle = handleOf(handles, "waiter");
-    await world.host.activate([handle]);
+    await activated(world.host, [handle]);
     expect(world.host.contexts.tracked(handle)).toBeGreaterThan(0);
 
     await world.host.release(handle);
@@ -359,8 +361,8 @@ describe("release", () => {
       pluginDirectory([watcher, plugin({ importName: "trigger", services: { provides: ["trigger:ping"] } })]),
     );
     const watcherHandle = handleOf(handles, "watcher");
-    await world.host.activate([watcherHandle, handleOf(handles, "trigger")]);
-    const released: Promise<void>[] = [];
+    await activated(world.host, [watcherHandle, handleOf(handles, "trigger")]);
+    const released: Promise<unknown>[] = [];
     const watcherContext = contextOf("watcher");
     watcherContext.services.watch(watcherContext.service("trigger:ping"), () => {
       released.push(world.host.release(watcherHandle));
@@ -383,7 +385,7 @@ describe("release", () => {
     const before = directoryContents(directory);
 
     const handles = discovered(world, directory);
-    await world.host.activate([...handles.values()]);
+    await activated(world.host, [...handles.values()]);
     for (const handle of handles.values()) {
       await world.host.release(handle);
     }
@@ -406,7 +408,7 @@ describe("destroy", () => {
         ),
       ]),
     );
-    await world.host.activate([...handles.values()]);
+    await activated(world.host, [...handles.values()]);
 
     await world.host.destroy();
 
@@ -417,7 +419,7 @@ describe("destroy", () => {
 
   it("leaves a host service's unregister doing nothing once the core is gone", async () => {
     const world = createHostWorld();
-    const unregister = world.host.registerHostService({ id: "clock" }, {});
+    const unregister = alive(world.host.registerHostService({ id: "clock" }, {}));
 
     await world.host.destroy();
 
@@ -441,8 +443,8 @@ describe("host services", () => {
     const reader = handleOf(handles, "reader");
 
     const unmet = world.host.core.planActivation([reader], EdgeSource.Services, []).value!;
-    world.host.registerHostService({ id: "clock" }, clockService);
-    const report = await world.host.activate([reader]);
+    alive(world.host.registerHostService({ id: "clock" }, clockService));
+    const report = await activated(world.host, [reader]);
 
     expect(unmet.refusals.map((refusal) => refusal.refusal.code)).toEqual([RefusalCode.UnmetNeed]);
     expect(report.plan.refusals).toEqual([]);
@@ -456,11 +458,11 @@ describe("host services", () => {
       world,
       pluginDirectory([plugin({ importName: "reader", services: { consumes: [{ id: "clock", optional: false }] } })]),
     );
-    const unregister = world.host.registerHostService({ id: "clock" }, {});
+    const unregister = alive(world.host.registerHostService({ id: "clock" }, {}));
 
     unregister();
     unregister();
-    const report = await world.host.activate([handleOf(handles, "reader")]);
+    const report = await activated(world.host, [handleOf(handles, "reader")]);
 
     expect(report.plan.refusals.map((refusal) => refusal.refusal.code)).toEqual([RefusalCode.UnmetNeed]);
     expect(report.outcomes).toEqual([]);
@@ -479,7 +481,7 @@ describe("time", () => {
         ),
       ]),
     );
-    await world.host.activate([handleOf(handles, "patient")]);
+    await activated(world.host, [handleOf(handles, "patient")]);
 
     expect([...world.scheduler.armed.values()].map((task) => task.delayMilliseconds)).toEqual([50]);
     world.clock.time = 50;

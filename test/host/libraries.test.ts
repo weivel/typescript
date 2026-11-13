@@ -3,7 +3,7 @@ import { HOST, Status } from "../../src/core/index.ts";
 import { LibraryCallError, LibraryUnloadedError, type LibraryService } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
 import { realStandard } from "../real-standard.ts";
-import { createHostWorld, echoLibraryPath, plugin, pluginDirectory, registerDirectory, type HostWorld } from "./world.ts";
+import { activated, alive, createHostWorld, echoLibraryPath, plugin, pluginDirectory, registerDirectory, type HostWorld } from "./world.ts";
 
 const echoFunctions = [
   { name: "echo", symbol: "echo_echo", kind: "bytes" },
@@ -22,7 +22,7 @@ function declaration(functions: readonly Record<string, unknown>[] = echoFunctio
 }
 
 function loadedEcho(world: HostWorld): LibraryService {
-  return world.host.loadLibrary(declaration(), echoLibraryPath).services.get("echo")!;
+  return alive(world.host.loadLibrary(declaration(), echoLibraryPath)).services.get("echo")!;
 }
 
 function hostReaches(world: HostWorld, id: string): boolean {
@@ -43,7 +43,7 @@ describe("a C library loaded as host services", () => {
       ]),
     );
 
-    await world.host.activate([...handles.registered.values()]);
+    await activated(world.host, [...handles.registered.values()]);
     const reached = globalThis.weivelHostProbe as unknown as { reached: unknown; answered: Uint8Array };
 
     expect(reached.reached).toBe(echo);
@@ -76,7 +76,7 @@ describe("a C library loaded as host services", () => {
 
   it("are unregistered when the library is unloaded", () => {
     const world = createHostWorld();
-    const library = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const library = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
     expect(hostReaches(world, "echo")).toBe(true);
 
     library.unload();
@@ -86,7 +86,7 @@ describe("a C library loaded as host services", () => {
 
   it("refuse a call a plugin still holds once unloaded, never reaching the unloaded code, and unload once", () => {
     const world = createHostWorld();
-    const library = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const library = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
     const held = library.services.get("echo")!;
 
     library.unload();
@@ -98,8 +98,8 @@ describe("a C library loaded as host services", () => {
 
   it("unload once, so a second unload leaves another load of the same file working", () => {
     const world = createHostWorld();
-    const first = world.host.loadLibrary(declaration(), echoLibraryPath);
-    const second = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const first = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
+    const second = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
 
     first.unload();
     first.unload();
@@ -109,7 +109,7 @@ describe("a C library loaded as host services", () => {
 
   it("are unloaded when the host is destroyed, so a held call is refused and a later unload does nothing", async () => {
     const world = createHostWorld();
-    const library = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const library = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
     const held = library.services.get("echo")!;
 
     await world.host.destroy();
@@ -123,7 +123,7 @@ describe("a C library loaded as host services", () => {
     const read = declaration();
     const retired = { ...read, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: 1, context: 0 }] }] };
 
-    expect(() => world.host.loadLibrary(retired, echoLibraryPath)).toThrow(/function echo is of kind 1; this layer binds the bytes kind alone/);
+    expect(() => alive(world.host.loadLibrary(retired, echoLibraryPath))).toThrow(/function echo is of kind 1; this layer binds the bytes kind alone/);
     expect(read.services[0]!.functions[0]!.kind).toBe(FunctionKind.Bytes);
     expect(hostReaches(world, "echo")).toBe(false);
   });
@@ -131,10 +131,10 @@ describe("a C library loaded as host services", () => {
   it("throws for a library that does not export a symbol its declaration names, registering nothing", () => {
     const world = createHostWorld();
 
-    expect(() => world.host.loadLibrary(declaration([{ name: "echo", symbol: "echo_absent", kind: "bytes" }]), echoLibraryPath)).toThrow(
+    expect(() => alive(world.host.loadLibrary(declaration([{ name: "echo", symbol: "echo_absent", kind: "bytes" }]), echoLibraryPath))).toThrow(
       /does not export every symbol echo declares/,
     );
-    expect(() => world.host.loadLibrary(declaration(), `${echoLibraryPath}.absent`)).toThrow(/is not at/);
+    expect(() => alive(world.host.loadLibrary(declaration(), `${echoLibraryPath}.absent`))).toThrow(/is not at/);
     expect(hostReaches(world, "echo")).toBe(false);
   });
 });

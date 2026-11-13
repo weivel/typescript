@@ -1,6 +1,6 @@
 import { EdgeSource, type CoreOptions, type Manifest } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
-import { Host, type Plugin } from "../host/index.js";
+import { Host, isHostDestroyed, type HostDestroyed, type Plugin } from "../host/index.js";
 import type { Clock, Scheduler } from "../timer/index.js";
 
 /** Where the driver finds the core; `native/` beside the package by default, as for the host. */
@@ -88,6 +88,14 @@ export interface BuiltPlugin {
 /** An entry for a plugin the driver opens itself and never activates. */
 export const inertEntry: Plugin = { activate() {} };
 
+/** The answer of a host call the driver makes only while the host lives. */
+export function alive<Answer>(answer: Answer | HostDestroyed): Answer {
+  if (isHostDestroyed(answer)) {
+    throw new Error("The driver called a host it had destroyed.");
+  }
+  return answer;
+}
+
 /** A host on virtual time over plugins the driver builds as values, every log recorded. */
 export class DriverWorld {
   readonly host: Host;
@@ -110,7 +118,7 @@ export class DriverWorld {
   /** Registers each plugin through the host, and fails unless the core registered every one. */
   register(plugins: readonly BuiltPlugin[]): void {
     for (const { manifest, entry } of plugins) {
-      const answer = this.host.register(manifest, entry);
+      const answer = alive(this.host.register(manifest, entry));
       if (answer.plugin === undefined) {
         throw new Error(`The host did not register ${manifest.importName}: ${answer.refusal.detail ?? `code ${answer.refusal.code}`}.`);
       }
@@ -127,7 +135,7 @@ export class DriverWorld {
   }
 
   open(importName: string): PluginContext {
-    return this.host.open(this.plugin(importName));
+    return alive(this.host.open(this.plugin(importName)));
   }
 
   async close(options: DriverOptions): Promise<void> {
