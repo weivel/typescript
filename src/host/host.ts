@@ -52,6 +52,11 @@ export class Host {
   readonly #timer: CoreTimer;
   readonly #plugins = new HandleTable<PluginRecord>();
   readonly #hostServiceCounts = new Map<string, number>();
+  /** Every plugin the core verified active and the host has not released, the latest activated last. */
+  readonly #activeOrder: bigint[] = [];
+  readonly #libraryUnloads = new Set<() => void>();
+  #destroyed = false;
+  #destruction: Promise<void> | undefined;
 
   /** @throws Error when either library is missing or the core cannot be created. */
   static create(options: HostOptions): Host {
@@ -112,7 +117,7 @@ export class Host {
     this.#countHostService(type.id, 1);
     let registered = true;
     return () => {
-      if (registered) {
+      if (registered && !this.#destroyed) {
         registered = false;
         unregister();
         this.#countHostService(type.id, -1);
@@ -150,9 +155,11 @@ export class Host {
     const bound = bindLibrary(libraryPath, read.value);
     const unregisters = [...bound.services].map(([id, service]) => this.registerHostService({ id }, service));
     const unload = (): void => {
+      this.#libraryUnloads.delete(unload);
       unregisters.splice(0).forEach((unregister) => unregister());
       bound.unload();
     };
+    this.#libraryUnloads.add(unload);
     return { library: { declaration: read.value, services: bound.services, unload }, refusal: undefined };
   }
 
@@ -236,7 +243,11 @@ export class Host {
   verify(plugin: bigint): ActivationOutcome {
     const record = this.#record(plugin);
     const verified = this.core.verifyActivation(plugin);
-    return verified.status === Status.Ok ? this.#outcome(record, "active", undefined) : this.#quarantine(record, undefined);
+    if (verified.status !== Status.Ok) {
+      return this.#quarantine(record, undefined);
+    }
+    this.#activeOrder.push(plugin);
+    return this.#outcome(record, "active", undefined);
   }
 
   /** With no reason, the plugin's ledger row shows the refusal its activation check answered. */
@@ -261,11 +272,19 @@ export class Host {
   async release(plugin: bigint): Promise<void> {
     const record = this.#record(plugin);
     await this.#deactivate(record);
+    this.#dropFromActiveOrder(plugin);
     succeeded("weivel_release_plugin", this.core.releasePlugin(plugin));
     this.contexts.stopped(plugin);
     succeeded("weivel_forget_plugin", this.core.forgetPlugin(plugin));
     this.contexts.forget(plugin);
     this.#plugins.drop(plugin);
+  }
+
+  #dropFromActiveOrder(plugin: bigint): void {
+    const index = this.#activeOrder.indexOf(plugin);
+    if (index !== -1) {
+      this.#activeOrder.splice(index, 1);
+    }
   }
 
   async #deactivate(record: PluginRecord): Promise<void> {
@@ -292,9 +311,37 @@ export class Host {
     return record;
   }
 
-  /** Stops the timer and destroys the core. */
-  destroy(): void {
+  /**
+   * Releases every active plugin, the latest activated first, unloads every C library the host loaded, stops the
+   * timer and destroys the core. A later call answers the first call's promise.
+   *
+   * The promise rejects with an AggregateError of every release that failed, once the rest of the shutdown has run.
+   */
+  destroy(): Promise<void> {
+    this.#destruction ??= this.#shutDown();
+    return this.#destruction;
+  }
+
+  async #shutDown(): Promise<void> {
+    const failures = await this.#releaseEveryActivePlugin();
+    [...this.#libraryUnloads].forEach((unload) => unload());
     this.#timer.stop();
+    this.#destroyed = true;
     this.core.destroy();
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Releasing a plugin failed while the host was destroyed.");
+    }
+  }
+
+  async #releaseEveryActivePlugin(): Promise<unknown[]> {
+    const failures: unknown[] = [];
+    for (const plugin of [...this.#activeOrder].reverse()) {
+      try {
+        await this.release(plugin);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    return failures;
   }
 }

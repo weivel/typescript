@@ -190,7 +190,7 @@ const echoDeclaration = JSON.stringify({
  * Times a call into a C library through the host's bytes binding, 16 bytes in and the same 16 back, against
  * `echo_release(NULL)`, which frees nothing, bound by koffi the way the host binds a library's release.
  */
-export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): FfiCallSummaries {
+export async function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Promise<FfiCallSummaries> {
   const host = Host.create({
     edgeSource: EdgeSource.Capabilities,
     ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
@@ -217,6 +217,6 @@ export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): FfiCallS
     );
   } finally {
     bareLibrary.unload();
-    host.destroy();
+    await host.destroy();
   }
 }

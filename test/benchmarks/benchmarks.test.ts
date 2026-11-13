@@ -82,7 +82,7 @@ function countingCoreLibrary(symbols: readonly string[], crossings: Map<string, 
 }
 
 /** Runs `run` while every function koffi binds from a newly loaded library is counted on every call into C. */
-function withCountedKoffi<Answer>(crossings: Map<string, number>, run: () => Answer): Answer {
+async function withCountedKoffi<Answer>(crossings: Map<string, number>, run: () => Promise<Answer>): Promise<Answer> {
   const load = koffi.load;
   koffi.load = ((path: string, ...rest: unknown[]) => {
     const library = (load as (...parameters: unknown[]) => koffi.IKoffiLib)(path, ...rest);
@@ -93,7 +93,7 @@ function withCountedKoffi<Answer>(crossings: Map<string, number>, run: () => Ans
     });
   }) as typeof koffi.load;
   try {
-    return run();
+    return await run();
   } finally {
     koffi.load = load;
   }
@@ -115,9 +115,9 @@ function boundHere(gate: RatioGate): number {
   return bound;
 }
 
-/** Spins long enough to push the weivel call past `bound` times the bare call measured now. */
-function slowdownPast(bound: number, measure: () => FfiCallSummaries): number {
-  return measure().bareCall.median * bound * 2;
+/** Spins long enough to push the weivel call past `bound` times the bare call `measured` saw. */
+function slowdownPast(bound: number, measured: FfiCallSummaries): number {
+  return measured.bareCall.median * bound * 2;
 }
 
 describe("a same-language service call through weivel", () => {
@@ -157,7 +157,7 @@ describe("a core control call through koffi", () => {
 
   it("is over its budget once it is slowed past it", { timeout }, () => {
     const options = { ...libraries, sampling: briefSampling };
-    const added = slowdownPast(boundHere("controlCall"), () => benchmarkControlCall(options));
+    const added = slowdownPast(boundHere("controlCall"), benchmarkControlCall(options));
     const slowed = benchmarkControlCall({ ...options, decorate: slowing("weivelCall", added) });
 
     expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("controlCall"));
@@ -177,25 +177,25 @@ describe("a core control call through koffi", () => {
 });
 
 describe("a C library call through the host's bytes binding", () => {
-  it("costs at most its budgeted multiple of a bare call into the library", { timeout }, () => {
-    const ratio = reportFfiPair("library-call", benchmarkLibraryCall({ ...libraries, echoLibraryPath }));
+  it("costs at most its budgeted multiple of a bare call into the library", { timeout }, async () => {
+    const ratio = reportFfiPair("library-call", await benchmarkLibraryCall({ ...libraries, echoLibraryPath }));
 
     expect(ratio).toBeLessThanOrEqual(boundHere("libraryCall"));
   });
 
-  it("is over its budget once it is slowed past it", { timeout }, () => {
+  it("is over its budget once it is slowed past it", { timeout }, async () => {
     const options = { ...libraries, echoLibraryPath, sampling: briefSampling };
-    const added = slowdownPast(boundHere("libraryCall"), () => benchmarkLibraryCall(options));
-    const slowed = benchmarkLibraryCall({ ...options, decorate: slowing("weivelCall", added) });
+    const added = slowdownPast(boundHere("libraryCall"), await benchmarkLibraryCall(options));
+    const slowed = await benchmarkLibraryCall({ ...options, decorate: slowing("weivelCall", added) });
 
     expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("libraryCall"));
   });
 
-  it("crosses into the library once for every call of each path, releasing every answer", { timeout }, () => {
+  it("crosses into the library once for every call of each path, releasing every answer", { timeout }, async () => {
     const crossings = new Map<string, number>();
     const paths = countingPaths();
 
-    withCountedKoffi(crossings, () =>
+    await withCountedKoffi(crossings, () =>
       benchmarkLibraryCall({ ...libraries, echoLibraryPath, sampling: briefSampling, decorate: paths.decorate }),
     );
 

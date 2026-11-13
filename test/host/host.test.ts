@@ -396,6 +396,38 @@ describe("release", () => {
   });
 });
 
+describe("destroy", () => {
+  it("deactivates and releases every active plugin, the latest activated first, before destroying the core", async () => {
+    const world = createHostWorld();
+    const handles = discovered(
+      world,
+      pluginDirectory([
+        plugin({ importName: "agenda", capabilities: { consumes: ["screens"] } }),
+        plugin(
+          { importName: "calendar", capabilities: { provides: ["screens"] } },
+          "context.provide(context.capability('screens'), { provider: 'calendar' });",
+        ),
+      ]),
+    );
+    await world.host.activate([...handles.values()]);
+
+    await world.host.destroy();
+
+    expect(probe().deactivated).toEqual(["agenda", "calendar"]);
+    expect(world.host.plugin(handleOf(handles, "agenda"))).toBeUndefined();
+    expect(world.host.plugin(handleOf(handles, "calendar"))).toBeUndefined();
+  });
+
+  it("leaves a host service's unregister doing nothing once the core is gone", async () => {
+    const world = createHostWorld();
+    const unregister = world.host.registerHostService({ id: "clock" }, {});
+
+    await world.host.destroy();
+
+    expect(() => unregister()).not.toThrow();
+  });
+});
+
 describe("host services", () => {
   it("are registered under the host, reached as the host's own object, and meet a plan's mandatory need", async () => {
     const world = createHostWorld({}, { edgeSource: EdgeSource.Services });

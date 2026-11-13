@@ -103,6 +103,17 @@ describe("a C library loaded as host services", () => {
     expect(second.services.get("echo")!.echo!(new Uint8Array([9]))).toEqual(new Uint8Array([9]));
   });
 
+  it("are unloaded when the host is destroyed, so a held call is refused and a later unload does nothing", async () => {
+    const world = createHostWorld();
+    const library = world.host.loadLibrary(declaration(), echoLibraryPath).library!;
+    const held = library.services.get("echo")!;
+
+    await world.host.destroy();
+
+    expect(() => held.echo!(new Uint8Array([1]))).toThrow(LibraryUnloadedError);
+    expect(() => library.unload()).not.toThrow();
+  });
+
   it("refuses a json function by its field path, binding and registering nothing", () => {
     const world = createHostWorld();
     const withJson = [echoFunctions[0]!, { name: "repeat", symbol: "echo_echo", kind: "json", argument: true, result: true }];

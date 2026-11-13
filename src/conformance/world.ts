@@ -139,12 +139,15 @@ export class DriverWorld {
     return this.host.open(this.plugin(importName));
   }
 
-  close(options: DriverOptions): void {
+  async close(options: DriverOptions): Promise<void> {
     try {
       options.inspect?.(this.host);
     } finally {
-      this.host.destroy();
-      rmSync(this.#directory, { recursive: true, force: true });
+      try {
+        await this.host.destroy();
+      } finally {
+        rmSync(this.#directory, { recursive: true, force: true });
+      }
     }
   }
 }

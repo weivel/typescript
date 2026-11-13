@@ -24,7 +24,7 @@ const opDrivers: Readonly<Record<string, OpDriver>> = {
 
 /**
  * Builds the vector's `given` through a host on the real core and standard, drives it, and answers every field of
- * its `then` from the run.
+ * its `then` from the run. What the host's shutdown makes the run's listeners hear or log afterwards is not read.
  *
  * @throws Error for an op, a given field, a step kind or a `then` field this driver does not know.
  */
@@ -36,8 +36,8 @@ export async function witnessLayerVector(vector: LayerVector, options: DriverOpt
   const world = new DriverWorld(options, opDriver.coreOptions(vector));
   try {
     const observers = await opDriver.drive(vector, world);
-    return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: world.logs };
+    return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: [...world.logs] };
   } finally {
-    world.close(options);
+    await world.close(options);
   }
 }
