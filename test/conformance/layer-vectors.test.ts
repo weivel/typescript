@@ -71,6 +71,15 @@ describe("want/a-settled-want-disarms-the-timer", () => {
   });
 });
 
+describe("want/a-registration-past-an-unfired-deadline-loses", () => {
+  it("advances the core to the clock before the registration, though the timer never fired, so the want times out", async () => {
+    const { vector, witness: seen } = await witness("want/a-registration-past-an-unfired-deadline-loses");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
 describe("lifecycle/an-awaited-want-does-not-hold-back-a-later-plugin", () => {
   it("starts the later plugin while the earlier one's activate waits on the service it registers", async () => {
     const { vector, witness: seen } = await witness("lifecycle/an-awaited-want-does-not-hold-back-a-later-plugin");

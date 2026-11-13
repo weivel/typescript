@@ -28,6 +28,8 @@ export class VirtualTime implements Clock, Scheduler {
   #now = 0;
   #nextToken = 0;
   readonly #tasks = new Map<number, ScheduledTask>();
+  /** The time each task ran at, in the order they ran: what the layer's timer did, not what it said it did. */
+  readonly fired: number[] = [];
 
   now(): number {
     return this.#now;
@@ -48,9 +50,15 @@ export class VirtualTime implements Clock, Scheduler {
     for (let due = this.#earliestDue(time); due !== undefined; due = this.#earliestDue(time)) {
       this.#tasks.delete(due[0]);
       this.#now = Math.max(this.#now, due[1].dueAt);
+      this.fired.push(this.#now);
       due[1].callback();
       await settled();
     }
+    this.#now = Math.max(this.#now, time);
+  }
+
+  /** Moves the clock to `time` and runs no task, as a scheduler that has not yet taken its turn. */
+  moveClockTo(time: number): void {
     this.#now = Math.max(this.#now, time);
   }
 

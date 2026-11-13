@@ -9,13 +9,20 @@ interface WantGiven {
   readonly registerAtMillis: number | null;
   readonly timeoutMillis: number | null;
   readonly horizonMillis: number;
+  readonly schedulerRunsBeforeRegistering?: boolean;
 }
 
 const consumerName = "consumer";
 const providerName = "provider";
 
 function checkGiven(vector: LayerVector): WantGiven {
-  refuseUnknownKeys(`The vector ${vector.id}'s given`, vector.given, ["service", "registerAtMillis", "timeoutMillis", "horizonMillis"]);
+  refuseUnknownKeys(`The vector ${vector.id}'s given`, vector.given, [
+    "service",
+    "registerAtMillis",
+    "timeoutMillis",
+    "horizonMillis",
+    "schedulerRunsBeforeRegistering",
+  ]);
   const given = vector.given as unknown as WantGiven;
   refuseUnknownKeys(`The vector ${vector.id}'s service`, given.service, ["id"]);
   return given;
@@ -48,9 +55,9 @@ function followWant(want: Promise<unknown>, world: DriverWorld): WantOutcome {
 }
 
 /**
- * Asks at time 0 on the driver's virtual time and runs time to the horizon. At `registerAtMillis` every deadline due
- * by then is handed to the core before the provider registers, the order a layer running a want on its own clock
- * must keep.
+ * Asks at time 0 on the driver's virtual time and runs time to the horizon, registering the provider at
+ * `registerAtMillis`. The scheduler runs the tasks due on the way there unless `schedulerRunsBeforeRegistering` is
+ * false, when only the clock moves, so the registration meets a deadline the layer's timer has not fired.
  */
 export async function driveWant(vector: LayerVector, world: DriverWorld): Promise<Record<string, Observer>> {
   const given = checkGiven(vector);
@@ -67,7 +74,11 @@ export async function driveWant(vector: LayerVector, world: DriverWorld): Promis
   );
   await settled();
   if (given.registerAtMillis !== null) {
-    await world.time.runUntil(given.registerAtMillis);
+    if (given.schedulerRunsBeforeRegistering === false) {
+      world.time.moveClockTo(given.registerAtMillis);
+    } else {
+      await world.time.runUntil(given.registerAtMillis);
+    }
     provider.services.register(provider.service(id), { provider: providerName });
     await settled();
   }
@@ -78,5 +89,6 @@ export async function driveWant(vector: LayerVector, world: DriverWorld): Promis
     atMillis: () => outcome.atMillis,
     refusal: () => outcome.refusal,
     timer: () => world.timerMoves.map((move) => [...move]),
+    fired: () => [...world.time.fired],
   };
 }
