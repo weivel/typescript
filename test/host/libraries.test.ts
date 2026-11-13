@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HOST, Status } from "../../src/core/index.ts";
-import { LibraryCallError, type LibraryService } from "../../src/host/index.ts";
+import { LibraryCallError, LibraryUnloadedError, type LibraryService } from "../../src/host/index.ts";
 import { StandardRefusalCode } from "../../src/standard/index.ts";
 import { createHostWorld, echoLibraryPath, plugin, pluginDirectory, type HostWorld } from "./world.ts";
 
@@ -78,6 +78,18 @@ describe("a C library loaded as host services", () => {
     answer.library!.unload();
 
     expect(hostReaches(world, "echo")).toBe(false);
+  });
+
+  it("refuse a call a plugin still holds once unloaded, never reaching the unloaded code, and unload once", () => {
+    const world = createHostWorld();
+    const answer = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const held = answer.library!.services.get("echo")!;
+
+    answer.library!.unload();
+    answer.library!.unload();
+
+    expect(() => held.echo!(new Uint8Array([1]))).toThrow(LibraryUnloadedError);
+    expect(() => held.echo!(new Uint8Array([1]))).toThrow("echo_echo belongs to a C library that has been unloaded.");
   });
 
   it("refuses a json function by its field path, binding and registering nothing", () => {

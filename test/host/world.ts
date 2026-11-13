@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
@@ -91,6 +91,15 @@ export function pluginDirectory(plugins: readonly WrittenPlugin[]): string {
     }
   }
   return directory;
+}
+
+/**
+ * Makes `link` a link to the directory `target`.
+ *
+ * @remarks A junction on Windows, which needs no privilege there, unlike a symbolic link; a symbolic link elsewhere.
+ */
+export function linkDirectory(target: string, link: string): void {
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
 }
 
 /** Every file of a directory and its text, to compare the directory before and after the host ran. */

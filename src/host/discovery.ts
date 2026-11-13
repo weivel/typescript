@@ -27,7 +27,13 @@ function sortOne(core: Core, discovered: DiscoveredPlugin, sorted: Sorted): void
   }
   const registered = core.registerManifest(manifest);
   if (registered.status === Status.Ok && registered.value !== undefined) {
-    sorted.registered.push({ plugin: registered.value, manifest, manifestPath, entryPath: discovered.entryPath });
+    sorted.registered.push({
+      plugin: registered.value,
+      manifest,
+      manifestPath,
+      entryPath: discovered.entryPath,
+      entryPresent: discovered.entryPresent,
+    });
     return;
   }
   const failure = failureOf("weivel_register_manifest", registered);

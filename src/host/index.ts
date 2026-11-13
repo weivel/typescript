@@ -1,5 +1,5 @@
 export { Host } from "./host.js";
-export { LibraryCallError } from "./libraries.js";
+export { LibraryCallError, LibraryUnloadedError } from "./libraries.js";
 export type {
   ActivationOutcome,
   ActivationReport,

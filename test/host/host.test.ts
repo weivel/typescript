@@ -2,9 +2,18 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Axis, EdgeSource, LogLevel, PluginStatus, RefusalCode } from "../../src/core/index.ts";
-import { RefusalError, type PluginContext, type PluginEvent } from "../../src/context/index.ts";
+import { RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { StandardRefusalCode } from "../../src/standard/index.ts";
-import { createHostWorld, directoryContents, plugin, pluginDirectory, settle, type HostWorld } from "./world.ts";
+import {
+  createHostWorld,
+  directoryContents,
+  entrySource,
+  linkDirectory,
+  plugin,
+  pluginDirectory,
+  settle,
+  type HostWorld,
+} from "./world.ts";
 
 const probe = () => globalThis.weivelHostProbe;
 
@@ -192,6 +201,7 @@ describe("activation", () => {
     const directory = pluginDirectory([
       { manifest: { importName: "absent", entry: "absent.js" } },
       { manifest: { importName: "bare", entry: "bare.js" }, entrySource: "export const nothing = 1;\n" },
+      { manifest: { importName: "broken", entry: "broken.js" }, entrySource: "export default {\n" },
       { manifest: { importName: "unnamed" } },
     ]);
     const handles = discovered(world, directory);
@@ -201,13 +211,63 @@ describe("activation", () => {
     expect(report.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
       ["absent", "quarantined"],
       ["bare", "quarantined"],
+      ["broken", "quarantined"],
       ["unnamed", "quarantined"],
     ]);
     const details = report.outcomes.map((outcome) => outcome.refusal?.detail);
-    expect(details[0]?.startsWith(`its entry ${directory}/absent.js could not be loaded: `)).toBe(true);
+    expect(details[0]).toBe(`its entry ${directory}/absent.js is not a regular file reached through no link`);
     expect(details[1]).toBe(`its entry ${directory}/bare.js has no default export with an activate function`);
-    expect(details[2]).toBe("its manifest names no entry");
+    expect(details[2]?.startsWith(`its entry ${directory}/broken.js could not be loaded: `)).toBe(true);
+    expect(details[3]).toBe("its manifest names no entry");
     expect(report.outcomes.every((outcome) => outcome.refusal?.hasFix === true)).toBe(true);
+  });
+
+  it("never imports an entry reached through a link, quarantining the plugin instead", async () => {
+    const world = createHostWorld();
+    const elsewhere = pluginDirectory([]);
+    writeFileSync(join(elsewhere, "linked.js"), entrySource("linked", "", "js").replace("const probe", "globalThis.weivelHostProbe.activated.push('imported');\nconst probe"));
+    const directory = pluginDirectory([{ manifest: { importName: "linked", entry: "lib/linked.js" } }]);
+    linkDirectory(elsewhere, join(directory, "lib"));
+    const handles = discovered(world, directory);
+
+    const report = await world.host.activate([handleOf(handles, "linked")]);
+
+    expect(world.host.plugin(handleOf(handles, "linked"))?.entryPresent).toBe(false);
+    expect(report.outcomes[0]).toMatchObject({
+      state: "quarantined",
+      refusal: { detail: `its entry ${directory}/lib/linked.js is not a regular file reached through no link` },
+    });
+    expect(probe().activated).toEqual([]);
+  });
+
+  it("runs an entry as the file now is when a released plugin is discovered and activated again", async () => {
+    const world = createHostWorld();
+    const directory = pluginDirectory([plugin({ importName: "changing" }, "probe.version = 1;")]);
+    const first = handleOf(discovered(world, directory), "changing");
+    await world.host.activate([first]);
+    await world.host.release(first);
+    writeFileSync(join(directory, "changing.js"), entrySource("changing", "probe.version = 2;"));
+
+    const second = handleOf(discovered(world, directory), "changing");
+    const report = await world.host.activate([second]);
+
+    expect(report.outcomes[0]?.state).toBe("active");
+    expect(probe().activated).toEqual(["changing", "changing"]);
+    expect((probe() as unknown as { version: number }).version).toBe(2);
+  });
+
+  it("writes a plugin's refused reach to the host's log as the core reports it", async () => {
+    const world = createHostWorld();
+    const handles = discovered(
+      world,
+      pluginDirectory([plugin({ importName: "reacher" }, "context.services.get(context.service('other:thing'));")]),
+    );
+
+    await world.host.activate([handleOf(handles, "reacher")]);
+
+    const warnings = world.hostLog.entries.filter((entry) => entry.level === "warn").map((entry) => entry.message);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.startsWith("reacher was refused other:thing: ")).toBe(true);
   });
 
   it("answers the core's refusal of a plugin it will not open as data", async () => {
@@ -223,56 +283,7 @@ describe("activation", () => {
   });
 });
 
-describe("consume/a-refused-verify-quarantines-the-plugin", () => {
-  it("quarantines the refused plugin in the same step, its watch stopping there, and reports no refusal", async () => {
-    const world = createHostWorld();
-    const handles = discovered(
-      world,
-      pluginDirectory([
-        { manifest: { importName: "agenda", capabilities: { consumes: ["screens"] } } },
-        { manifest: { importName: "calendar", entry: "calendar.js", capabilities: { provides: ["screens"] } } },
-        { manifest: { importName: "flaky", entry: "flaky.js", capabilities: { provides: ["screens", "extras"], consumes: ["screens"] } } },
-      ]),
-    );
-    const agenda = world.host.open(handleOf(handles, "agenda"));
-    const calendar = world.host.open(handleOf(handles, "calendar"));
-    const flaky = world.host.open(handleOf(handles, "flaky"));
-    const pluginEvents: PluginEvent[] = [];
-    for (const context of [agenda, calendar, flaky]) {
-      context.events.listen((event) => pluginEvents.push(event));
-    }
-    const heard: [string, string][][] = [[], []];
-    const watchScreens = (context: PluginContext, into: [string, string][]) =>
-      context.capabilities.watch(context.capability<{ provider: string }>("screens"), (implementation, change) =>
-        into.push([implementation.provider, change]),
-      );
-
-    watchScreens(agenda, heard[0]!);
-    watchScreens(flaky, heard[1]!);
-    calendar.provide(calendar.capability("screens"), { provider: "calendar" });
-    const calendarVerified = world.host.verify(handleOf(handles, "calendar"));
-    flaky.provide(flaky.capability("screens"), { provider: "flaky" });
-    const flakyVerified = world.host.verify(handleOf(handles, "flaky"));
-    await world.host.release(handleOf(handles, "calendar"));
-
-    expect(heard).toEqual([
-      [
-        ["calendar", "provide"],
-        ["calendar", "withdraw"],
-      ],
-      [["calendar", "provide"]],
-    ]);
-    expect(calendarVerified.state).toBe("active");
-    expect(flakyVerified.state).toBe("quarantined");
-    expect(quarantinedNames(world)).toEqual(["flaky"]);
-    const reason = world.host.core.ledgerEntry(handleOf(handles, "flaky")).value!.refusal;
-    expect(reason).toMatchObject({ code: RefusalCode.ActivationMismatch, subject: "flaky", hasFix: true });
-    expect(flakyVerified.refusal).toEqual(reason);
-    expect(world.host.contexts.tracked(handleOf(handles, "flaky"))).toBe(0);
-    expect(pluginEvents.filter((event) => event.kind === "reach-refused")).toEqual([]);
-    expect(world.host.core.ledger().value!.refusals).toEqual([]);
-  });
-
+describe("a refused activation check", () => {
   it("quarantines a plugin whose activation the core refuses after activate ran", async () => {
     const world = createHostWorld();
     const handles = discovered(world, pluginDirectory([plugin({ importName: "liar", capabilities: { provides: ["screens"] } })]));

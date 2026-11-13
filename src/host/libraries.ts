@@ -21,6 +21,21 @@ export class LibraryCallError extends Error {
   }
 }
 
+/** A call to a function of a library that has been unloaded, refused before it reaches unmapped code. */
+export class LibraryUnloadedError extends Error {
+  readonly symbol: string;
+
+  constructor(symbol: string) {
+    super(`${symbol} belongs to a C library that has been unloaded.`);
+    this.name = "LibraryUnloadedError";
+    this.symbol = symbol;
+  }
+}
+
+interface LoadState {
+  loaded: boolean;
+}
+
 function textOf(body: Uint8Array): string {
   if (body.length === 0) {
     return "and no text saying why";
@@ -39,9 +54,12 @@ function copyBody(pointer: object | null, length: number): Uint8Array {
   return new Uint8Array(koffi.view(pointer, length)).slice();
 }
 
-function bindFunction(library: koffi.IKoffiLib, symbol: string, release: NativeFunction): LibraryFunction {
+function bindFunction(library: koffi.IKoffiLib, symbol: string, release: NativeFunction, state: LoadState): LibraryFunction {
   const native = library.func(symbol, "int32_t", bytesParameters) as NativeFunction;
   return (input) => {
+    if (!state.loaded) {
+      throw new LibraryUnloadedError(symbol);
+    }
     const output: (object | null)[] = [null];
     const outputLength: number[] = [0];
     const status = native(input, input.length, output, outputLength) as number;
@@ -60,12 +78,27 @@ function bindFunction(library: koffi.IKoffiLib, symbol: string, release: NativeF
   };
 }
 
-function bindService(library: koffi.IKoffiLib, functions: readonly DeclaredFunction[], release: NativeFunction): LibraryService {
-  return Object.fromEntries(functions.map((declared) => [declared.name, bindFunction(library, declared.symbol, release)]));
+function bindService(
+  library: koffi.IKoffiLib,
+  functions: readonly DeclaredFunction[],
+  release: NativeFunction,
+  state: LoadState,
+): LibraryService {
+  return Object.fromEntries(
+    functions.map((declared) => [declared.name, bindFunction(library, declared.symbol, release, state)]),
+  );
+}
+
+function unloadOnce(library: koffi.IKoffiLib, state: LoadState): void {
+  if (state.loaded) {
+    state.loaded = false;
+    library.unload();
+  }
 }
 
 export interface BoundLibrary {
   readonly services: ReadonlyMap<string, LibraryService>;
+  /** Unloads the library once; a later call does nothing, and a bound function then throws LibraryUnloadedError. */
   unload(): void;
 }
 
@@ -79,12 +112,13 @@ export function bindLibrary(path: string, declaration: LibraryDeclaration): Boun
     throw new Error(`The C library ${declaration.importName} is not at ${path}.`);
   }
   const library = koffi.load(path);
+  const state: LoadState = { loaded: true };
   try {
     const release = library.func(declaration.release, "void", ["void *"]) as NativeFunction;
     const services = new Map(
-      declaration.services.map((service) => [service.id, bindService(library, service.functions, release)] as const),
+      declaration.services.map((service) => [service.id, bindService(library, service.functions, release, state)] as const),
     );
-    return { services, unload: () => library.unload() };
+    return { services, unload: () => unloadOnce(library, state) };
   } catch (error) {
     library.unload();
     throw new Error(`The C library at ${path} does not export every symbol ${declaration.importName} declares.`, {
