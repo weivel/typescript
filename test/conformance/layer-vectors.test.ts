@@ -52,3 +52,48 @@ describe("want/a-registration-at-the-deadline-loses", () => {
     expect(seen.observed.refusal).toEqual(vector.then.refusal);
   });
 });
+
+describe("want/a-timed-want-arms-the-timer-at-its-deadline", () => {
+  it("arms the timer at the announced deadline and disarms it once the want has timed out there", async () => {
+    const { vector, witness: seen } = await witness("want/a-timed-want-arms-the-timer-at-its-deadline");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("want/a-settled-want-disarms-the-timer", () => {
+  it("disarms the timer when the registration settles the want, so it never fires", async () => {
+    const { vector, witness: seen } = await witness("want/a-settled-want-disarms-the-timer");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("lifecycle/an-awaited-want-does-not-hold-back-a-later-plugin", () => {
+  it("starts the later plugin while the earlier one's activate waits on the service it registers", async () => {
+    const { vector, witness: seen } = await witness("lifecycle/an-awaited-want-does-not-hold-back-a-later-plugin");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("lifecycle/a-release-deactivates-then-releases-then-forgets", () => {
+  it("deactivates the plugin while whole, hands it its stopped want, then forgets it", async () => {
+    const { vector, witness: seen } = await witness("lifecycle/a-release-deactivates-then-releases-then-forgets");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("lifecycle/destroy-releases-a-plugin-whose-activate-is-in-flight", () => {
+  it("releases the in-flight plugin, leaves no want pending, and answers a later verify quietly", async () => {
+    const { vector, witness: seen } = await witness("lifecycle/destroy-releases-a-plugin-whose-activate-is-in-flight");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});

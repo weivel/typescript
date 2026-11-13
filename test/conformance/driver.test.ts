@@ -16,6 +16,7 @@ function withThen(vector: LayerVector, then: Record<string, unknown>): LayerVect
 
 const consumeId = "consume/a-throwing-listener-does-not-silence-the-others";
 const wantId = "want/a-registration-at-the-deadline-loses";
+const lifecycleId = "lifecycle/a-release-deactivates-then-releases-then-forgets";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -106,5 +107,26 @@ describe("the layer driver", () => {
     const seen = await witnessLayerVector(early, options);
 
     expect(seen.observed).toEqual({ settled: true, timedOut: false, atMillis: { equals: 999 }, refusal: null });
+  });
+
+  it("answers a lifecycle trace pair the run breaks as broken, so the comparison fails", async () => {
+    const vector = kitVector(lifecycleId);
+    const reversed = { before: [["missed agenda calendar:events", "deactivate calendar"]] };
+
+    const seen = await witnessLayerVector(withThen(vector, { trace: reversed }), options);
+
+    expect(seen.observed.trace).not.toEqual(reversed);
+    expect((seen.observed.trace as { before: string[][] }).before[0]![2]).toMatch(/^not in that order/);
+  });
+
+  it("fails a lifecycle action and a step it does not drive", async () => {
+    const vector = kitVector(lifecycleId);
+    const given = vector.given as { plugins: Record<string, unknown>[]; steps: unknown[] };
+    const plugins = [{ ...given.plugins[0]!, activate: [{ provide: "screens" }] }, given.plugins[1]!];
+
+    await expect(witnessLayerVector({ ...vector, given: { ...given, plugins } }, options)).rejects.toThrow(/names 0 actions/);
+    await expect(witnessLayerVector({ ...vector, given: { ...given, steps: [{ quarantine: "calendar" }] } }, options)).rejects.toThrow(
+      /names 0 actions/,
+    );
   });
 });
