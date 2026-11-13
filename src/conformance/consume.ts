@@ -123,8 +123,8 @@ class ConsumeRun {
 
   observers(): Record<string, Observer> {
     return {
-      heard: () => this.heard,
-      reported: () => this.reported,
+      heard: () => this.heard.map((listener) => [...listener]),
+      reported: () => [...this.reported],
       refusal: () => (this.refusals[0] === undefined ? null : kitRefusal(this.refusals[0])),
       quarantined: () => this.quarantinedRows().map((row) => row.importName),
       quarantineReason: () => {

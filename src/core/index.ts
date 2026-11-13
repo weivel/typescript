@@ -51,6 +51,7 @@ export {
   type CallResult,
   type CoreLibrary,
   type CreateCoreOptions,
+  type DeadlineListener,
   type DrainListener,
   type EventDispatcher,
   type ListenerErrorSink,

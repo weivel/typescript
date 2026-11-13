@@ -99,6 +99,26 @@ describe("a call that throws", () => {
   });
 });
 
+describe("a call's drain", () => {
+  it("crosses weivel_next_event once per event the call queued, and not at all when it queued none", () => {
+    let crossings = 0;
+    const { core } = createWrappedCore({
+      weivel_next_event: (...parameters: unknown[]) => {
+        crossings += 1;
+        return library.functions.weivel_next_event(...parameters);
+      },
+    });
+
+    core.ledger();
+    const crossedForNothing = crossings;
+    const refused = core.registerService(HOST, "");
+
+    expect(crossedForNothing).toBe(0);
+    expect(refused.events).toEqual([expect.objectContaining({ kind: "refusal" })]);
+    expect(crossings).toBe(1);
+  });
+});
+
 describe("a dispatcher that throws", () => {
   it("never costs the caller its answer, and every event is still dispatched", () => {
     const sunk: SinkRecord[] = [];

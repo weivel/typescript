@@ -48,6 +48,12 @@ export type EventDispatcher = (event: CoreEvent) => void;
 export type DrainListener = () => void;
 
 /**
+ * Called once an outermost call has settled when it, or a call made while its events were dispatched, could have
+ * moved the core's next deadline.
+ */
+export type DeadlineListener = () => void;
+
+/**
  * Receives what a dispatcher, a drain listener or a timer-driven call threw, with the event being dispatched when
  * there was one.
  *
@@ -126,9 +132,11 @@ export function readThenRelease<Value>(answer: object, read: (answer: object) =>
 type EventCopier = (event: object) => CoreEvent | undefined;
 
 /**
- * Moves every queued event into `drained` until the core answers NONE: the only caller of weivel_next_event. Each
- * event is released whatever copying it does, so the next weivel_next_event never meets an unreleased event, and an
- * event that cannot be copied goes to `report` while the rest are still drained.
+ * Moves every queued event into `drained`: the only caller of weivel_next_event. `pending` holds how many events the
+ * core said wait and receives each later count, so a queue the core reported empty costs no crossing; without it the
+ * drain runs until the core answers NONE. Each event is released whatever copying it does, so the next
+ * weivel_next_event never meets an unreleased event, and an event that cannot be copied goes to `report` while the
+ * rest are still drained.
  */
 export function drainEvents(
   functions: CoreFunctions,
@@ -137,15 +145,18 @@ export function drainEvents(
   drained: CoreEvent[],
   copy: EventCopier,
   report: ListenerErrorSink,
+  pending: Uint32Array | null = null,
 ): void {
-  for (;;) {
-    const status = functions.weivel_next_event(core, eventBuffer, null) as Status;
+  let waiting = pending === null ? Number.POSITIVE_INFINITY : pending[0]!;
+  while (waiting > 0) {
+    const status = functions.weivel_next_event(core, eventBuffer, pending) as Status;
     if (status === Status.None) {
       return;
     }
     if (status !== Status.Ok) {
       throw new Error(`weivel_next_event answered status ${status}: the layer's event struct is malformed.`);
     }
+    waiting = pending === null ? waiting : pending[0]!;
     try {
       const event = copy(eventBuffer);
       if (event !== undefined) {
@@ -176,6 +187,9 @@ export class Core {
   #core: object | null;
   #dispatcher: EventDispatcher | undefined;
   readonly #drainListeners = new Set<DrainListener>();
+  readonly #deadlineListeners = new Set<DeadlineListener>();
+  readonly #pending = new Uint32Array(1);
+  #deadlineMayHaveMoved = false;
   readonly #undispatched: CoreEvent[] = [];
   #settling = false;
   readonly #onListenerError: ListenerErrorSink;
@@ -206,6 +220,12 @@ export class Core {
     return () => this.#drainListeners.delete(listener);
   }
 
+  /** Adds a listener told when the core's next deadline may have moved; the answer removes it. */
+  addDeadlineListener(listener: DeadlineListener): () => void {
+    this.#deadlineListeners.add(listener);
+    return () => this.#deadlineListeners.delete(listener);
+  }
+
   get destroyed(): boolean {
     return this.#core === null;
   }
@@ -222,27 +242,28 @@ export class Core {
   nextDeadline(): CallResult<number> {
     const deadline: unknown[] = [0];
     return this.#invoke(
-      (core) => this.#functions.weivel_next_deadline(core, deadline, null),
+      (core, pending) => this.#functions.weivel_next_deadline(core, deadline, pending),
       () => Number(deadline[0]),
     );
   }
 
   advance(now: number): CallResult<undefined> {
-    return this.#invoke((core) => this.#functions.weivel_advance(core, now, null));
+    this.#deadlineMayHaveMoved = true;
+    return this.#invoke((core, pending) => this.#functions.weivel_advance(core, now, pending));
   }
 
   supports(manifest: Manifest): CallResult<Support> {
     return this.#invokeWithAnswer(
       "weivel_support",
-      (core, answer) => this.#functions.weivel_supports(core, encodeManifest(manifest), answer, null),
+      (core, answer, pending) => this.#functions.weivel_supports(core, encodeManifest(manifest), answer, pending),
       readSupport,
       (answer) => this.#functions.weivel_support_release(answer),
     );
   }
 
   registerManifest(manifest: Manifest): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle) =>
-      this.#functions.weivel_register_manifest(core, encodeManifest(manifest), handle, null),
+    return this.#invokeForHandle((core, handle, pending) =>
+      this.#functions.weivel_register_manifest(core, encodeManifest(manifest), handle, pending),
     );
   }
 
@@ -251,8 +272,8 @@ export class Core {
     const provided = hostProvided === undefined ? null : encodeStrings(hostProvided);
     return this.#invokeWithAnswer(
       "weivel_activation_plan",
-      (core, answer) =>
-        this.#functions.weivel_plan_activation(core, pluginList, plugins.length, edgeSource, provided, answer, null),
+      (core, answer, pending) =>
+        this.#functions.weivel_plan_activation(core, pluginList, plugins.length, edgeSource, provided, answer, pending),
       readActivationPlan,
       (answer) => this.#functions.weivel_activation_plan_release(answer),
     );
@@ -260,101 +281,107 @@ export class Core {
 
   openPlugin(plugin: bigint, payload?: bigint): CallResult<undefined> {
     const options = payload === undefined ? null : encodePluginOptions(payload);
-    return this.#invoke((core) => this.#functions.weivel_open_plugin(core, plugin, options, null));
+    return this.#invoke((core, pending) => this.#functions.weivel_open_plugin(core, plugin, options, pending));
   }
 
   pluginPayload(plugin: bigint): CallResult<bigint> {
-    return this.#invokeForHandle((core, payload) => this.#functions.weivel_plugin_payload(core, plugin, payload, null));
+    return this.#invokeForHandle((core, payload, pending) => this.#functions.weivel_plugin_payload(core, plugin, payload, pending));
   }
 
   releasePlugin(plugin: bigint): CallResult<undefined> {
-    return this.#invoke((core) => this.#functions.weivel_release_plugin(core, plugin, null));
+    this.#deadlineMayHaveMoved = true;
+    return this.#invoke((core, pending) => this.#functions.weivel_release_plugin(core, plugin, pending));
   }
 
   quarantinePlugin(plugin: bigint, reason?: QuarantineReason): CallResult<undefined> {
+    this.#deadlineMayHaveMoved = true;
     const encoded = reason === undefined ? null : encodeQuarantineReason(reason);
-    return this.#invoke((core) => this.#functions.weivel_quarantine_plugin(core, plugin, encoded, null));
+    return this.#invoke((core, pending) => this.#functions.weivel_quarantine_plugin(core, plugin, encoded, pending));
   }
 
   forgetPlugin(plugin: bigint): CallResult<undefined> {
-    return this.#invoke((core) => this.#functions.weivel_forget_plugin(core, plugin, null));
+    return this.#invoke((core, pending) => this.#functions.weivel_forget_plugin(core, plugin, pending));
   }
 
   registerService(owner: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle) => this.#functions.weivel_register_service(core, owner, id, handle, null));
+    this.#deadlineMayHaveMoved = true;
+    return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
   }
 
   unregister(handle: bigint): CallResult<undefined> {
-    return this.#invoke((core) => this.#functions.weivel_unregister(core, handle, null));
+    this.#deadlineMayHaveMoved = true;
+    return this.#invoke((core, pending) => this.#functions.weivel_unregister(core, handle, pending));
   }
 
   handleState(handle: bigint): CallResult<HandleCondition> {
     const condition: unknown[] = [0];
     return this.#invoke(
-      (core) => this.#functions.weivel_handle_state(core, handle, condition, null),
+      (core, pending) => this.#functions.weivel_handle_state(core, handle, condition, pending),
       () => condition[0] as HandleCondition,
     );
   }
 
   getService(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle) => this.#functions.weivel_get_service(core, plugin, id, handle, null));
+    return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_get_service(core, plugin, id, handle, pending));
   }
 
   wantService(plugin: bigint, id: string, options?: WantOptions): CallResult<bigint> {
+    this.#deadlineMayHaveMoved = true;
     const encoded = options === undefined ? null : encodeWantOptions(options);
-    return this.#invokeForHandle((core, handle) =>
-      this.#functions.weivel_want_service(core, plugin, id, encoded, handle, null),
+    return this.#invokeForHandle((core, handle, pending) =>
+      this.#functions.weivel_want_service(core, plugin, id, encoded, handle, pending),
     );
   }
 
   reportCapacity(want: bigint, registration: bigint, answer: CapacityAnswer, now: number): CallResult<undefined> {
+    this.#deadlineMayHaveMoved = true;
     const encoded = encodeCapacity(answer);
-    return this.#invoke((core) => this.#functions.weivel_report_capacity(core, want, registration, encoded, now, null));
+    return this.#invoke((core, pending) => this.#functions.weivel_report_capacity(core, want, registration, encoded, now, pending));
   }
 
   watchService(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle) => this.#functions.weivel_watch_service(core, plugin, id, handle, null));
+    return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_watch_service(core, plugin, id, handle, pending));
   }
 
   serviceIds(plugin: bigint): CallResult<string[]> {
-    return this.#invokeForServiceList((core, answer) => this.#functions.weivel_service_ids(core, plugin, answer, null));
+    return this.#invokeForServiceList((core, answer, pending) => this.#functions.weivel_service_ids(core, plugin, answer, pending));
   }
 
   unboundServices(plugin: bigint): CallResult<string[]> {
-    return this.#invokeForServiceList((core, answer) =>
-      this.#functions.weivel_unbound_services(core, plugin, answer, null),
+    return this.#invokeForServiceList((core, answer, pending) =>
+      this.#functions.weivel_unbound_services(core, plugin, answer, pending),
     );
   }
 
   provideCapability(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle) =>
-      this.#functions.weivel_provide_capability(core, plugin, id, handle, null),
+    return this.#invokeForHandle((core, handle, pending) =>
+      this.#functions.weivel_provide_capability(core, plugin, id, handle, pending),
     );
   }
 
   verifyActivation(plugin: bigint): CallResult<undefined> {
-    return this.#invoke((core) => this.#functions.weivel_verify_activation(core, plugin, null));
+    return this.#invoke((core, pending) => this.#functions.weivel_verify_activation(core, plugin, pending));
   }
 
   allCapabilities(plugin: bigint, id: string): CallResult<CapabilityImplementation[]> {
     return this.#invokeWithAnswer(
       "weivel_capability_list",
-      (core, answer) => this.#functions.weivel_all_capabilities(core, plugin, id, answer, null),
+      (core, answer, pending) => this.#functions.weivel_all_capabilities(core, plugin, id, answer, pending),
       readCapabilityList,
       (answer) => this.#functions.weivel_capability_list_release(answer),
     );
   }
 
   watchCapability(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle) =>
-      this.#functions.weivel_watch_capability(core, plugin, id, handle, null),
+    return this.#invokeForHandle((core, handle, pending) =>
+      this.#functions.weivel_watch_capability(core, plugin, id, handle, pending),
     );
   }
 
   ledger(): CallResult<LedgerSnapshot> {
     return this.#invokeWithAnswer(
       "weivel_ledger_snapshot",
-      (core, answer) => this.#functions.weivel_ledger(core, answer, null),
+      (core, answer, pending) => this.#functions.weivel_ledger(core, answer, pending),
       readLedgerSnapshot,
       (answer) => this.#functions.weivel_ledger_snapshot_release(answer),
     );
@@ -363,21 +390,21 @@ export class Core {
   ledgerEntry(plugin: bigint): CallResult<LedgerRow> {
     return this.#invokeWithAnswer(
       "weivel_ledger_row",
-      (core, answer) => this.#functions.weivel_ledger_entry(core, plugin, answer, null),
+      (core, answer, pending) => this.#functions.weivel_ledger_entry(core, plugin, answer, pending),
       readLedgerRow,
       (answer) => this.#functions.weivel_ledger_row_release(answer),
     );
   }
 
-  #invokeForHandle(call: (core: object, handle: unknown[]) => number): CallResult<bigint> {
+  #invokeForHandle(call: (core: object, handle: unknown[], pending: Uint32Array) => number): CallResult<bigint> {
     const handle: unknown[] = [0];
     return this.#invoke(
-      (core) => call(core, handle),
+      (core, pending) => call(core, handle, pending),
       () => toBigInt(handle[0]),
     );
   }
 
-  #invokeForServiceList(call: (core: object, answer: object) => number): CallResult<string[]> {
+  #invokeForServiceList(call: (core: object, answer: object, pending: Uint32Array) => number): CallResult<string[]> {
     return this.#invokeWithAnswer("weivel_service_list", call, readServiceList, (answer) =>
       this.#functions.weivel_service_list_release(answer),
     );
@@ -385,14 +412,14 @@ export class Core {
 
   #invokeWithAnswer<Value>(
     answerStruct: CoreStructName,
-    call: (core: object, answer: object) => number,
+    call: (core: object, answer: object, pending: Uint32Array) => number,
     read: (answer: object) => Value,
     release: Release,
   ): CallResult<Value> {
     const answer = allocateZeroed(answerStruct);
     try {
       return this.#invoke(
-        (core) => call(core, answer),
+        (core, pending) => call(core, answer, pending),
         () => readThenRelease(answer, read, release),
       );
     } finally {
@@ -402,25 +429,34 @@ export class Core {
 
   /**
    * The one function every call taking a core goes through: it makes the call, reads the call's value when the
-   * status is OK, drains the queue, and dispatches what it drained. The drain runs whatever the call or the read
-   * throws, so a call's events always belong to it.
+   * status is OK, drains what the core said waits, and dispatches what it drained. The drain runs whatever the call
+   * or the read throws, so a call's events always belong to it; a call that threw before the core answered says
+   * nothing of the queue, which is then drained until the core answers NONE.
    */
-  #invoke<Value>(call: (core: object) => number, readValue?: () => Value): CallResult<Value> {
+  #invoke<Value>(call: (core: object, pending: Uint32Array) => number, readValue?: () => Value): CallResult<Value> {
     const core = this.#liveCore();
     const events: CoreEvent[] = [];
+    let answered = false;
     try {
-      const status = call(core) as Status;
+      const status = call(core, this.#pending) as Status;
+      answered = true;
       const value = status === Status.Ok ? readValue?.() : undefined;
       return { status, events, value };
     } finally {
-      this.#drainAndSettle(core, events);
+      this.#drainAndSettle(core, events, answered ? this.#pending : null);
     }
   }
 
-  #drainAndSettle(core: object, events: CoreEvent[]): void {
+  #drainAndSettle(core: object, events: CoreEvent[], pending: Uint32Array | null): void {
     try {
-      drainEvents(this.#functions, core, this.#event, events, copyEvent, (error, event) =>
-        this.reportListenerError(error, event),
+      drainEvents(
+        this.#functions,
+        core,
+        this.#event,
+        events,
+        copyEvent,
+        (error, event) => this.reportListenerError(error, event),
+        pending,
       );
     } finally {
       this.#undispatched.push(...events);
@@ -448,6 +484,10 @@ export class Core {
     } finally {
       this.#settling = false;
     }
+    if (this.#deadlineMayHaveMoved) {
+      this.#deadlineMayHaveMoved = false;
+      this.#notify(this.#deadlineListeners);
+    }
   }
 
   #dispatchUndispatched(): void {
@@ -461,7 +501,11 @@ export class Core {
   }
 
   #notifyDrainListeners(): void {
-    for (const listener of [...this.#drainListeners]) {
+    this.#notify(this.#drainListeners);
+  }
+
+  #notify(listeners: ReadonlySet<() => void>): void {
+    for (const listener of [...listeners]) {
       try {
         listener();
       } catch (error) {

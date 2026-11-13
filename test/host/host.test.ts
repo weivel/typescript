@@ -159,6 +159,33 @@ describe("activation", () => {
     expect(world.host.core.pluginPayload(handleOf(handles, "agenda")).value).toBe(handleOf(handles, "agenda"));
   });
 
+  it("starts a later plugin's activate while an earlier one still awaits the service that later plugin registers", async () => {
+    const world = createHostWorld();
+    const directory = pluginDirectory([
+      plugin(
+        { importName: "early", services: { consumes: ["late:thing"] } },
+        "await context.services.want(context.service('late:thing'));",
+      ),
+      plugin({ importName: "late", services: { provides: ["late:thing"] } }, "context.services.register(context.service('late:thing'), {});"),
+    ]);
+    const handles = discovered(world, directory);
+    const order = [handleOf(handles, "early"), handleOf(handles, "late")];
+
+    const report = await Promise.race([
+      world.host.activate(order),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 2000)),
+    ]);
+
+    expect(report).not.toBe("hung");
+    const settled = report as Exclude<typeof report, "hung">;
+    expect(settled.plan.order).toEqual(order);
+    expect(probe().activated).toEqual(["early", "late"]);
+    expect(settled.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
+      ["early", "active"],
+      ["late", "active"],
+    ]);
+  });
+
   it("loads an entry written in TypeScript as it loads one in JavaScript", async () => {
     const world = createHostWorld();
     const directory = pluginDirectory([plugin({ importName: "typed" }, "", "ts"), plugin({ importName: "plain" })]);
@@ -366,6 +393,38 @@ describe("release", () => {
     await settle();
 
     expect(directoryContents(directory)).toEqual(before);
+  });
+});
+
+describe("destroy", () => {
+  it("deactivates and releases every active plugin, the latest activated first, before destroying the core", async () => {
+    const world = createHostWorld();
+    const handles = discovered(
+      world,
+      pluginDirectory([
+        plugin({ importName: "agenda", capabilities: { consumes: ["screens"] } }),
+        plugin(
+          { importName: "calendar", capabilities: { provides: ["screens"] } },
+          "context.provide(context.capability('screens'), { provider: 'calendar' });",
+        ),
+      ]),
+    );
+    await world.host.activate([...handles.values()]);
+
+    await world.host.destroy();
+
+    expect(probe().deactivated).toEqual(["agenda", "calendar"]);
+    expect(world.host.plugin(handleOf(handles, "agenda"))).toBeUndefined();
+    expect(world.host.plugin(handleOf(handles, "calendar"))).toBeUndefined();
+  });
+
+  it("leaves a host service's unregister doing nothing once the core is gone", async () => {
+    const world = createHostWorld();
+    const unregister = world.host.registerHostService({ id: "clock" }, {});
+
+    await world.host.destroy();
+
+    expect(() => unregister()).not.toThrow();
   });
 });
 

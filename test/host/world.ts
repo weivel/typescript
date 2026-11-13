@@ -30,9 +30,9 @@ beforeEach(() => {
 const temporaryDirectories: string[] = [];
 const createdHosts: Host[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const host of createdHosts.splice(0)) {
-    host.destroy();
+    await host.destroy();
   }
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });

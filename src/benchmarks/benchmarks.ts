@@ -2,6 +2,7 @@ import koffi from "koffi";
 import { coreStructs, createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
 import { Host } from "../host/index.js";
+import { CoreTimer } from "../timer/index.js";
 import {
   measureInterleaved,
   sampleInterleaved,
@@ -64,10 +65,11 @@ function openPlugin(core: Core, contexts: PluginContexts, manifest: Manifest): O
 const providerManifest: Manifest = { importName: "provider", services: { provides: [{ id: arithmeticId }] } };
 const consumerManifest: Manifest = { importName: "consumer", services: { consumes: [{ id: arithmeticId }, { id: echoId }] } };
 
-/** A core and its contexts, as a host composes them, with a provider and a consumer opened in it. */
+/** A core, its contexts and its armed timer, as a host composes them, with a provider and a consumer opened in it. */
 class CoreWorld {
   readonly library: CoreLibrary;
   readonly core: Core;
+  readonly #timer: CoreTimer;
   readonly provider: OpenedPlugin;
   readonly consumer: OpenedPlugin;
 
@@ -80,11 +82,13 @@ class CoreWorld {
     this.core = created.value;
     const contexts = new PluginContexts(this.core, { log: silentLogger });
     this.core.setDispatcher((event) => contexts.receive(event));
+    this.#timer = new CoreTimer(this.core);
     this.provider = openPlugin(this.core, contexts, providerManifest);
     this.consumer = openPlugin(this.core, contexts, consumerManifest);
   }
 
   destroy(): void {
+    this.#timer.stop();
     this.core.destroy();
   }
 }
@@ -109,7 +113,11 @@ export interface SameLanguageCallSummaries {
 
 /**
  * Times a call on a service a consumer resolved through weivel against the same call made on the provider's object
- * directly. The resolved service is the provider's own object, so after the lookup the call is a plain call.
+ * directly.
+ *
+ * @remarks Both timed paths run the same code, a call on the provider's own object, so the timing can show only
+ * noise. The proof that weivel puts nothing between a consumer and a provider of the same language is the identity
+ * check before it: the object `services.get` resolved is the provider's object itself, or the benchmark throws.
  */
 export function benchmarkSameLanguageCall(options: BenchmarkOptions = {}): SameLanguageCallSummaries {
   return withCoreWorld(options, (world) => {
@@ -151,8 +159,8 @@ function ffiPair(paths: Readonly<Record<"bareCall" | "weivelCall", MeasuredPath>
 }
 
 /**
- * Times weivel_get_service through koffi and the wrapper's drain, the control call the kit's C benchmark times,
- * against weivel_support_release on an all-zero answer through the same bound library, which the core answers as a
+ * Times weivel_get_service through koffi and the wrapper's drain, with the core's timer armed as a host arms it, the
+ * control call the kit's C benchmark times, against weivel_support_release on an all-zero answer through the same bound library, which the core answers as a
  * no-op.
  */
 export function benchmarkControlCall(options: BenchmarkOptions = {}): FfiCallSummaries {
@@ -190,7 +198,7 @@ const echoDeclaration = JSON.stringify({
  * Times a call into a C library through the host's bytes binding, 16 bytes in and the same 16 back, against
  * `echo_release(NULL)`, which frees nothing, bound by koffi the way the host binds a library's release.
  */
-export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): FfiCallSummaries {
+export async function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Promise<FfiCallSummaries> {
   const host = Host.create({
     edgeSource: EdgeSource.Capabilities,
     ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
@@ -217,6 +225,6 @@ export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): FfiCallS
     );
   } finally {
     bareLibrary.unload();
-    host.destroy();
+    await host.destroy();
   }
 }

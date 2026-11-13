@@ -31,14 +31,15 @@ interface Armed {
 }
 
 /**
- * Keeps one timer armed for the core's next deadline: re-armed after every drain from weivel_next_deadline,
- * cancelled when the core answers none, and on firing tells the core the time with weivel_advance.
+ * Keeps one timer armed for the core's next deadline: re-armed from weivel_next_deadline once per outermost call that
+ * could have moved it, cancelled when the core answers none, and on firing tells the core the time with
+ * weivel_advance.
  */
 export class CoreTimer {
   readonly #core: Core;
   readonly #clock: Clock;
   readonly #scheduler: Scheduler;
-  readonly #removeDrainListener: () => void;
+  readonly #removeDeadlineListener: () => void;
   #armed: Armed | undefined;
   #rearming = false;
 
@@ -46,7 +47,7 @@ export class CoreTimer {
     this.#core = core;
     this.#clock = options.clock ?? systemClock;
     this.#scheduler = options.scheduler ?? systemScheduler;
-    this.#removeDrainListener = core.addDrainListener(() => this.#rearm());
+    this.#removeDeadlineListener = core.addDeadlineListener(() => this.#rearm());
     this.#rearm();
   }
 
@@ -56,7 +57,7 @@ export class CoreTimer {
   }
 
   stop(): void {
-    this.#removeDrainListener();
+    this.#removeDeadlineListener();
     this.#cancel();
   }
 

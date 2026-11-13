@@ -18,18 +18,20 @@ export type RatioGate = "controlCall" | "libraryCall";
 
 /**
  * The highest per-round median ratio of weivel's call over a bare call through the same binding that each platform
- * showed under the default sampling, in Test run 43444931168, two attempts of five repeats each. The lowest were:
- * control linux 8.12, win32 8.10, darwin 7.09; library linux 30.68, win32 29.35, darwin 22.79.
+ * showed under the default sampling, two attempts of five repeats each. The control call was measured with the core's
+ * timer armed in Test run 43451359295, its gate's own run included (macos in attempts 2 and 3, its first never
+ * started); the lowest were linux 6.68, win32 7.28, darwin 5.53. The library call was measured in Test run
+ * 43444931168; the lowest were linux 30.68, win32 29.35, darwin 22.79.
  */
 const highestMeasuredRatio: Readonly<Record<RatioGate, Readonly<Record<string, number>>>> = {
-  controlCall: { linux: 8.8348, win32: 10.5055, darwin: 7.7688 },
+  controlCall: { linux: 8.0425, win32: 8.2643, darwin: 6.5947 },
   libraryCall: { linux: 35.3079, win32: 33.6923, darwin: 27.8254 },
 };
 
 /**
  * How far over its platform's highest measured ratio a run may go. It keeps every bound below twice its platform's
  * lowest measured ratio, so a call twice as slow as the fastest run measured fails on every platform; the tightest
- * case, win32's control call, allows at most 1.54.
+ * case, darwin's library call, allows at most 1.63.
  */
 const RATIO_MARGIN = 1.4;
 
