@@ -51,8 +51,11 @@ export type RegisterAnswer =
   | { readonly plugin: bigint; readonly refusal: undefined }
   | { readonly plugin: undefined; readonly refusal: Refusal };
 
-/** Where an activation ended; `released` for a plugin released before its activate settled. */
-export type ActivationState = "active" | "quarantined" | "refused" | "released";
+/**
+ * Where an activation ended: `refused` when the core refused to open the plugin, `released` for a plugin released
+ * before its activate settled, `failed` when its open failed for a reason other than the core's refusal.
+ */
+export type ActivationState = "active" | "quarantined" | "refused" | "released" | "failed";
 
 /** Where one plugin's activation ended, and why when it did not end active. */
 export interface ActivationOutcome {
