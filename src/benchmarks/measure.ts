@@ -63,15 +63,18 @@ export function callsPerPath(sampling: Sampling): number {
   return sampling.warmupCalls + sampling.batches * sampling.callsPerBatch;
 }
 
+/** Every path's batch times, one per round, in round order, so the batches of one round can be compared. */
+export type RoundSamples<Name extends string> = Record<Name, readonly number[]>;
+
 /**
  * Samples every path in turn, one batch of each per round, so a change in the machine's speed during the run falls on
  * every path alike, and rotates which path goes first each round, so no path always follows the same one.
  */
-export function measureInterleaved<Name extends string>(
+export function sampleInterleaved<Name extends string>(
   paths: Readonly<Record<Name, MeasuredPath>>,
   sampling: Sampling,
   decorate: PathDecorator = (_name, path) => path,
-): Record<Name, Summary> {
+): RoundSamples<Name> {
   const names = Object.keys(paths) as Name[];
   const decorated = new Map<Name, MeasuredPath>(names.map((name) => [name, decorate(name, paths[name])]));
   for (const name of names) {
@@ -83,5 +86,22 @@ export function measureInterleaved<Name extends string>(
       samples.get(name)!.push(timeBatch(decorated.get(name)!, sampling.callsPerBatch));
     }
   }
-  return Object.fromEntries(names.map((name) => [name, summarise(samples.get(name)!)])) as Record<Name, Summary>;
+  return Object.fromEntries(samples) as unknown as RoundSamples<Name>;
+}
+
+export function summariseEach<Name extends string>(samples: RoundSamples<Name>): Record<Name, Summary> {
+  return Object.fromEntries(Object.entries<readonly number[]>(samples).map(([name, times]) => [name, summarise(times)])) as Record<Name, Summary>;
+}
+
+/** The ratio of `numerator` over `denominator` in each round, summarised: batches of one round ran side by side. */
+export function summariseRoundRatios(numerator: readonly number[], denominator: readonly number[]): Summary {
+  return summarise(numerator.map((time, round) => time / denominator[round]!));
+}
+
+export function measureInterleaved<Name extends string>(
+  paths: Readonly<Record<Name, MeasuredPath>>,
+  sampling: Sampling,
+  decorate?: PathDecorator,
+): Record<Name, Summary> {
+  return summariseEach(sampleInterleaved(paths, sampling, decorate));
 }

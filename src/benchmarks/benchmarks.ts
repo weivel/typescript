@@ -2,7 +2,16 @@ import koffi from "koffi";
 import { coreStructs, createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
 import { Host } from "../host/index.js";
-import { measureInterleaved, type MeasuredPath, type PathDecorator, type Sampling, type Summary } from "./measure.js";
+import {
+  measureInterleaved,
+  sampleInterleaved,
+  summarise,
+  summariseRoundRatios,
+  type MeasuredPath,
+  type PathDecorator,
+  type Sampling,
+  type Summary,
+} from "./measure.js";
 
 export interface BenchmarkOptions {
   readonly coreLibraryPath?: string;
@@ -128,6 +137,17 @@ export interface FfiCallSummaries {
   readonly bareCall: Summary;
   /** The call weivel makes. */
   readonly weivelCall: Summary;
+  /** The weivel call's batch time over the bare call's in the same round, per round. */
+  readonly roundRatio: Summary;
+}
+
+function ffiPair(paths: Readonly<Record<"bareCall" | "weivelCall", MeasuredPath>>, sampling: Sampling, decorate?: PathDecorator): FfiCallSummaries {
+  const samples = sampleInterleaved(paths, sampling, decorate);
+  return {
+    bareCall: summarise(samples.bareCall),
+    weivelCall: summarise(samples.weivelCall),
+    roundRatio: summariseRoundRatios(samples.weivelCall, samples.bareCall),
+  };
 }
 
 /**
@@ -142,7 +162,7 @@ export function benchmarkControlCall(options: BenchmarkOptions = {}): FfiCallSum
     const consumer = world.consumer.plugin;
     const emptyAnswer = Buffer.alloc(koffi.sizeof(coreStructs.weivel_support));
     const releaseEmpty = world.library.functions.weivel_support_release;
-    return measureInterleaved(
+    return ffiPair(
       {
         bareCall: () => releaseEmpty(emptyAnswer),
         weivelCall: () => {
@@ -190,7 +210,7 @@ export function benchmarkLibraryCall(options: LibraryBenchmarkOptions): FfiCallS
     }
     const releaseNothing = bareLibrary.func("echo_release", "void", ["void *"]) as (buffer: null) => void;
     const input = new Uint8Array(16).fill(7);
-    return measureInterleaved(
+    return ffiPair(
       { bareCall: () => releaseNothing(null), weivelCall: () => echo.echo(input) },
       samplingOf(defaultSamplings.libraryCall, options),
       options.decorate,
