@@ -1,0 +1,43 @@
+import type { CoreOptions } from "../core/index.js";
+import { driveConsume } from "./consume.js";
+import { observe, type Observer } from "./expectations.js";
+import type { LayerVector } from "./vectors.js";
+import { wantCoreOptions, driveWant } from "./want.js";
+import { DriverWorld, type DriverLogEntry, type DriverOptions } from "./world.js";
+
+/** What the driver saw of one vector: `observed` in the shape of the vector's `then`, and every log written. */
+export interface LayerWitness {
+  readonly id: string;
+  readonly observed: Record<string, unknown>;
+  readonly logs: readonly DriverLogEntry[];
+}
+
+interface OpDriver {
+  readonly coreOptions: (vector: LayerVector) => CoreOptions;
+  readonly drive: (vector: LayerVector, world: DriverWorld) => Promise<Record<string, Observer>>;
+}
+
+const opDrivers: Readonly<Record<string, OpDriver>> = {
+  consume: { coreOptions: () => ({}), drive: driveConsume },
+  want: { coreOptions: wantCoreOptions, drive: driveWant },
+};
+
+/**
+ * Builds the vector's `given` through a host on the real core and standard, drives it, and answers every field of
+ * its `then` from the run.
+ *
+ * @throws Error for an op, a given field, a step kind or a `then` field this driver does not know.
+ */
+export async function witnessLayerVector(vector: LayerVector, options: DriverOptions = {}): Promise<LayerWitness> {
+  const opDriver = opDrivers[vector.op];
+  if (opDriver === undefined) {
+    throw new Error(`The vector ${vector.id} has the op ${vector.op}, which this driver does not drive.`);
+  }
+  const world = new DriverWorld(options, opDriver.coreOptions(vector));
+  try {
+    const observers = await opDriver.drive(vector, world);
+    return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: world.logs };
+  } finally {
+    world.close(options);
+  }
+}

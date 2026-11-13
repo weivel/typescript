@@ -292,7 +292,7 @@ describe("capabilities", () => {
   });
 });
 
-describe("consume/a-throwing-listener-does-not-silence-the-others", () => {
+describe("a listener that throws", () => {
   it("lets every other listener hear, logs the throw on the plugin's log, and reports no refusal", () => {
     const world = createWorld();
     const calendar = world.open(screensProvider("calendar"));
