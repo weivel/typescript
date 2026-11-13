@@ -26,6 +26,7 @@ export type IdentityKind = ValueOf<typeof IdentityKind> | number;
 
 export const FunctionKind = {
   Json: 1,
+  Bytes: 2,
 } as const;
 export type FunctionKind = ValueOf<typeof FunctionKind> | number;
 

@@ -186,4 +186,24 @@ describe("a library declaration", () => {
     expect(libraryBindingRefusal(onlyLater)?.path).toBe("services[1].functions[0].kind");
     expect(libraryBindingRefusal({ ...read, services: [] })).toBeUndefined();
   });
+
+  it("reads a bytes function, which the layer binds", () => {
+    const bytes = { ...declaration, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: "bytes" }] }] };
+
+    const read = standard.readLibrary(JSON.stringify(bytes));
+
+    expect(read.value?.services[0]?.functions[0]).toEqual({ name: "echo", symbol: "echo_echo", kind: FunctionKind.Bytes, context: 0 });
+    expect(libraryBindingRefusal(read.value!)).toBeUndefined();
+  });
+
+  it("is refused by the layer for a kind it does not bind, naming the function's kind", () => {
+    const read = standard.readLibrary(JSON.stringify(declaration)).value!;
+    const later = { ...read, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: 3, context: 0 }] }] };
+
+    expect(libraryBindingRefusal(later)).toMatchObject({
+      code: StandardRefusalCode.InvalidValue,
+      detail: "is kind 3, which this layer does not bind",
+      path: "services[0].functions[0].kind",
+    });
+  });
 });

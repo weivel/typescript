@@ -3,10 +3,15 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sharedLibraryFileName } from "../src/core/library-file.ts";
 
-interface NativeLibrary {
-  sibling: string;
+interface BuiltTarget {
   target: string;
   outputName: string;
+  destination: string;
+}
+
+interface NativeLibrary {
+  sibling: string;
+  targets: BuiltTarget[];
   configureDefinitions: string[];
 }
 
@@ -14,13 +19,20 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 const siblingsDirectory = join(repositoryRoot, "siblings");
 const buildDirectory = join(repositoryRoot, "build");
 const nativeDirectory = join(repositoryRoot, "native");
+const testLibraryDirectory = join(nativeDirectory, "test");
 
 const nativeLibraries: NativeLibrary[] = [
-  { sibling: "core", target: "weivel_core_shared", outputName: "weivel_core", configureDefinitions: [] },
+  {
+    sibling: "core",
+    targets: [
+      { target: "weivel_core_shared", outputName: "weivel_core", destination: nativeDirectory },
+      { target: "echo", outputName: "echo", destination: testLibraryDirectory },
+    ],
+    configureDefinitions: [],
+  },
   {
     sibling: "standard",
-    target: "weivel_standard_shared",
-    outputName: "weivel_standard",
+    targets: [{ target: "weivel_standard_shared", outputName: "weivel_standard", destination: nativeDirectory }],
     configureDefinitions: [`-DWEIVEL_CORE_SOURCE_DIR=${join(siblingsDirectory, "core")}`],
   },
 ];
@@ -70,12 +82,15 @@ function buildNativeLibrary(library: NativeLibrary): void {
     "-DCMAKE_BUILD_TYPE=Release",
     ...library.configureDefinitions,
   ]);
-  runCmake(["--build", libraryBuildDirectory, "--config", "Release", "--target", library.target, "--parallel"]);
-  const fileName = sharedLibraryFileName(library.outputName);
-  copyFileSync(findBuiltLibrary(libraryBuildDirectory, fileName), join(nativeDirectory, fileName));
+  const targetNames = library.targets.map((built) => built.target);
+  runCmake(["--build", libraryBuildDirectory, "--config", "Release", "--target", ...targetNames, "--parallel"]);
+  for (const built of library.targets) {
+    const fileName = sharedLibraryFileName(built.outputName);
+    copyFileSync(findBuiltLibrary(libraryBuildDirectory, fileName), join(built.destination, fileName));
+  }
 }
 
-mkdirSync(nativeDirectory, { recursive: true });
+mkdirSync(testLibraryDirectory, { recursive: true });
 for (const library of nativeLibraries) {
   buildNativeLibrary(library);
 }
