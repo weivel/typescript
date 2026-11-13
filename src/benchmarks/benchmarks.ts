@@ -2,6 +2,7 @@ import koffi from "koffi";
 import { coreStructs, createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
 import { Host } from "../host/index.js";
+import { CoreTimer } from "../timer/index.js";
 import {
   measureInterleaved,
   sampleInterleaved,
@@ -64,10 +65,11 @@ function openPlugin(core: Core, contexts: PluginContexts, manifest: Manifest): O
 const providerManifest: Manifest = { importName: "provider", services: { provides: [{ id: arithmeticId }] } };
 const consumerManifest: Manifest = { importName: "consumer", services: { consumes: [{ id: arithmeticId }, { id: echoId }] } };
 
-/** A core and its contexts, as a host composes them, with a provider and a consumer opened in it. */
+/** A core, its contexts and its armed timer, as a host composes them, with a provider and a consumer opened in it. */
 class CoreWorld {
   readonly library: CoreLibrary;
   readonly core: Core;
+  readonly #timer: CoreTimer;
   readonly provider: OpenedPlugin;
   readonly consumer: OpenedPlugin;
 
@@ -80,11 +82,13 @@ class CoreWorld {
     this.core = created.value;
     const contexts = new PluginContexts(this.core, { log: silentLogger });
     this.core.setDispatcher((event) => contexts.receive(event));
+    this.#timer = new CoreTimer(this.core);
     this.provider = openPlugin(this.core, contexts, providerManifest);
     this.consumer = openPlugin(this.core, contexts, consumerManifest);
   }
 
   destroy(): void {
+    this.#timer.stop();
     this.core.destroy();
   }
 }
@@ -151,8 +155,8 @@ function ffiPair(paths: Readonly<Record<"bareCall" | "weivelCall", MeasuredPath>
 }
 
 /**
- * Times weivel_get_service through koffi and the wrapper's drain, the control call the kit's C benchmark times,
- * against weivel_support_release on an all-zero answer through the same bound library, which the core answers as a
+ * Times weivel_get_service through koffi and the wrapper's drain, with the core's timer armed as a host arms it, the
+ * control call the kit's C benchmark times, against weivel_support_release on an all-zero answer through the same bound library, which the core answers as a
  * no-op.
  */
 export function benchmarkControlCall(options: BenchmarkOptions = {}): FfiCallSummaries {

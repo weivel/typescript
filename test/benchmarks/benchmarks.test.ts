@@ -163,16 +163,22 @@ describe("a core control call through koffi", () => {
     expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("controlCall"));
   });
 
-  it("crosses into the core once for every call of each path", { timeout }, () => {
+  it("crosses into the core once for every call of each path, with no drain or re-arm of its own", { timeout }, () => {
     const crossings = new Map<string, number>();
     const paths = countingPaths();
-    const coreLibrary = countingCoreLibrary(["weivel_get_service", "weivel_support_release"], crossings);
+    const coreLibrary = countingCoreLibrary(
+      ["weivel_get_service", "weivel_support_release", "weivel_next_event", "weivel_next_deadline"],
+      crossings,
+    );
 
     benchmarkControlCall({ ...libraries, coreLibrary, sampling: briefSampling, decorate: paths.decorate });
 
     expect(paths.calls.get("weivelCall")).toBe(callsPerPath(briefSampling));
     expect(crossings.get("weivel_get_service")).toBe(paths.calls.get("weivelCall"));
     expect(crossings.get("weivel_support_release")).toBe(paths.calls.get("bareCall"));
+    expect(crossings.get("weivel_next_deadline")).toBeGreaterThan(0);
+    expect(crossings.get("weivel_next_deadline")).toBeLessThan(callsPerPath(briefSampling));
+    expect(crossings.get("weivel_next_event") ?? 0).toBeLessThan(callsPerPath(briefSampling));
   });
 });
 
