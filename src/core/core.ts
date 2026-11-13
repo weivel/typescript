@@ -47,6 +47,19 @@ export type EventDispatcher = (event: CoreEvent) => void;
 /** Called once the events of a call, and of every call made while dispatching them, have all been dispatched. */
 export type DrainListener = () => void;
 
+/**
+ * Receives what a dispatcher, a drain listener or a timer-driven call threw, with the event being dispatched when
+ * there was one.
+ *
+ * @remarks No such error ever reaches the caller of a bound call: a caller handed an exception instead of the
+ * plugin or registration it asked for could never release it, and a drain driven by a timer would kill the process.
+ */
+export type ListenerErrorSink = (error: unknown, event: CoreEvent | undefined) => void;
+
+export const defaultListenerErrorSink: ListenerErrorSink = (error, event) => {
+  console.error(`weivel: a listener threw${event === undefined ? "" : ` on a ${event.kind} event`}`, error);
+};
+
 export interface CoreLibrary {
   readonly path: string;
   readonly functions: CoreFunctions;
@@ -80,6 +93,7 @@ export interface CreateCoreOptions {
   readonly libraryPath?: string;
   readonly options?: CoreOptions;
   readonly dispatcher?: EventDispatcher;
+  readonly onListenerError?: ListenerErrorSink;
 }
 
 /** Creates a core; a status other than OK answers no core, and no core exists to queue a refusal for it. */
@@ -91,7 +105,7 @@ export function createCore(createOptions: CreateCoreOptions = {}): CallResult<Co
   if (status !== Status.Ok) {
     return { status, events: [], value: undefined };
   }
-  const core = new Core(library.functions, created[0] as object);
+  const core = new Core(library.functions, created[0] as object, createOptions.onListenerError);
   if (createOptions.dispatcher !== undefined) {
     core.setDispatcher(createOptions.dispatcher);
   }
@@ -99,6 +113,51 @@ export function createCore(createOptions: CreateCoreOptions = {}): CallResult<Co
 }
 
 type Release = (answer: object) => number;
+
+/** Reads an answer and releases it, released whatever the read does. */
+export function readThenRelease<Value>(answer: object, read: (answer: object) => Value, release: Release): Value {
+  try {
+    return read(answer);
+  } finally {
+    release(answer);
+  }
+}
+
+type EventCopier = (event: object) => CoreEvent | undefined;
+
+/**
+ * Moves every queued event into `drained` until the core answers NONE: the only caller of weivel_next_event. Each
+ * event is released whatever copying it does, so the next weivel_next_event never meets an unreleased event, and an
+ * event that cannot be copied goes to `report` while the rest are still drained.
+ */
+export function drainEvents(
+  functions: CoreFunctions,
+  core: object,
+  eventBuffer: object,
+  drained: CoreEvent[],
+  copy: EventCopier,
+  report: ListenerErrorSink,
+): void {
+  for (;;) {
+    const status = functions.weivel_next_event(core, eventBuffer, null) as Status;
+    if (status === Status.None) {
+      return;
+    }
+    if (status !== Status.Ok) {
+      throw new Error(`weivel_next_event answered status ${status}: the layer's event struct is malformed.`);
+    }
+    try {
+      const event = copy(eventBuffer);
+      if (event !== undefined) {
+        drained.push(event);
+      }
+    } catch (error) {
+      report(error, undefined);
+    } finally {
+      functions.weivel_event_release(eventBuffer);
+    }
+  }
+}
 
 function allocateZeroed(name: CoreStructName): object {
   const pointer = koffi.alloc(coreStructs[name], 1) as object;
@@ -122,11 +181,22 @@ export class Core {
   readonly #drainListeners = new Set<DrainListener>();
   readonly #undispatched: CoreEvent[] = [];
   #settling = false;
+  readonly #onListenerError: ListenerErrorSink;
 
-  constructor(functions: CoreFunctions, core: object) {
+  constructor(functions: CoreFunctions, core: object, onListenerError: ListenerErrorSink = defaultListenerErrorSink) {
     this.#functions = functions;
     this.#core = core;
+    this.#onListenerError = onListenerError;
     this.#event = allocateZeroed("weivel_event");
+  }
+
+  /** Hands an error to the core's listener error sink; a sink that throws is reported to the console instead. */
+  reportListenerError(error: unknown, event?: CoreEvent): void {
+    try {
+      this.#onListenerError(error, event);
+    } catch (sinkError) {
+      defaultListenerErrorSink(sinkError, event);
+    }
   }
 
   setDispatcher(dispatcher: EventDispatcher | undefined): void {
@@ -326,11 +396,7 @@ export class Core {
     try {
       return this.#invoke(
         (core) => call(core, answer),
-        () => {
-          const value = read(answer);
-          release(answer);
-          return value;
-        },
+        () => readThenRelease(answer, read, release),
       );
     } finally {
       koffi.free(answer);
@@ -339,16 +405,30 @@ export class Core {
 
   /**
    * The one function every call taking a core goes through: it makes the call, reads the call's value when the
-   * status is OK, drains the queue, and dispatches what it drained.
+   * status is OK, drains the queue, and dispatches what it drained. The drain runs whatever the call or the read
+   * throws, so a call's events always belong to it.
    */
   #invoke<Value>(call: (core: object) => number, readValue?: () => Value): CallResult<Value> {
     const core = this.#liveCore();
-    const status = call(core) as Status;
-    const value = status === Status.Ok ? readValue?.() : undefined;
-    const events = this.#drain(core);
-    this.#undispatched.push(...events);
-    this.#settle();
-    return { status, events, value };
+    const events: CoreEvent[] = [];
+    try {
+      const status = call(core) as Status;
+      const value = status === Status.Ok ? readValue?.() : undefined;
+      return { status, events, value };
+    } finally {
+      this.#drainAndSettle(core, events);
+    }
+  }
+
+  #drainAndSettle(core: object, events: CoreEvent[]): void {
+    try {
+      drainEvents(this.#functions, core, this.#event, events, copyEvent, (error, event) =>
+        this.reportListenerError(error, event),
+      );
+    } finally {
+      this.#undispatched.push(...events);
+      this.#settle();
+    }
   }
 
   #liveCore(): object {
@@ -358,60 +438,37 @@ export class Core {
     return this.#core;
   }
 
-  /** The only caller of weivel_next_event. */
-  #drain(core: object): CoreEvent[] {
-    const drained: CoreEvent[] = [];
-    for (;;) {
-      const status = this.#functions.weivel_next_event(core, this.#event, null) as Status;
-      if (status === Status.None) {
-        return drained;
-      }
-      if (status !== Status.Ok) {
-        throw new Error(`weivel_next_event answered status ${status}: the layer's event struct is malformed.`);
-      }
-      const event = copyEvent(this.#event);
-      this.#functions.weivel_event_release(this.#event);
-      if (event !== undefined) {
-        drained.push(event);
-      }
-    }
-  }
-
   #settle(): void {
     if (this.#settling) {
       return;
     }
     this.#settling = true;
-    const errors: unknown[] = [];
     try {
       do {
-        this.#dispatchUndispatched(errors);
-        this.#notifyDrainListeners(errors);
+        this.#dispatchUndispatched();
+        this.#notifyDrainListeners();
       } while (this.#undispatched.length > 0);
     } finally {
       this.#settling = false;
     }
-    if (errors.length > 0) {
-      throw errors[0];
-    }
   }
 
-  #dispatchUndispatched(errors: unknown[]): void {
+  #dispatchUndispatched(): void {
     for (let event = this.#undispatched.shift(); event !== undefined; event = this.#undispatched.shift()) {
       try {
         this.#dispatcher?.(event);
       } catch (error) {
-        errors.push(error);
+        this.reportListenerError(error, event);
       }
     }
   }
 
-  #notifyDrainListeners(errors: unknown[]): void {
+  #notifyDrainListeners(): void {
     for (const listener of [...this.#drainListeners]) {
       try {
         listener();
       } catch (error) {
-        errors.push(error);
+        this.reportListenerError(error);
       }
     }
   }

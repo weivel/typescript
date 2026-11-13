@@ -93,8 +93,13 @@ export class CoreTimer {
 
   #fire(): void {
     this.#armed = undefined;
-    if (!this.#core.destroyed) {
+    if (this.#core.destroyed) {
+      return;
+    }
+    try {
       this.#core.advance(this.#clock.now());
+    } catch (error) {
+      this.#core.reportListenerError(error);
     }
   }
 }

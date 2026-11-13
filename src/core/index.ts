@@ -47,9 +47,11 @@ export {
   createCore,
   loadCoreLibrary,
   defaultCoreLibraryPath,
+  defaultListenerErrorSink,
   type CallResult,
   type CoreLibrary,
   type CreateCoreOptions,
   type DrainListener,
   type EventDispatcher,
+  type ListenerErrorSink,
 } from "./core.js";
