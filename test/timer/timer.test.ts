@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { Choice, RefusalCode, type Core } from "../../src/core/index.ts";
+import { afterEach, describe, expect, it } from "vitest";
+import { Choice, createCore, HOST, loadCoreLibrary, RefusalCode, type Core } from "../../src/core/index.ts";
 import { CoreTimer, systemClock, type Clock, type Scheduler } from "../../src/timer/index.ts";
-import { createRecordedCore, openPlugin } from "../real-core.ts";
+import { coreLibraryPath, createRecordedCore, openPlugin } from "../real-core.ts";
 
 class FakeClock implements Clock {
   current = 1000;
@@ -127,6 +127,95 @@ describe("the core timer", () => {
 
     expect(scheduler.live()).toEqual([]);
   });
+});
+
+const countedCores: Core[] = [];
+
+afterEach(() => {
+  for (const core of countedCores.splice(0)) {
+    core.destroy();
+  }
+});
+
+/** A real core whose every weivel_next_deadline is counted: each one is a re-arm of the timer. */
+function deadlineCountingCore(): { core: Core; deadlineQuestions: () => number } {
+  const library = loadCoreLibrary(coreLibraryPath);
+  let questions = 0;
+  const functions = {
+    ...library.functions,
+    weivel_next_deadline: (...parameters: unknown[]) => {
+      questions += 1;
+      return library.functions.weivel_next_deadline(...parameters);
+    },
+  };
+  const core = createCore({ library: { path: library.path, functions } }).value!;
+  countedCores.push(core);
+  return { core, deadlineQuestions: () => questions };
+}
+
+function provider(core: Core): bigint {
+  return openPlugin(core, { importName: "alpha", services: { provides: [{ id: "alpha:greeting" }] } });
+}
+
+describe("re-arming", () => {
+  it("asks the core for its deadline only after a call that could have moved it", () => {
+    const { core, deadlineQuestions } = deadlineCountingCore();
+    const clock = new FakeClock();
+    const timer = new CoreTimer(core, { clock, scheduler: new FakeScheduler() });
+    const beta = waitingConsumer(core);
+    const before = deadlineQuestions();
+
+    core.ledger();
+    core.getService(beta, "alpha:greeting");
+    core.watchService(beta, "alpha:greeting");
+    const afterQuietCalls = deadlineQuestions();
+    timedWant(core, beta, clock, 250);
+
+    expect(afterQuietCalls).toBe(before);
+    expect(deadlineQuestions()).toBe(before + 1);
+    expect(timer.armedDeadline).toBe(1250);
+  });
+
+  it("asks once per outermost call, however many deadline-moving calls its events lead to", () => {
+    const { core, deadlineQuestions } = deadlineCountingCore();
+    const clock = new FakeClock();
+    const timer = new CoreTimer(core, { clock, scheduler: new FakeScheduler() });
+    const beta = waitingConsumer(core);
+    core.setDispatcher(() => {
+      timedWant(core, beta, clock, 100);
+      timedWant(core, beta, clock, 300);
+    });
+    const before = deadlineQuestions();
+
+    core.registerService(HOST, "");
+
+    expect(deadlineQuestions()).toBe(before + 1);
+    expect(timer.armedDeadline).toBe(1100);
+  });
+
+  const endingCalls: Record<string, (core: Core, plugins: { readonly alpha: bigint; readonly beta: bigint; readonly want: bigint }) => void> = {
+    "registering the service it waits for": (core, { alpha }) => void core.registerService(alpha, "alpha:greeting"),
+    "unregistering the want": (core, { want }) => void core.unregister(want),
+    "releasing the plugin that wants": (core, { beta }) => void core.releasePlugin(beta),
+    "quarantining the plugin that wants": (core, { beta }) => void core.quarantinePlugin(beta),
+  };
+
+  for (const [name, end] of Object.entries(endingCalls)) {
+    it(`cancels its timer after ${name}`, () => {
+      const { core } = createRecordedCore();
+      const clock = new FakeClock();
+      const scheduler = new FakeScheduler();
+      const timer = new CoreTimer(core, { clock, scheduler });
+      const alpha = provider(core);
+      const beta = waitingConsumer(core);
+      const want = timedWant(core, beta, clock, 250);
+
+      end(core, { alpha, beta, want });
+
+      expect(timer.armedDeadline).toBeUndefined();
+      expect(scheduler.live()).toEqual([]);
+    });
+  }
 });
 
 describe("the system clock", () => {
