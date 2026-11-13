@@ -16,6 +16,7 @@ import {
 } from "./answers.js";
 import { Status, type EdgeSource, type HandleCondition } from "./constants.js";
 import { bindCoreFunctions, coreStructs, type CoreFunctions, type CoreStructName } from "./declarations.js";
+import { DeferredStep } from "./deferred-step.js";
 import { copyEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
 import { allocateSized, toBigInt } from "./memory.js";
@@ -170,11 +171,6 @@ export function drainEvents(
       functions.weivel_event_release(eventBuffer);
     }
   }
-}
-
-/** A step queued among the events to dispatch, run when the dispatch reaches it. */
-class DeferredStep {
-  constructor(readonly step: () => void) {}
 }
 
 function allocateZeroed(name: CoreStructName): object {

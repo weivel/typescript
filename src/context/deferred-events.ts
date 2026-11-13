@@ -1,3 +1,4 @@
+import { DeferredStep } from "../core/deferred-step.js";
 import type { CoreEvent } from "../core/index.js";
 
 /**
@@ -7,11 +8,6 @@ import type { CoreEvent } from "../core/index.js";
  * @remarks The core wrapper dispatches a call's events before the call returns, so a want settled by the call that
  * registered its service would otherwise arrive before the layer knows which object that registration stands for.
  */
-/** A step queued among the events to handle, run when the handling reaches it. */
-class DeferredStep {
-  constructor(readonly step: () => void) {}
-}
-
 export class DeferredEvents {
   readonly #handle: (event: CoreEvent) => void;
   readonly #report: (error: unknown, event: CoreEvent | undefined) => void;
