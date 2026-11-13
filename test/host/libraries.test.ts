@@ -114,15 +114,14 @@ describe("a C library loaded as host services", () => {
     expect(() => library.unload()).not.toThrow();
   });
 
-  it("refuses a json function by its field path, binding and registering nothing", () => {
+  it("answers the standard's refusal of a json function by its field path, binding and registering nothing", () => {
     const world = createHostWorld();
-    const withJson = [echoFunctions[0]!, { name: "repeat", symbol: "echo_echo", kind: "json", argument: true, result: true }];
+    const withJson = [echoFunctions[0]!, { name: "repeat", symbol: "echo_echo", kind: "json" }];
 
     const answer = world.host.loadLibrary(declaration(withJson), echoLibraryPath);
 
     expect(answer.library).toBeUndefined();
     expect(answer.refusal).toMatchObject({ code: StandardRefusalCode.InvalidValue, path: "services[0].functions[1].kind" });
-    expect(answer.refusal?.detail).toContain('"json"');
     expect(hostReaches(world, "echo")).toBe(false);
   });
 

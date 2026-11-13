@@ -1,13 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Status } from "../../src/core/index.ts";
-import {
-  ContextFact,
-  FunctionKind,
-  IdentityKind,
-  StandardRefusalCode,
-  libraryBindingRefusal,
-} from "../../src/standard/index.ts";
+import { ContextFact, FunctionKind, IdentityKind, StandardRefusalCode } from "../../src/standard/index.ts";
 import { directoryWith, realStandard } from "../real-standard.ts";
 
 const standard = realStandard();
@@ -129,13 +123,8 @@ describe("a library declaration", () => {
     version: "0.1.0",
     release: "echo_release",
     services: [
-      { id: "echo", functions: [{ name: "repeat", symbol: "echo_repeat", kind: "json", argument: true, result: true }] },
-      {
-        id: "echo-twice",
-        functions: [
-          { name: "twice", symbol: "echo_twice", kind: "json", argument: true, result: true, context: ["home", "arguments"] },
-        ],
-      },
+      { id: "echo", functions: [{ name: "repeat", symbol: "echo_repeat", kind: "bytes" }] },
+      { id: "echo-twice", functions: [{ name: "twice", symbol: "echo_twice", kind: "bytes", context: ["home", "arguments"] }] },
     ],
   };
 
@@ -148,16 +137,11 @@ describe("a library declaration", () => {
         version: "0.1.0",
         release: "echo_release",
         services: [
-          { id: "echo", functions: [{ name: "repeat", symbol: "echo_repeat", kind: FunctionKind.Json, context: 0 }] },
+          { id: "echo", functions: [{ name: "repeat", symbol: "echo_repeat", kind: FunctionKind.Bytes, context: 0 }] },
           {
             id: "echo-twice",
             functions: [
-              {
-                name: "twice",
-                symbol: "echo_twice",
-                kind: FunctionKind.Json,
-                context: ContextFact.Home | ContextFact.Arguments,
-              },
+              { name: "twice", symbol: "echo_twice", kind: FunctionKind.Bytes, context: ContextFact.Home | ContextFact.Arguments },
             ],
           },
         ],
@@ -166,7 +150,7 @@ describe("a library declaration", () => {
   });
 
   it("is refused at the field the standard names", () => {
-    const broken = { ...declaration, services: [{ id: "echo", functions: [{ name: "repeat", symbol: "not a symbol", kind: "json" }] }] };
+    const broken = { ...declaration, services: [{ id: "echo", functions: [{ name: "repeat", symbol: "not a symbol", kind: "bytes" }] }] };
 
     expect(standard.readLibrary(JSON.stringify(broken))).toMatchObject({
       status: Status.Refused,
@@ -175,35 +159,25 @@ describe("a library declaration", () => {
     });
   });
 
-  it("is refused by the layer for a json function, naming the function's kind", () => {
-    const read = standard.readLibrary(JSON.stringify(declaration)).value!;
-    const onlyLater = { ...read, services: [{ id: "none", functions: [] }, read.services[1]!] };
+  it("is refused by the standard for a json function, at the function's kind", () => {
+    const withJson = { ...declaration, services: [declaration.services[0]!, { id: "echo-twice", functions: [{ name: "twice", symbol: "echo_twice", kind: "json" }] }] };
 
-    expect(libraryBindingRefusal(read)).toMatchObject({
-      code: StandardRefusalCode.InvalidValue,
-      path: "services[0].functions[0].kind",
+    expect(standard.readLibrary(JSON.stringify(withJson))).toMatchObject({
+      status: Status.Refused,
+      value: undefined,
+      refusal: { code: StandardRefusalCode.InvalidValue, path: "services[1].functions[0].kind" },
     });
-    expect(libraryBindingRefusal(onlyLater)?.path).toBe("services[1].functions[0].kind");
-    expect(libraryBindingRefusal({ ...read, services: [] })).toBeUndefined();
   });
 
-  it("reads a bytes function, which the layer binds", () => {
-    const bytes = { ...declaration, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: "bytes" }] }] };
+  it("reads three functions in a row at the stride the standard lays them out", () => {
+    const three = ["first", "second", "third"].map((name) => ({ name, symbol: `echo_${name}`, kind: "bytes" }));
 
-    const read = standard.readLibrary(JSON.stringify(bytes));
+    const read = standard.readLibrary(JSON.stringify({ ...declaration, services: [{ id: "echo", functions: three }] }));
 
-    expect(read.value?.services[0]?.functions[0]).toEqual({ name: "echo", symbol: "echo_echo", kind: FunctionKind.Bytes, context: 0 });
-    expect(libraryBindingRefusal(read.value!)).toBeUndefined();
-  });
-
-  it("is refused by the layer for a kind it does not bind, naming the function's kind", () => {
-    const read = standard.readLibrary(JSON.stringify(declaration)).value!;
-    const later = { ...read, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: 3, context: 0 }] }] };
-
-    expect(libraryBindingRefusal(later)).toMatchObject({
-      code: StandardRefusalCode.InvalidValue,
-      detail: "is kind 3, which this layer does not bind",
-      path: "services[0].functions[0].kind",
-    });
+    expect(read.value?.services[0]?.functions.map((declared) => [declared.name, declared.symbol, declared.kind])).toEqual([
+      ["first", "echo_first", FunctionKind.Bytes],
+      ["second", "echo_second", FunctionKind.Bytes],
+      ["third", "echo_third", FunctionKind.Bytes],
+    ]);
   });
 });

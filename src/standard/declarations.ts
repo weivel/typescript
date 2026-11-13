@@ -69,8 +69,6 @@ const weivel_standard_library_function = structOf({
   symbol: text,
   kind: "uint32_t",
   context: "uint32_t",
-  argument: pointer,
-  result: pointer,
 });
 const weivel_standard_library_service = structOf({ id: text, functions: pointer, function_count: count });
 const weivel_standard_library = structOf({
@@ -88,6 +86,39 @@ const weivel_standard_mirror_list = structOf({
   count,
   storage: pointer,
 });
+const weivel_standard_service_refusal = structOf({ ...sizeField, detail: text, fix: text, storage: pointer });
+const weivel_standard_setting_value = structOf({
+  kind: "uint32_t",
+  boolean: "uint32_t",
+  number: "double",
+  text,
+  text_length: count,
+});
+const weivel_standard_setting = structOf({ key: text, value: weivel_standard_setting_value });
+const weivel_standard_settings = structOf({ ...sizeField, settings: pointer, count, storage: pointer });
+const weivel_standard_setting_answer = structOf({ ...sizeField, value: weivel_standard_setting_value, storage: pointer });
+/** A definition's operations are function pointers the provider fills; this layer lays them out and calls none. */
+const weivel_standard_config = structOf({
+  ...sizeField,
+  context: pointer,
+  all: pointer,
+  get: pointer,
+  set: pointer,
+  release_settings: pointer,
+  release_answer: pointer,
+  release_refusal: pointer,
+});
+const weivel_standard_secret = structOf({ ...sizeField, bytes: pointer, length: count, storage: pointer });
+const weivel_standard_secrets = structOf({
+  ...sizeField,
+  context: pointer,
+  remove: pointer,
+  get: pointer,
+  set: pointer,
+  release_secret: pointer,
+  release_refusal: pointer,
+});
+const weivel_standard_paths = structOf({ ...sizeField, context: pointer, cache: pointer, config: pointer, plugin: pointer });
 
 /**
  * Every struct the standard's headers declare by name, laid out field for field as the headers lay them out. The
@@ -105,6 +136,15 @@ export const standardStructs = {
   weivel_standard_library_service,
   weivel_standard_library,
   weivel_standard_mirror_list,
+  weivel_standard_service_refusal,
+  weivel_standard_setting_value,
+  weivel_standard_setting,
+  weivel_standard_settings,
+  weivel_standard_setting_answer,
+  weivel_standard_config,
+  weivel_standard_secret,
+  weivel_standard_secrets,
+  weivel_standard_paths,
 } as const;
 
 export type StandardStructName = keyof typeof standardStructs;

@@ -54,6 +54,7 @@ const weivel_capability_event = structOf({
   provider: handle,
   change: "uint32_t",
 });
+const weivel_deadline_event = structOf({ at: "int64_t", set: "uint32_t" });
 
 /** WEIVEL_EVENT_PAYLOAD_WORDS. */
 const EVENT_PAYLOAD_WORDS = 16;
@@ -68,6 +69,7 @@ const weivel_event_payload = koffi.union({
   capacity: weivel_capacity_event,
   capability: weivel_capability_event,
   refused: weivel_refusal_event,
+  deadline: weivel_deadline_event,
   reserved: koffi.array("uint64_t", EVENT_PAYLOAD_WORDS),
 });
 const weivel_event = structOf({ ...sizeField, kind: "uint32_t", storage: "void *", data: weivel_event_payload });
@@ -208,6 +210,7 @@ export const coreStructs = {
   weivel_numbers,
   weivel_capacity_event,
   weivel_capability_event,
+  weivel_deadline_event,
   weivel_event,
   weivel_strings,
   weivel_service_offer,
