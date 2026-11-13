@@ -322,6 +322,74 @@ describe("re-arming", () => {
   }
 });
 
+/** A real core whose every weivel_advance is counted, its events recorded. */
+function advanceCountingCore(): { core: Core; dispatched: CoreEvent[]; advances: () => number } {
+  const library = loadCoreLibrary(coreLibraryPath);
+  let advances = 0;
+  const functions = {
+    ...library.functions,
+    weivel_advance: (...parameters: unknown[]) => {
+      advances += 1;
+      return library.functions.weivel_advance(...parameters);
+    },
+  };
+  const dispatched: CoreEvent[] = [];
+  const core = createCore({ library: { path: library.path, functions }, dispatcher: (event) => dispatched.push(event) }).value!;
+  countedCores.push(core);
+  return { core, dispatched, advances: () => advances };
+}
+
+describe("a call made once the clock has reached the armed deadline", () => {
+  it("hands the core the time first, once, so the want times out before the call though the timer never fired", () => {
+    const { core, dispatched, advances } = advanceCountingCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
+    const want = timedWant(core, waitingConsumer(core), clock, 250);
+    const alpha = provider(core);
+    clock.current = 1300;
+
+    core.registerService(alpha, "alpha:greeting");
+
+    const settledWant = dispatched.filter((event) => event.kind === "want-settled" && event.want === want);
+    expect(settledWant).toHaveLength(1);
+    expect(settledWant[0]).toMatchObject({ refusal: { code: RefusalCode.TimedOut } });
+    expect(advances()).toBe(1);
+    expect(scheduler.scheduled.some((entry) => entry.fired)).toBe(false);
+    expect(scheduler.live()).toEqual([]);
+    expect(timer.armedDeadline).toBeUndefined();
+  });
+
+  it("never checks the advance it makes, so a timer firing at the deadline reaches the core once", () => {
+    const { core, advances } = advanceCountingCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    new CoreTimer(core, { clock, scheduler });
+    timedWant(core, waitingConsumer(core), clock, 250);
+    clock.current = 1250;
+
+    scheduler.fireNext();
+
+    expect(advances()).toBe(1);
+  });
+
+  it("makes no check before the deadline, nor once the timer is stopped", () => {
+    const { core, dispatched, advances } = advanceCountingCore();
+    const clock = new FakeClock();
+    const timer = new CoreTimer(core, { clock, scheduler: new FakeScheduler() });
+    const want = timedWant(core, waitingConsumer(core), clock, 250);
+    clock.current = 1249;
+    const alpha = provider(core);
+    timer.stop();
+    clock.current = 1300;
+
+    core.registerService(alpha, "alpha:greeting");
+
+    expect(advances()).toBe(0);
+    expect(dispatched.filter((event) => event.kind === "want-settled" && event.want === want)).toMatchObject([{ refusal: { code: RefusalCode.None } }]);
+  });
+});
+
 describe("the system clock", () => {
   it("answers performance.now() floored to whole milliseconds", () => {
     const before = Math.floor(performance.now());
