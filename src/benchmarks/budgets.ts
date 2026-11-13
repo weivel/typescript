@@ -1,44 +1,104 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Summary } from "./measure.js";
-
-/**
- * The noise a same-language pair shows on a quiet run: the largest deviation from 1 of the ratio of two paths of
- * identical cost (two direct paths, or the direct path and the one through weivel) measured on the three CI runners
- * on 2026-11-13, in Test runs 43438389364 and 43441441323, two attempts each, outside the one run whose own two direct
- * paths differed by more than half.
- */
-const QUIET_NOISE = 0.0772;
-
-/** The noisiest same-language run measured on CI (macos, Test run 43441441323): beyond it a run is not judged. */
-const WORST_MEASURED_NOISE = 0.5678;
-
-/** How many times the noise a same-language pair may differ by and still count as equal. */
-const NOISE_MARGIN = 2.5;
 
 export type RatioGate = "controlCall" | "libraryCall";
 
 /**
- * The highest per-round median ratio of weivel's call over a bare call through the same binding that each platform
- * showed under the default sampling, two attempts of five repeats each. The control call was measured with the core's
- * timer armed in Test run 43451359295, its gate's own run included (macos in attempts 2 and 3, its first never
- * started); the lowest were linux 6.68, win32 7.28, darwin 5.53. The library call was measured in Test run
- * 43444931168; the lowest were linux 30.68, win32 29.35, darwin 22.79.
+ * The bounds the kit sets for this language, read from its `benchmarks/typescript.txt`: each ratio gate's highest
+ * measured ratio per kit platform, the margin over it, and the noise a same-language pair is judged against.
  */
-const highestMeasuredRatio: Readonly<Record<RatioGate, Readonly<Record<string, number>>>> = {
-  controlCall: { linux: 8.0425, win32: 8.2643, darwin: 6.5947 },
-  libraryCall: { linux: 35.3079, win32: 33.6923, darwin: 27.8254 },
-};
+export interface LanguageBudget {
+  readonly highestMeasuredRatio: Readonly<Record<RatioGate, Readonly<Record<string, number>>>>;
+  readonly ratioMargin: number;
+  readonly quietNoise: number;
+  readonly worstNoise: number;
+  readonly noiseMargin: number;
+}
+
+const gatesByKitName: Readonly<Record<string, RatioGate>> = { "control-call": "controlCall", "library-call": "libraryCall" };
+const scalarsByKitName = {
+  "ratio-margin": "ratioMargin",
+  "quiet-noise": "quietNoise",
+  "worst-noise": "worstNoise",
+  "noise-margin": "noiseMargin",
+} as const;
+type ScalarName = (typeof scalarsByKitName)[keyof typeof scalarsByKitName];
+const kitPlatforms: readonly string[] = ["linux", "windows", "macos"];
+const kitPlatformsByNodePlatform: Readonly<Record<string, string>> = { linux: "linux", win32: "windows", darwin: "macos" };
+
+/** The kit's name for a Node platform, or undefined for one the kit names no bound for. */
+export function kitPlatformOf(nodePlatform: string): string | undefined {
+  return kitPlatformsByNodePlatform[nodePlatform];
+}
+
+/** The kit's budget file of the commit this repository pins, beside the package as CI checks it out. */
+export function defaultBudgetPath(): string {
+  return join(import.meta.dirname, "..", "..", "siblings", "conformance", "benchmarks", "typescript.txt");
+}
+
+function positiveNumber(text: string, line: string): number {
+  const number = Number(text);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new Error(`The budget line "${line}" carries ${text}, which is not a positive number.`);
+  }
+  return number;
+}
+
+interface BudgetLines {
+  readonly highest: Record<RatioGate, Record<string, number>>;
+  readonly scalars: Partial<Record<ScalarName, number>>;
+}
+
+function readLine(line: string, read: BudgetLines): void {
+  const fields = line.split(" ");
+  const gate = gatesByKitName[fields[0]!];
+  const scalar = scalarsByKitName[fields[0] as keyof typeof scalarsByKitName];
+  if (gate !== undefined && fields.length === 3 && kitPlatforms.includes(fields[1]!)) {
+    read.highest[gate][fields[1]!] = positiveNumber(fields[2]!, line);
+  } else if (scalar !== undefined && fields.length === 2) {
+    read.scalars[scalar] = positiveNumber(fields[1]!, line);
+  } else {
+    throw new Error(`The budget line "${line}" is neither a gate on a kit platform nor one of the kit's scalars.`);
+  }
+}
+
+function scalarOf(read: BudgetLines, name: ScalarName): number {
+  const value = read.scalars[name];
+  if (value === undefined) {
+    throw new Error(`The budget names no ${name}.`);
+  }
+  return value;
+}
 
 /**
- * How far over its platform's highest measured ratio a run may go. It keeps every bound below twice its platform's
- * lowest measured ratio, so a call twice as slow as the fastest run measured fails on every platform; the tightest
- * case, darwin's library call, allows at most 1.63.
+ * Reads a budget file as the kit's RUNNER.md lays it out.
+ *
+ * @throws Error for a line the format does not define, a number that is not positive, or a missing scalar.
  */
-const RATIO_MARGIN = 1.4;
+export function readLanguageBudget(text: string): LanguageBudget {
+  const read: BudgetLines = { highest: { controlCall: {}, libraryCall: {} }, scalars: {} };
+  for (const line of text.split(/\r?\n/).map((candidate) => candidate.trim()).filter((candidate) => candidate.length > 0)) {
+    readLine(line, read);
+  }
+  return {
+    highestMeasuredRatio: read.highest,
+    ratioMargin: scalarOf(read, "ratioMargin"),
+    quietNoise: scalarOf(read, "quietNoise"),
+    worstNoise: scalarOf(read, "worstNoise"),
+    noiseMargin: scalarOf(read, "noiseMargin"),
+  };
+}
 
-/** The bound of `gate` on `platform`, or undefined for a platform no CI run has measured, which the gate fails. */
-export function ratioBound(gate: RatioGate, platform: string = process.platform): number | undefined {
-  const highest = highestMeasuredRatio[gate][platform];
-  return highest === undefined ? undefined : highest * RATIO_MARGIN;
+export function loadLanguageBudget(path: string = defaultBudgetPath()): LanguageBudget {
+  return readLanguageBudget(readFileSync(path, "utf8"));
+}
+
+/** The bound of `gate` on a Node platform, or undefined for a platform the kit gives no line, which the gate fails. */
+export function ratioBound(budget: LanguageBudget, gate: RatioGate, nodePlatform: string = process.platform): number | undefined {
+  const kitPlatform = kitPlatformOf(nodePlatform);
+  const highest = kitPlatform === undefined ? undefined : budget.highestMeasuredRatio[gate][kitPlatform];
+  return highest === undefined ? undefined : highest * budget.ratioMargin;
 }
 
 /** How many times slower `measured` ran than `reference`, by their medians. */
@@ -51,17 +111,17 @@ export function deviation(ratio: number): number {
   return Math.max(ratio, 1 / ratio) - 1;
 }
 
-/** Whether a run whose two identical direct paths differed by `noiseRatio` was noisier than any measured on CI. */
-export function tooNoisyToJudge(noiseRatio: number): boolean {
-  return deviation(noiseRatio) > WORST_MEASURED_NOISE;
+/** Whether a run whose two identical direct paths differed by `noiseRatio` was noisier than any the kit measured. */
+export function tooNoisyToJudge(budget: LanguageBudget, noiseRatio: number): boolean {
+  return deviation(noiseRatio) > budget.worstNoise;
 }
 
 /**
  * How far from 1 the ratio of a same-language pair may be in a run whose two identical direct paths differed by
  * `noiseRatio`: the margin times that run's own noise, or times the quiet noise when the run was quieter.
  */
-export function sameLanguageBound(noiseRatio: number): number {
-  return 1 + NOISE_MARGIN * Math.max(QUIET_NOISE, deviation(noiseRatio));
+export function sameLanguageBound(budget: LanguageBudget, noiseRatio: number): number {
+  return 1 + budget.noiseMargin * Math.max(budget.quietNoise, deviation(noiseRatio));
 }
 
 /** Whether `ratio` lies within `bound` of 1 either way: two paths equal within the noise the bound allows. */

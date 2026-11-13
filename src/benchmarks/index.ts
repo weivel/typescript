@@ -9,7 +9,20 @@ export {
   type LibraryBenchmarkOptions,
   type SameLanguageCallSummaries,
 } from "./benchmarks.js";
-export { deviation, pairRatio, ratioBound, sameLanguageBound, tooNoisyToJudge, withinRatio, type RatioGate } from "./budgets.js";
+export {
+  defaultBudgetPath,
+  deviation,
+  kitPlatformOf,
+  loadLanguageBudget,
+  pairRatio,
+  ratioBound,
+  readLanguageBudget,
+  sameLanguageBound,
+  tooNoisyToJudge,
+  withinRatio,
+  type LanguageBudget,
+  type RatioGate,
+} from "./budgets.js";
 export {
   callsPerPath,
   lastAnswer,
