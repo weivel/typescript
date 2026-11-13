@@ -5,8 +5,19 @@ export {
   defaultSamplings,
   type Arithmetic,
   type BenchmarkOptions,
+  type FfiCallSummaries,
   type LibraryBenchmarkOptions,
   type SameLanguageCallSummaries,
 } from "./benchmarks.js";
-export { benchmarkBudgets, judge, pairRatio, withinRatio, type Budget, type Verdict } from "./budgets.js";
-export { busyWait, lastAnswer, measureInterleaved, summarise, type MeasuredPath, type Sampling, type Summary } from "./measure.js";
+export { benchmarkBudgets, deviation, pairRatio, sameLanguageBound, withinRatio } from "./budgets.js";
+export {
+  callsPerPath,
+  lastAnswer,
+  measureInterleaved,
+  roundOrder,
+  summarise,
+  type MeasuredPath,
+  type PathDecorator,
+  type Sampling,
+  type Summary,
+} from "./measure.js";
