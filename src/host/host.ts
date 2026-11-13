@@ -141,19 +141,11 @@ export class Host {
       return { library: undefined, refusal };
     }
     const bound = bindLibrary(libraryPath, read.value);
-    const unregisters: (() => void)[] = [];
+    const unregisters = [...bound.services].map(([id, service]) => this.registerHostService({ id }, service));
     const unload = (): void => {
       unregisters.splice(0).forEach((unregister) => unregister());
       bound.unload();
     };
-    try {
-      for (const [id, service] of bound.services) {
-        unregisters.push(this.registerHostService({ id }, service));
-      }
-    } catch (error) {
-      unload();
-      throw error;
-    }
     return { library: { declaration: read.value, services: bound.services, unload }, refusal: undefined };
   }
 

@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { Axis, EdgeSource, PluginStatus, RefusalCode } from "../../src/core/index.ts";
+import { Axis, EdgeSource, LogLevel, PluginStatus, RefusalCode } from "../../src/core/index.ts";
 import { RefusalError, type PluginContext, type PluginEvent } from "../../src/context/index.ts";
 import { StandardRefusalCode } from "../../src/standard/index.ts";
 import { createHostWorld, directoryContents, plugin, pluginDirectory, settle, type HostWorld } from "./world.ts";
@@ -162,7 +162,7 @@ describe("activation", () => {
   });
 
   it("quarantines a plugin whose activate throws, with the reason in its ledger row, and activates the rest", async () => {
-    const world = createHostWorld();
+    const world = createHostWorld({ minimumLogLevel: LogLevel.Info });
     const directory = pluginDirectory([
       plugin({ importName: "angry" }, "throw new Error('no disk');"),
       plugin({ importName: "calm" }),
@@ -180,6 +180,11 @@ describe("activation", () => {
     expect(row.refusal.detail).toBe("its activate threw: no disk");
     expect(row.refusal.hasFix).toBe(true);
     expect(report.outcomes[0]!.refusal).toEqual(row.refusal);
+    expect(world.hostLog.entries).toContainEqual({
+      level: "info",
+      message: 'quarantined the plugin "angry": its activate threw: no disk',
+      cause: undefined,
+    });
   });
 
   it("quarantines a plugin whose entry cannot be activated, saying why", async () => {
@@ -263,6 +268,7 @@ describe("consume/a-refused-verify-quarantines-the-plugin", () => {
     const reason = world.host.core.ledgerEntry(handleOf(handles, "flaky")).value!.refusal;
     expect(reason).toMatchObject({ code: RefusalCode.ActivationMismatch, subject: "flaky", hasFix: true });
     expect(flakyVerified.refusal).toEqual(reason);
+    expect(world.host.contexts.tracked(handleOf(handles, "flaky"))).toBe(0);
     expect(pluginEvents.filter((event) => event.kind === "reach-refused")).toEqual([]);
     expect(world.host.core.ledger().value!.refusals).toEqual([]);
   });
