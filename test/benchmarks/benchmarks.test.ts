@@ -1,18 +1,20 @@
 import koffi from "koffi";
 import { describe, expect, it } from "vitest";
 import {
-  benchmarkBudgets,
   benchmarkControlCall,
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   callsPerPath,
   pairRatio,
+  ratioBound,
   roundOrder,
   sameLanguageBound,
+  tooNoisyToJudge,
   withinRatio,
   type FfiCallSummaries,
   type MeasuredPath,
   type PathDecorator,
+  type RatioGate,
   type Sampling,
   type Summary,
 } from "../../src/benchmarks/index.ts";
@@ -100,9 +102,17 @@ function withCountedKoffi<Answer>(crossings: Map<string, number>, run: () => Ans
 function reportFfiPair(name: string, summaries: FfiCallSummaries): number {
   report(`${name}-bare`, summaries.bareCall);
   report(name, summaries.weivelCall);
-  const ratio = pairRatio(summaries.weivelCall, summaries.bareCall);
-  reportRatio(`${name}-over-bare`, ratio);
-  return ratio;
+  reportRatio(`${name}-over-bare`, summaries.roundRatio.median);
+  return summaries.roundRatio.median;
+}
+
+/** The gate's bound on this platform; a platform no CI run has measured fails the gate rather than passing it. */
+function boundHere(gate: RatioGate): number {
+  const bound = ratioBound(gate);
+  if (bound === undefined) {
+    throw new Error(`No CI run has measured ${gate} on ${process.platform}, so it has no bound and cannot pass.`);
+  }
+  return bound;
 }
 
 /** Spins long enough to push the weivel call past `bound` times the bare call measured now. */
@@ -121,6 +131,7 @@ describe("a same-language service call through weivel", () => {
     const ratio = pairRatio(pair.throughWeivel, pair.direct);
     reportRatio("same-language-weivel", ratio);
 
+    expect(tooNoisyToJudge(noise), `the run was too noisy to judge: its two identical direct paths differed by ${noise.toFixed(4)}`).toBe(false);
     expect(withinRatio(ratio, sameLanguageBound(noise))).toBe(true);
   });
 
@@ -141,15 +152,15 @@ describe("a core control call through koffi", () => {
   it("costs at most its budgeted multiple of a bare call into the core", { timeout }, () => {
     const ratio = reportFfiPair("control-call", benchmarkControlCall(libraries));
 
-    expect(ratio).toBeLessThanOrEqual(benchmarkBudgets.controlCallRatio);
+    expect(ratio).toBeLessThanOrEqual(boundHere("controlCall"));
   });
 
   it("is over its budget once it is slowed past it", { timeout }, () => {
     const options = { ...libraries, sampling: briefSampling };
-    const added = slowdownPast(benchmarkBudgets.controlCallRatio, () => benchmarkControlCall(options));
+    const added = slowdownPast(boundHere("controlCall"), () => benchmarkControlCall(options));
     const slowed = benchmarkControlCall({ ...options, decorate: slowing("weivelCall", added) });
 
-    expect(pairRatio(slowed.weivelCall, slowed.bareCall)).toBeGreaterThan(benchmarkBudgets.controlCallRatio);
+    expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("controlCall"));
   });
 
   it("crosses into the core once for every call of each path", { timeout }, () => {
@@ -169,15 +180,15 @@ describe("a C library call through the host's bytes binding", () => {
   it("costs at most its budgeted multiple of a bare call into the library", { timeout }, () => {
     const ratio = reportFfiPair("library-call", benchmarkLibraryCall({ ...libraries, echoLibraryPath }));
 
-    expect(ratio).toBeLessThanOrEqual(benchmarkBudgets.libraryCallRatio);
+    expect(ratio).toBeLessThanOrEqual(boundHere("libraryCall"));
   });
 
   it("is over its budget once it is slowed past it", { timeout }, () => {
     const options = { ...libraries, echoLibraryPath, sampling: briefSampling };
-    const added = slowdownPast(benchmarkBudgets.libraryCallRatio, () => benchmarkLibraryCall(options));
+    const added = slowdownPast(boundHere("libraryCall"), () => benchmarkLibraryCall(options));
     const slowed = benchmarkLibraryCall({ ...options, decorate: slowing("weivelCall", added) });
 
-    expect(pairRatio(slowed.weivelCall, slowed.bareCall)).toBeGreaterThan(benchmarkBudgets.libraryCallRatio);
+    expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("libraryCall"));
   });
 
   it("crosses into the library once for every call of each path, releasing every answer", { timeout }, () => {
@@ -203,5 +214,18 @@ describe("the measuring", () => {
     expect(sameLanguageBound(1)).toBeCloseTo(1.193, 3);
     expect(sameLanguageBound(1 / 1.5)).toBeCloseTo(2.25, 3);
     expect(sameLanguageBound(1.5)).toBeCloseTo(2.25, 3);
+  });
+
+  it("refuses to judge a same-language run noisier than any measured on CI", () => {
+    expect(tooNoisyToJudge(1.5)).toBe(false);
+    expect(tooNoisyToJudge(1.6)).toBe(true);
+    expect(tooNoisyToJudge(1 / 1.6)).toBe(true);
+  });
+
+  it("has a bound for each measured platform and none for a platform no CI run measured", () => {
+    for (const gate of ["controlCall", "libraryCall"] as const) {
+      expect(["linux", "win32", "darwin"].map((platform) => ratioBound(gate, platform) !== undefined)).toEqual([true, true, true]);
+      expect(ratioBound(gate, "freebsd")).toBeUndefined();
+    }
   });
 });

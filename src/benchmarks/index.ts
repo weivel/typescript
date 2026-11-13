@@ -9,15 +9,19 @@ export {
   type LibraryBenchmarkOptions,
   type SameLanguageCallSummaries,
 } from "./benchmarks.js";
-export { benchmarkBudgets, deviation, pairRatio, sameLanguageBound, withinRatio } from "./budgets.js";
+export { deviation, pairRatio, ratioBound, sameLanguageBound, tooNoisyToJudge, withinRatio, type RatioGate } from "./budgets.js";
 export {
   callsPerPath,
   lastAnswer,
   measureInterleaved,
   roundOrder,
+  sampleInterleaved,
   summarise,
+  summariseEach,
+  summariseRoundRatios,
   type MeasuredPath,
   type PathDecorator,
+  type RoundSamples,
   type Sampling,
   type Summary,
 } from "./measure.js";

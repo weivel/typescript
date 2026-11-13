@@ -8,22 +8,36 @@ import type { Summary } from "./measure.js";
  */
 const QUIET_NOISE = 0.0772;
 
+/** The noisiest same-language run measured on CI (macos, Test run 43441441323): beyond it a run is not judged. */
+const WORST_MEASURED_NOISE = 0.5678;
+
 /** How many times the noise a same-language pair may differ by and still count as equal. */
 const NOISE_MARGIN = 2.5;
 
+export type RatioGate = "controlCall" | "libraryCall";
+
 /**
- * The slowest ratio of weivel's call over a bare call through the same binding measured on the three CI runners, in
- * Test run 43441441323, two attempts of five repeats each.
+ * The highest per-round median ratio of weivel's call over a bare call through the same binding that each platform
+ * showed under the default sampling, in Test run 43444931168, two attempts of five repeats each. The lowest were:
+ * control linux 8.12, win32 8.10, darwin 7.09; library linux 30.68, win32 29.35, darwin 22.79.
  */
-const slowestMeasuredRatio = { controlCall: 11.41, libraryCall: 56.93 } as const;
+const highestMeasuredRatio: Readonly<Record<RatioGate, Readonly<Record<string, number>>>> = {
+  controlCall: { linux: 8.8348, win32: 10.5055, darwin: 7.7688 },
+  libraryCall: { linux: 35.3079, win32: 33.6923, darwin: 27.8254 },
+};
 
-/** How far over the slowest measured ratio a run may go; a regression of 1.5 times the slowest runner fails. */
-const RATIO_MARGIN = 1.5;
+/**
+ * How far over its platform's highest measured ratio a run may go. It keeps every bound below twice its platform's
+ * lowest measured ratio, so a call twice as slow as the fastest run measured fails on every platform; the tightest
+ * case, win32's control call, allows at most 1.54.
+ */
+const RATIO_MARGIN = 1.4;
 
-export const benchmarkBudgets = {
-  controlCallRatio: slowestMeasuredRatio.controlCall * RATIO_MARGIN,
-  libraryCallRatio: slowestMeasuredRatio.libraryCall * RATIO_MARGIN,
-} as const;
+/** The bound of `gate` on `platform`, or undefined for a platform no CI run has measured, which the gate fails. */
+export function ratioBound(gate: RatioGate, platform: string = process.platform): number | undefined {
+  const highest = highestMeasuredRatio[gate][platform];
+  return highest === undefined ? undefined : highest * RATIO_MARGIN;
+}
 
 /** How many times slower `measured` ran than `reference`, by their medians. */
 export function pairRatio(measured: Summary, reference: Summary): number {
@@ -33,6 +47,11 @@ export function pairRatio(measured: Summary, reference: Summary): number {
 /** How far `ratio` is from 1, the same either way: 1.1 and 1/1.1 are both 0.1 away. */
 export function deviation(ratio: number): number {
   return Math.max(ratio, 1 / ratio) - 1;
+}
+
+/** Whether a run whose two identical direct paths differed by `noiseRatio` was noisier than any measured on CI. */
+export function tooNoisyToJudge(noiseRatio: number): boolean {
+  return deviation(noiseRatio) > WORST_MEASURED_NOISE;
 }
 
 /**
