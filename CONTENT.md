@@ -11,6 +11,13 @@ standard's. It is held to the vectors in `weivel/conformance`.
 `MODULES` list names them: `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance`
 and `benchmarks`. Each is a subpath of the package, `@weivel/typescript/<module>`.
 
+## A plugin's entry
+
+In TypeScript a plugin's entry is an object with an `activate(context)` and an optional `deactivate()`, either
+of which may answer a promise. The host takes it beside the manifest value, as `host.register(manifest, entry)`,
+and never needs the standard. The `standard` module feeds it from disk: `registrationOf` turns a plugin the
+standard discovered into its manifest and an entry whose `activate` imports the module's default export.
+
 ## Siblings and native libraries
 
 `.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks
