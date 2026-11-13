@@ -159,6 +159,33 @@ describe("activation", () => {
     expect(world.host.core.pluginPayload(handleOf(handles, "agenda")).value).toBe(handleOf(handles, "agenda"));
   });
 
+  it("starts a later plugin's activate while an earlier one still awaits the service that later plugin registers", async () => {
+    const world = createHostWorld();
+    const directory = pluginDirectory([
+      plugin(
+        { importName: "early", services: { consumes: ["late:thing"] } },
+        "await context.services.want(context.service('late:thing'));",
+      ),
+      plugin({ importName: "late", services: { provides: ["late:thing"] } }, "context.services.register(context.service('late:thing'), {});"),
+    ]);
+    const handles = discovered(world, directory);
+    const order = [handleOf(handles, "early"), handleOf(handles, "late")];
+
+    const report = await Promise.race([
+      world.host.activate(order),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 2000)),
+    ]);
+
+    expect(report).not.toBe("hung");
+    const settled = report as Exclude<typeof report, "hung">;
+    expect(settled.plan.order).toEqual(order);
+    expect(probe().activated).toEqual(["early", "late"]);
+    expect(settled.outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
+      ["early", "active"],
+      ["late", "active"],
+    ]);
+  });
+
   it("loads an entry written in TypeScript as it loads one in JavaScript", async () => {
     const world = createHostWorld();
     const directory = pluginDirectory([plugin({ importName: "typed" }, "", "ts"), plugin({ importName: "plain" })]);

@@ -157,43 +157,53 @@ export class Host {
   }
 
   /**
-   * Plans the activation of `plugins` with the core, then activates each plugin of the plan's order in turn: opens
-   * it, runs its `activate`, and checks the activation with the core.
+   * Plans the activation of `plugins` with the core, then starts each plugin of the plan's order in turn: opens it,
+   * imports its entry and calls its `activate`, without waiting for the previous plugin's `activate` to settle. Each
+   * plugin's activation is checked with the core when its own `activate` settles, and the answer comes once every one
+   * has.
+   *
+   * @implNote A plugin whose `activate` awaits a want of a service a later plugin registers would otherwise hold back
+   * every plugin behind it for good, and the core sets no default timeout on a want. So a provider's `activate` may
+   * still be running when its consumer's starts: a consumer that needs the service wants it.
    */
   async activate(plugins: readonly bigint[]): Promise<ActivationReport> {
     const planned = this.core.planActivation(plugins, this.#options.edgeSource, [...this.#hostServiceCounts.keys()]);
     if (planned.value === undefined) {
       throw failureOf("weivel_plan_activation", planned);
     }
-    const outcomes: ActivationOutcome[] = [];
+    const settling: Promise<ActivationOutcome>[] = [];
     for (const plugin of planned.value.order) {
-      outcomes.push(await this.#activateOne(plugin));
+      settling.push((await this.#startActivation(plugin)).settled);
     }
-    return { plan: planned.value, outcomes };
+    return { plan: planned.value, outcomes: await Promise.all(settling) };
   }
 
-  async #activateOne(plugin: bigint): Promise<ActivationOutcome> {
+  /** Answers once the plugin's `activate` has been called; `settled` is its outcome once that `activate` settles. */
+  async #startActivation(plugin: bigint): Promise<{ readonly settled: Promise<ActivationOutcome> }> {
     const record = this.#record(plugin);
     let context: PluginContext;
     try {
       context = this.open(plugin);
     } catch (error) {
       if (error instanceof RefusalError) {
-        return this.#outcome(record, "refused", error);
+        return { settled: Promise.resolve(this.#outcome(record, "refused", error)) };
       }
       throw error;
     }
-    const failure = await this.#runActivate(record, context);
-    return failure === undefined ? this.verify(plugin) : this.#quarantine(record, failure.reason);
+    const imported = await this.#import(record);
+    const failure = imported instanceof ActivationFailure ? Promise.resolve(imported) : this.#callActivate(record, imported, context);
+    return { settled: failure.then((settledFailure) => this.#checkActivation(record, settledFailure)) };
   }
 
-  async #runActivate(record: PluginRecord, context: PluginContext): Promise<ActivationFailure | undefined> {
-    let definition: Plugin;
+  async #import(record: PluginRecord): Promise<Plugin | ActivationFailure> {
     try {
-      definition = await importPlugin(record.hosted.entryPath, record.hosted.entryPresent);
+      return await importPlugin(record.hosted.entryPath, record.hosted.entryPresent);
     } catch (error) {
       return error instanceof ActivationFailure ? error : activateThrew(error);
     }
+  }
+
+  async #callActivate(record: PluginRecord, definition: Plugin, context: PluginContext): Promise<ActivationFailure | undefined> {
     record.definition = definition;
     try {
       await definition.activate(context);
@@ -201,6 +211,10 @@ export class Host {
     } catch (error) {
       return activateThrew(error);
     }
+  }
+
+  #checkActivation(record: PluginRecord, failure: ActivationFailure | undefined): ActivationOutcome {
+    return failure === undefined ? this.verify(record.hosted.plugin) : this.#quarantine(record, failure.reason);
   }
 
   /**
