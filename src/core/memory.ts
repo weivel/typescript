@@ -27,6 +27,15 @@ export function toBigInt(value: unknown): bigint {
   return BigInt(value as number | bigint);
 }
 
+/** A struct of `type` in memory koffi owns, zeroed, its leading `size` set to the layer's `sizeof`; freed by koffi.free. */
+export function allocateSized(type: ReturnType<typeof koffi.opaque>): object {
+  const byteSize = koffi.sizeof(type);
+  const pointer = koffi.alloc(type, 1) as object;
+  koffi.encode(pointer, 0, "uint8_t", new Array(byteSize).fill(0), byteSize);
+  koffi.encode(pointer, 0, "uint32_t", byteSize);
+  return pointer;
+}
+
 export function decodeStruct(pointer: object, offset: number, name: CoreStructName): DecodedFields {
   return koffi.decode(pointer, offset, coreStructs[name]) as DecodedFields;
 }

@@ -15,10 +15,10 @@ import {
   type Support,
 } from "./answers.js";
 import { Status, type EdgeSource, type HandleCondition } from "./constants.js";
-import { bindCoreFunctions, coreStructs, sizeOf, type CoreFunctions, type CoreStructName } from "./declarations.js";
+import { bindCoreFunctions, coreStructs, type CoreFunctions, type CoreStructName } from "./declarations.js";
 import { copyEvent, type CoreEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
-import { toBigInt } from "./memory.js";
+import { allocateSized, toBigInt } from "./memory.js";
 import {
   encodeCapacity,
   encodeCoreOptions,
@@ -160,10 +160,7 @@ export function drainEvents(
 }
 
 function allocateZeroed(name: CoreStructName): object {
-  const pointer = koffi.alloc(coreStructs[name], 1) as object;
-  koffi.encode(pointer, 0, "uint8_t", new Array(sizeOf(name)).fill(0), sizeOf(name));
-  koffi.encode(pointer, 0, "uint32_t", sizeOf(name));
-  return pointer;
+  return allocateSized(coreStructs[name]);
 }
 
 /**
