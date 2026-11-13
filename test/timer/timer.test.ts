@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Choice, createCore, HOST, loadCoreLibrary, RefusalCode, type Core } from "../../src/core/index.ts";
+import { Bound, Choice, createCore, HOST, loadCoreLibrary, RefusalCode, type Core, type CoreEvent } from "../../src/core/index.ts";
 import { CoreTimer, systemClock, type Clock, type Scheduler } from "../../src/timer/index.ts";
 import { coreLibraryPath, createRecordedCore, openPlugin } from "../real-core.ts";
 
@@ -199,6 +199,54 @@ describe("re-arming", () => {
     "releasing the plugin that wants": (core, { beta }) => void core.releasePlugin(beta),
     "quarantining the plugin that wants": (core, { beta }) => void core.quarantinePlugin(beta),
   };
+
+  it("re-arms for the next deadline after advancing past the first", () => {
+    const { core } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
+    const beta = waitingConsumer(core);
+    timedWant(core, beta, clock, 250);
+    timedWant(core, beta, clock, 500);
+
+    clock.current = 1250;
+    scheduler.fireNext();
+
+    expect(timer.armedDeadline).toBe(1500);
+    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([250]);
+  });
+
+  it("cancels its timer after a capacity answer settles a constrained want", () => {
+    const storeId = "alpha:store";
+    const { core, dispatched } = createRecordedCore({
+      options: { constraintVocabulary: [{ constraintName: "minimumReplicas", attributeName: "replicas", bound: Bound.Lower }] },
+    });
+    const clock = new FakeClock();
+    const timer = new CoreTimer(core, { clock, scheduler: new FakeScheduler() });
+    const alpha = openPlugin(core, { importName: "alpha", services: { provides: [{ id: storeId, attributes: [{ name: "replicas", value: 1 }] }] } });
+    const beta = openPlugin(core, {
+      importName: "beta",
+      services: { consumes: [{ id: storeId, constraints: [{ name: "minimumReplicas", value: 3 }] }] },
+    });
+    const registration = core.registerService(alpha, storeId).value!;
+    const want = core.wantService(beta, storeId, { now: clock.now(), pollMillis: 100 }).value!;
+    const armedWhileAsking = timer.armedDeadline;
+
+    const isQuestion = (event: CoreEvent) => event.kind === "capacity-wanted" && event.want === want;
+    for (let question = [...dispatched].reverse().find(isQuestion); question?.kind === "capacity-wanted"; ) {
+      const answered = core.reportCapacity(
+        want,
+        registration,
+        { request: question.request, attributes: [{ name: "replicas", value: 3 }], serves: Choice.Yes },
+        clock.now(),
+      );
+      question = answered.events.find(isQuestion);
+    }
+
+    expect(armedWhileAsking).toBe(1100);
+    expect(dispatched.at(-1)).toMatchObject({ kind: "want-settled", want, implementation: registration });
+    expect(timer.armedDeadline).toBeUndefined();
+  });
 
   for (const [name, end] of Object.entries(endingCalls)) {
     it(`cancels its timer after ${name}`, () => {
