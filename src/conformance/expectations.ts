@@ -1,5 +1,8 @@
-/** Answers what the run shows for one `then` field, in the field's own terms. */
-export type Observer = () => unknown;
+/**
+ * Answers what the run shows for one `then` field, in the field's own terms; it is handed the field's expectation for
+ * a matcher, such as `before`, whose answer names what it was asked about.
+ */
+export type Observer = (expectation: unknown) => unknown;
 
 function isEqualsMatcher(expectation: unknown): boolean {
   return (
@@ -25,7 +28,7 @@ export function observe(vectorId: string, then: Readonly<Record<string, unknown>
     if (observer === undefined) {
       throw new Error(`The vector ${vectorId} states then.${field}, which this driver does not witness.`);
     }
-    observed[field] = isEqualsMatcher(expectation) ? { equals: observer() } : observer();
+    observed[field] = isEqualsMatcher(expectation) ? { equals: observer(expectation) } : observer(expectation);
   }
   return observed;
 }

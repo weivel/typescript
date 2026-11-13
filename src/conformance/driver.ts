@@ -1,5 +1,6 @@
-import type { CoreOptions } from "../core/index.js";
+import { EdgeSource, type CoreOptions } from "../core/index.js";
 import { driveConsume } from "./consume.js";
+import { driveLifecycle, lifecycleEdgeSource } from "./lifecycle.js";
 import { observe, type Observer } from "./expectations.js";
 import type { LayerVector } from "./vectors.js";
 import { wantCoreOptions, driveWant } from "./want.js";
@@ -14,12 +15,14 @@ export interface LayerWitness {
 
 interface OpDriver {
   readonly coreOptions: (vector: LayerVector) => CoreOptions;
+  readonly edgeSource: (vector: LayerVector) => EdgeSource;
   readonly drive: (vector: LayerVector, world: DriverWorld) => Promise<Record<string, Observer>>;
 }
 
 const opDrivers: Readonly<Record<string, OpDriver>> = {
-  consume: { coreOptions: () => ({}), drive: driveConsume },
-  want: { coreOptions: wantCoreOptions, drive: driveWant },
+  consume: { coreOptions: () => ({}), edgeSource: () => EdgeSource.Capabilities, drive: driveConsume },
+  want: { coreOptions: wantCoreOptions, edgeSource: () => EdgeSource.Capabilities, drive: driveWant },
+  lifecycle: { coreOptions: () => ({}), edgeSource: lifecycleEdgeSource, drive: driveLifecycle },
 };
 
 /**
@@ -33,7 +36,7 @@ export async function witnessLayerVector(vector: LayerVector, options: DriverOpt
   if (opDriver === undefined) {
     throw new Error(`The vector ${vector.id} has the op ${vector.op}, which this driver does not drive.`);
   }
-  const world = new DriverWorld(options, opDriver.coreOptions(vector));
+  const world = new DriverWorld(options, opDriver.coreOptions(vector), opDriver.edgeSource(vector));
   try {
     const observers = await opDriver.drive(vector, world);
     return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: [...world.logs] };

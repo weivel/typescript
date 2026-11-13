@@ -77,5 +77,6 @@ export async function driveWant(vector: LayerVector, world: DriverWorld): Promis
     timedOut: () => outcome.timedOut,
     atMillis: () => outcome.atMillis,
     refusal: () => outcome.refusal,
+    timer: () => world.timerMoves.map((move) => [...move]),
   };
 }

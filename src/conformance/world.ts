@@ -101,17 +101,23 @@ export class DriverWorld {
   readonly host: Host;
   readonly time = new VirtualTime();
   readonly logs: DriverLogEntry[] = [];
+  /** What reached the host's error sink. */
+  readonly sunk: unknown[] = [];
+  /** Each move the host's timer made, as `[the time it moved, the deadline it armed or null]`. */
+  readonly timerMoves: [number, number | null][] = [];
   readonly #plugins = new Map<string, bigint>();
 
-  constructor(options: DriverOptions, core: CoreOptions = {}) {
+  constructor(options: DriverOptions, core: CoreOptions = {}, edgeSource: EdgeSource = EdgeSource.Capabilities) {
     this.host = Host.create({
-      edgeSource: EdgeSource.Capabilities,
+      edgeSource,
       ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
       core,
       clock: this.time,
       scheduler: this.time,
       log: recordingLogger("host", this.logs),
       pluginLog: (manifest: Manifest) => recordingLogger(manifest.importName, this.logs),
+      onListenerError: (error) => void this.sunk.push(error),
+      onTimerMove: (deadline) => void this.timerMoves.push([this.time.now(), deadline ?? null]),
     });
   }
 
@@ -124,6 +130,11 @@ export class DriverWorld {
       }
       this.#plugins.set(manifest.importName, answer.plugin);
     }
+  }
+
+  /** Every import name the driver registered, with its handle. */
+  registered(): ReadonlyMap<string, bigint> {
+    return this.#plugins;
   }
 
   plugin(importName: string): bigint {
