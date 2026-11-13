@@ -21,9 +21,8 @@ import {
 import { loadCoreLibrary, type CoreLibrary } from "../../src/core/index.ts";
 import { echoLibraryPath } from "../host/world.ts";
 import { coreLibraryPath } from "../real-core.ts";
-import { standardLibraryPath } from "../real-standard.ts";
 
-const libraries = { coreLibraryPath, standardLibraryPath };
+const libraries = { coreLibraryPath };
 const timeout = 120_000;
 /** Enough batches to tell a slowed path apart, or to count crossings, at a fraction of the gate's run time. */
 const briefSampling: Sampling = { warmupCalls: 1_000, callsPerBatch: 20, batches: 21 };

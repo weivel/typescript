@@ -3,7 +3,7 @@ import { RefusalError, type PluginContext } from "../context/index.js";
 import { refuseUnknownKeys, type Observer } from "./expectations.js";
 import { kitRefusal } from "./refusals.js";
 import type { LayerVector } from "./vectors.js";
-import type { DriverWorld, WrittenManifest } from "./world.js";
+import { inertEntry, type BuiltPlugin, type DriverWorld } from "./world.js";
 
 interface GivenPlugin {
   readonly id: string;
@@ -47,13 +47,15 @@ function checkGiven(vector: LayerVector): ConsumeGiven {
   return given;
 }
 
-/** The manifest of a given plugin, its capabilities exactly as written, so the core reads the declaration itself. */
-function manifestOf(plugin: GivenPlugin): WrittenManifest {
-  return {
+/** A given plugin as a manifest value, its capabilities exactly as written, so the core reads the declaration itself. */
+function builtPlugin(plugin: GivenPlugin): BuiltPlugin {
+  const manifest = {
     importName: plugin.id,
+    api: 1,
     capabilities: plugin.capabilities,
     ...(plugin.capabilities.provides.length > 0 ? { entry: `${plugin.id}.ts` } : {}),
   };
+  return { manifest, entry: inertEntry };
 }
 
 class ConsumeRun {
@@ -66,7 +68,7 @@ class ConsumeRun {
     readonly world: DriverWorld,
     plugins: readonly GivenPlugin[],
   ) {
-    world.discover(plugins.map(manifestOf));
+    world.register(plugins.map(builtPlugin));
     for (const plugin of plugins) {
       const context = world.open(plugin.id);
       context.events.listen((event) => {

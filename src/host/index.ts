@@ -1,17 +1,15 @@
 export { Host } from "./host.js";
+export { ActivationFailure } from "./activation-failure.js";
 export { LibraryCallError, LibraryUnloadedError } from "./libraries.js";
 export type {
   ActivationOutcome,
   ActivationReport,
   ActivationState,
-  DiscoveryReport,
   HostedPlugin,
   HostOptions,
-  LibraryAnswer,
   LibraryFunction,
   LibraryService,
   LoadedLibrary,
   Plugin,
-  RefusedPlugin,
-  UnsupportedPlugin,
+  RegisterAnswer,
 } from "./model.js";

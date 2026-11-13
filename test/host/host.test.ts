@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { Axis, EdgeSource, LogLevel, PluginStatus, RefusalCode } from "../../src/core/index.ts";
+import { EdgeSource, LogLevel, PluginStatus, RefusalCode } from "../../src/core/index.ts";
 import { RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { StandardRefusalCode } from "../../src/standard/index.ts";
 import {
@@ -11,6 +11,7 @@ import {
   linkDirectory,
   plugin,
   pluginDirectory,
+  registerDirectory,
   settle,
   type HostWorld,
 } from "./world.ts";
@@ -31,7 +32,7 @@ function contextOf(name: string): PluginContext {
 }
 
 function discovered(world: HostWorld, directory: string): Map<string, bigint> {
-  return new Map(world.host.discover(directory).registered.map((hosted) => [hosted.manifest.importName, hosted.plugin]));
+  return registerDirectory(world, directory).registered;
 }
 
 function handleOf(handles: Map<string, bigint>, name: string): bigint {
@@ -49,86 +50,83 @@ function quarantinedNames(world: HostWorld): (string | null)[] {
     .map((row) => row.importName);
 }
 
-describe("discovering plugins", () => {
-  it("registers what the standard discovers, in the standard's order", () => {
+describe("registration", () => {
+  it("registers a manifest value with the entry its caller hands in, and activates that entry", async () => {
     const world = createHostWorld();
-    const directory = pluginDirectory([plugin({ importName: "beta" }), plugin({ importName: "alpha" })]);
+    const entry = {
+      activate: (context: PluginContext) => {
+        probe().activated.push(context.manifest.importName);
+      },
+    };
 
-    const report = world.host.discover(directory);
+    const answer = world.host.register({ importName: "inline", api: 1 }, entry);
+    const report = await world.host.activate([answer.plugin!]);
 
-    expect(report.refusal).toBeUndefined();
-    expect(report.registered.map((hosted) => hosted.manifest.importName)).toEqual(["alpha", "beta"]);
-    expect(report.registered[0]!.entryPath).toBe(`${directory}/alpha.js`);
-    expect(world.host.core.ledgerEntry(report.registered[1]!.plugin).value?.importName).toBe("beta");
-    expect(world.host.plugin(report.registered[0]!.plugin)?.manifest.importName).toBe("alpha");
-  });
-
-  it("answers the standard's refusal of each file it could not take a plugin from", () => {
-    const world = createHostWorld();
-    const directory = pluginDirectory([plugin({ importName: "alpha" })]);
-    writeFileSync(join(directory, "broken.json"), "{");
-
-    const report = world.host.discover(directory);
-
-    expect(report.registered.map((hosted) => hosted.manifest.importName)).toEqual(["alpha"]);
-    expect(report.failures.map((failure) => [failure.file, failure.refusal.code])).toEqual([
-      [`${directory}/broken.json`, StandardRefusalCode.MalformedJson],
-    ]);
-  });
-
-  it("answers the standard's refusal of a directory that does not exist", () => {
-    const world = createHostWorld();
-
-    const report = world.host.discover(join(pluginDirectory([]), "absent"));
-
-    expect(report.refusal?.code).toBe(StandardRefusalCode.NotFound);
-    expect(report.registered).toEqual([]);
-  });
-
-  it("registers the identity file's id with the manifest", () => {
-    const world = createHostWorld();
-    const directory = pluginDirectory([{ ...plugin({ importName: "first" }), identity: { id: "forge:7", name: "first-repository" } }]);
-
-    const report = world.host.discover(directory);
-
-    expect(report.registered.map((hosted) => hosted.manifest.identity)).toEqual(["forge:7"]);
-    expect(world.host.core.ledgerEntry(report.registered[0]!.plugin).value?.identity).toBe("forge:7");
+    expect(answer.refusal).toBeUndefined();
+    expect(world.host.plugin(answer.plugin!)).toEqual({ plugin: answer.plugin, manifest: { importName: "inline", api: 1 }, entry });
+    expect(world.host.core.ledgerEntry(answer.plugin!).value?.importName).toBe("inline");
+    expect(report.outcomes.map((outcome) => outcome.state)).toEqual(["active"]);
+    expect(probe().activated).toEqual(["inline"]);
   });
 
   it("answers the core's refusal to register a plugin as data", () => {
     const world = createHostWorld();
-    world.host.discover(pluginDirectory([plugin({ importName: "alpha" })]));
-    const again = pluginDirectory([plugin({ importName: "alpha" })]);
+    world.host.register({ importName: "alpha", api: 1 }, { activate() {} });
 
-    const report = world.host.discover(again);
+    const answer = world.host.register({ importName: "alpha", api: 1 }, { activate() {} });
 
-    expect(report.registered).toEqual([]);
-    expect(report.refused.map((refused) => [refused.manifestPath, refused.refusal.code])).toEqual([
-      [`${again}/alpha.json`, RefusalCode.NameTaken],
-    ]);
+    expect(answer.plugin).toBeUndefined();
+    expect(answer.refusal?.code).toBe(RefusalCode.NameTaken);
   });
 });
 
-describe("supports", () => {
-  it("reports a plugin the core does not support with the core's answer, and never registers or loads it", async () => {
-    const world = createHostWorld({ applications: ["here"] });
-    const directory = pluginDirectory([
-      plugin({ importName: "elsewhere", targets: ["there"] }),
-      plugin({ importName: "later", api: 99 }),
-      plugin({ importName: "local", targets: ["here"] }),
-    ]);
+describe("plugins the standard discovers", () => {
+  it("are registered in the standard's order, each with its entry on disk", () => {
+    const world = createHostWorld();
+    const directory = pluginDirectory([plugin({ importName: "beta" }), plugin({ importName: "alpha" })]);
 
-    const report = world.host.discover(directory);
-    await world.host.activate(report.registered.map((hosted) => hosted.plugin));
+    const registration = registerDirectory(world, directory);
 
-    expect(report.registered.map((hosted) => hosted.manifest.importName)).toEqual(["local"]);
-    expect(report.unsupported.map((unsupported) => [unsupported.manifest.importName, unsupported.support.axis])).toEqual([
-      ["elsewhere", Axis.Application],
-      ["later", Axis.Api],
+    expect(registration.refusal).toBeUndefined();
+    expect([...registration.registered.keys()]).toEqual(["alpha", "beta"]);
+    expect(world.host.core.ledgerEntry(registration.registered.get("beta")!).value?.importName).toBe("beta");
+    expect(world.host.plugin(registration.registered.get("alpha")!)?.manifest.importName).toBe("alpha");
+  });
+
+  it("leave out each file the standard could not take a plugin from, with its refusal", () => {
+    const world = createHostWorld();
+    const directory = pluginDirectory([plugin({ importName: "alpha" })]);
+    writeFileSync(join(directory, "broken.json"), "{");
+
+    const registration = registerDirectory(world, directory);
+
+    expect([...registration.registered.keys()]).toEqual(["alpha"]);
+    expect(registration.failures.map((failure) => [failure.file, failure.refusal.code])).toEqual([
+      [`${directory}/broken.json`, StandardRefusalCode.MalformedJson],
     ]);
-    expect(report.unsupported[0]!.support.refusal.code).toBe(RefusalCode.Incompatible);
-    expect(world.host.core.ledger().value!.rows.map((row) => row.importName)).toEqual(["local"]);
-    expect(probe().activated).toEqual(["local"]);
+  });
+
+  it("carry the identity file's id in the manifest the host registers", () => {
+    const world = createHostWorld();
+    const directory = pluginDirectory([{ ...plugin({ importName: "first" }), identity: { id: "forge:7", name: "first-repository" } }]);
+
+    const registration = registerDirectory(world, directory);
+
+    expect(world.host.plugin(registration.registered.get("first")!)?.manifest.identity).toBe("forge:7");
+    expect(world.host.core.ledgerEntry(registration.registered.get("first")!).value?.identity).toBe("forge:7");
+  });
+
+  it("are refused by the core as data when a plugin of the name is registered already", () => {
+    const world = createHostWorld();
+    registerDirectory(world, pluginDirectory([plugin({ importName: "alpha" })]));
+    const again = pluginDirectory([plugin({ importName: "alpha" })]);
+
+    const registration = registerDirectory(world, again);
+
+    expect(registration.registered.size).toBe(0);
+    expect(registration.refused.map((refused) => [refused.manifestPath, refused.refusal.code])).toEqual([
+      [`${again}/alpha.json`, RefusalCode.NameTaken],
+    ]);
   });
 });
 
@@ -259,7 +257,6 @@ describe("activation", () => {
 
     const report = await world.host.activate([handleOf(handles, "linked")]);
 
-    expect(world.host.plugin(handleOf(handles, "linked"))?.entryPresent).toBe(false);
     expect(report.outcomes[0]).toMatchObject({
       state: "quarantined",
       refusal: { detail: `its entry ${directory}/lib/linked.js is not a regular file reached through no link` },
