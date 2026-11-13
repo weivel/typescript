@@ -1,7 +1,0 @@
-{
-  "importName": "demo-broken",
-  "api": 1,
-  "entry": "dist/index.js",
-  "displayName": "Demo Broken",
-  "capabilities": { "provides": ["screens"] }
-}

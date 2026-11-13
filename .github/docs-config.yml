@@ -1,2 +1,2 @@
 kind: generic
-description: The plugin engine, native TypeScript, held to the same conformance kit as every other implementation.
+description: The TypeScript language implementation of weivel, binding the C core and the C standard and deciding nothing itself.

@@ -1,32 +1,23 @@
 ## What this is
 
-The plugin engine written natively in TypeScript. It reads the one schema in `weivel/model` and is
-held to the vectors in `weivel/conformance`, exactly as `weivel/java` is.
+The TypeScript language implementation of weivel. It binds the C core (`weivel/core`) and the C
+standard (`weivel/standard`) through koffi and decides nothing itself: compatibility, order, reach,
+waiting, revocation and constraints are the core's answers, and the manifest format is the
+standard's. It is held to the vectors in `weivel/conformance`.
 
-## Layout
+## Modules
 
-- `.` and `./engine`: the contract and the engine. Neither reaches a Node builtin, which a test
-  proves by walking the module graph. Neither generates code at run time either: the manifest
-  validator is precompiled at build time, so the engine runs under a CSP without `unsafe-eval` or a
-  Workers-style eval ban, which a test proves in a Node that forbids it.
-- `./host`: the Node host. It may use builtins.
-- `./conformance`: the driver the conformance runner launches.
-- `scripts/`: sibling resolution and schema embedding.
+`src/` holds the modules every language implementation of weivel holds, in the order the core's
+`MODULES` list names them: `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance`
+and `benchmarks`. Each is a subpath of the package, `@weivel/typescript/<module>`.
 
-## Siblings
+## Siblings and native libraries
 
-`model`, `conformance` and `java` are found inside the repository first (CI checks them out there)
-and beside it second (a local workspace). The manifest schema is compiled at build time into a
-gitignored validator module, so no copy of it is committed.
+`.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks
+them out there; locally, link or clone each checkout into `siblings/`. `scripts/native.ts` builds
+the core and the standard as shared libraries with CMake and copies them into `native/`, which git
+ignores. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
 
-## Subpaths
+Node runs the build scripts through its own type stripping, which needs Node 22.18 or later.
 
-| subpath | holds | node builtins |
-| --- | --- | --- |
-| `.` | the plugin contract: types, manifest shapes, `PluginError` | none |
-| `./engine` | the engine: manifest validation, ordering, activation, handles, the scheduler, `pluginError` | none |
-| `./host` | the Node host: reads deployed manifests, imports plugin entries, `startPlugins` | yes |
-| `./conformance` | the driver the conformance runner launches | yes |
-
-The package is `@weivel/typescript`, private, and unpublished until the npm publishing blocker
-clears.
+The package is private and unpublished.

@@ -4,19 +4,19 @@ on: [push, pull_request, workflow_dispatch]
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   test:
     uses: intisy/workflows/.github/workflows/test.yml@main
     with:
-      toolchains: node
-      node_install: npm ci
+      toolchains: node cmake
+      runners: '["ubuntu-latest","windows-latest","macos-latest"]'
+      cmake_version: '4.4.4'
+      cmake_configure: ''
+      cmake_build: ''
+      cmake_test: ''
+      node_install: npm install
       node_build: npm run build
       node_test: npm test
-      extra_repositories: |
-        weivel/model model
-        weivel/conformance conformance
-        weivel/java java development
     secrets:
       envPAT: ${{ secrets.PAT }}

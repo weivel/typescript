@@ -2,33 +2,51 @@
   "name": "@weivel/typescript",
   "version": "0.1.0",
   "private": true,
-  "description": "The plugin engine, native TypeScript, held to the same conformance kit as every other implementation",
+  "description": "The TypeScript language implementation of weivel, a binding of the C core and the C standard",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
     },
-    "./engine": {
-      "types": "./dist/engine/index.d.ts",
-      "default": "./dist/engine/index.js"
+    "./handles": {
+      "types": "./dist/handles/index.d.ts",
+      "default": "./dist/handles/index.js"
+    },
+    "./timer": {
+      "types": "./dist/timer/index.d.ts",
+      "default": "./dist/timer/index.js"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "default": "./dist/context/index.js"
     },
     "./host": {
       "types": "./dist/host/index.d.ts",
       "default": "./dist/host/index.js"
     },
+    "./standard": {
+      "types": "./dist/standard/index.d.ts",
+      "default": "./dist/standard/index.js"
+    },
     "./conformance": {
-      "types": "./dist/conformance/driver.d.ts",
-      "default": "./dist/conformance/driver.js"
+      "types": "./dist/conformance/index.d.ts",
+      "default": "./dist/conformance/index.js"
+    },
+    "./benchmarks": {
+      "types": "./dist/benchmarks/index.d.ts",
+      "default": "./dist/benchmarks/index.js"
     }
   },
   "scripts": {
-    "build": "node scripts/embed-schema.mjs && tsc",
-    "test": "node scripts/embed-schema.mjs && tsc --noEmit -p tsconfig.test.json && vitest run"
+    "build": "node scripts/native.ts && tsc",
+    "test": "node scripts/native.ts && tsc -p tsconfig.test.json && vitest run"
   },
   "dependencies": {
-    "ajv": "8.17.1",
     "koffi": "2.16.3"
   },
   "devDependencies": {
