@@ -32,17 +32,20 @@ describe("the holding table", () => {
     expect(holdings.lookup(beta, reregistered)).toBeUndefined();
   });
 
-  it("drops what a released plugin took late once the core forgets it", () => {
+  it("drops what a released plugin took late by the revocation its forget queues, holder and all", () => {
     const { core, holdings, alpha, beta } = holdingCore();
     core.registerService(alpha, "alpha:greeting");
     core.releasePlugin(beta);
     const late = core.getService(beta, "alpha:greeting").value!;
     holdings.hold(beta, late, {});
+    expect(holdings.holderCount).toBe(1);
 
-    expect(core.forgetPlugin(beta).status).toBe(Status.Ok);
-    holdings.forget(beta);
+    const forgotten = core.forgetPlugin(beta);
 
+    expect(forgotten.status).toBe(Status.Ok);
+    expect(forgotten.events).toContainEqual({ kind: "revoked", plugin: beta, implementation: late });
     expect(holdings.lookup(beta, late)).toBeUndefined();
+    expect(holdings.holderCount).toBe(0);
   });
 
   it("keeps a holding no event has ended", () => {

@@ -30,7 +30,10 @@ export class HandleTable<Value> {
 
 /**
  * What each plugin holds: the object it was handed for an implementation handle, per holding plugin. A holding goes
- * with the WEIVEL_EVENT_REVOKED that ends it, and every holding of a plugin goes when the core forgets the plugin.
+ * only with the WEIVEL_EVENT_REVOKED that ends it.
+ *
+ * @remarks No call drops a plugin's holdings: the core revokes all of them on release and quarantine, and revokes
+ * what a released plugin took late before weivel_forget_plugin forgets it.
  */
 export class HoldingTable<Value> {
   readonly #holdingsByPlugin = new Map<bigint, HandleTable<Value>>();
@@ -53,11 +56,16 @@ export class HoldingTable<Value> {
     if (event.kind !== "revoked") {
       return false;
     }
-    return this.#holdingsByPlugin.get(event.plugin)?.drop(event.implementation) ?? false;
+    const holdings = this.#holdingsByPlugin.get(event.plugin);
+    const dropped = holdings?.drop(event.implementation) ?? false;
+    if (holdings?.size === 0) {
+      this.#holdingsByPlugin.delete(event.plugin);
+    }
+    return dropped;
   }
 
-  /** Drops every holding of a plugin weivel_forget_plugin answered OK for. */
-  forget(plugin: bigint): void {
-    this.#holdingsByPlugin.delete(plugin);
+  /** How many plugins hold anything. */
+  get holderCount(): number {
+    return this.#holdingsByPlugin.size;
   }
 }
