@@ -2,6 +2,8 @@ import koffi from "koffi";
 import { coreStructs, createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
 import { Host } from "../host/index.js";
+import type { LibraryDeclaration } from "../standard/answers.js";
+import { FunctionKind } from "../standard/constants.js";
 import { CoreTimer } from "../timer/index.js";
 import {
   measureInterleaved,
@@ -18,7 +20,6 @@ export interface BenchmarkOptions {
   readonly coreLibraryPath?: string;
   /** The bound core library to call through; loaded from `coreLibraryPath` when absent. */
   readonly coreLibrary?: CoreLibrary;
-  readonly standardLibraryPath?: string;
   readonly sampling?: Partial<Sampling>;
   /** Wraps each measured path, named as the benchmark's summaries name it. */
   readonly decorate?: PathDecorator;
@@ -187,12 +188,12 @@ export function benchmarkControlCall(options: BenchmarkOptions = {}): FfiCallSum
   });
 }
 
-const echoDeclaration = JSON.stringify({
+const echoDeclaration: LibraryDeclaration = {
   importName: "echo",
   version: "0.1.0",
   release: "echo_release",
-  services: [{ id: echoId, functions: [{ name: "echo", symbol: "echo_echo", kind: "bytes" }] }],
-});
+  services: [{ id: echoId, functions: [{ name: "echo", symbol: "echo_echo", kind: FunctionKind.Bytes, context: 0 }] }],
+};
 
 /**
  * Times a call into a C library through the host's bytes binding, 16 bytes in and the same 16 back, against
@@ -202,15 +203,11 @@ export async function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Pr
   const host = Host.create({
     edgeSource: EdgeSource.Capabilities,
     ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
-    ...(options.standardLibraryPath === undefined ? {} : { standardLibraryPath: options.standardLibraryPath }),
     log: silentLogger,
   });
   const bareLibrary = koffi.load(options.echoLibraryPath);
   try {
-    const answer = host.loadLibrary(echoDeclaration, options.echoLibraryPath);
-    if (answer.library === undefined) {
-      throw new Error(`The echo declaration was refused: ${answer.refusal.detail}`);
-    }
+    host.loadLibrary(echoDeclaration, options.echoLibraryPath);
     const consumer = openPlugin(host.core, host.contexts, consumerManifest).context;
     const echo = consumer.services.get(consumer.service<{ echo(input: Uint8Array): Uint8Array }>(echoId));
     if (echo === undefined) {

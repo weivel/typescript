@@ -24,3 +24,4 @@ export {
   type StandardLibrary,
   type StandardServiceIds,
 } from "./standard.js";
+export { entryOnDisk, registrationOf, type PluginRegistration } from "./entry.js";

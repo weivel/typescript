@@ -2,13 +2,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
-import { EdgeSource, sharedLibraryFileName, type CoreOptions } from "../../src/core/index.ts";
+import { EdgeSource, sharedLibraryFileName, type CoreOptions, type Refusal } from "../../src/core/index.ts";
 import type { PluginContext } from "../../src/context/index.ts";
 import { Host, type HostOptions } from "../../src/host/index.ts";
+import { registrationOf, type DiscoveryFailure, type StandardRefusal } from "../../src/standard/index.ts";
 import type { Scheduler } from "../../src/timer/index.ts";
 import { ManualClock, recordingLogger, type RecordingLogger } from "../context/world.ts";
 import { coreLibraryPath } from "../real-core.ts";
-import { standardLibraryPath } from "../real-standard.ts";
+import { realStandard } from "../real-standard.ts";
 
 export const echoLibraryPath = join(import.meta.dirname, "..", "..", "native", "test", sharedLibraryFileName("echo"));
 
@@ -152,7 +153,6 @@ export function createHostWorld(core: CoreOptions = {}, options: Partial<HostOpt
   const host = Host.create({
     edgeSource: EdgeSource.Capabilities,
     coreLibraryPath,
-    standardLibraryPath,
     core,
     clock,
     scheduler,
@@ -166,6 +166,31 @@ export function createHostWorld(core: CoreOptions = {}, options: Partial<HostOpt
   });
   createdHosts.push(host);
   return { host, clock, scheduler, hostLog, pluginLogs };
+}
+
+/** What registering a directory's plugins answered: each registered plugin by name, and what was not registered. */
+export interface DirectoryRegistration {
+  readonly registered: Map<string, bigint>;
+  readonly refused: readonly { readonly manifestPath: string; readonly refusal: Refusal }[];
+  readonly failures: readonly DiscoveryFailure[];
+  readonly refusal: StandardRefusal | undefined;
+}
+
+/** Discovers the plugins in `directory` with the real standard and registers each through the host, in its order. */
+export function registerDirectory(world: HostWorld, directory: string): DirectoryRegistration {
+  const discovery = realStandard().discover(directory);
+  const registered = new Map<string, bigint>();
+  const refused: { manifestPath: string; refusal: Refusal }[] = [];
+  for (const found of discovery.value?.plugins ?? []) {
+    const { manifest, entry } = registrationOf(found);
+    const answer = world.host.register(manifest, entry);
+    if (answer.plugin === undefined) {
+      refused.push({ manifestPath: found.manifestPath, refusal: answer.refusal });
+    } else {
+      registered.set(manifest.importName, answer.plugin);
+    }
+  }
+  return { registered, refused, failures: discovery.value?.failures ?? [], refusal: discovery.refusal };
 }
 
 /** Lets every settled promise's callbacks run. */

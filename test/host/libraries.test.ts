@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { HOST, Status } from "../../src/core/index.ts";
 import { LibraryCallError, LibraryUnloadedError, type LibraryService } from "../../src/host/index.ts";
-import { StandardRefusalCode } from "../../src/standard/index.ts";
-import { createHostWorld, echoLibraryPath, plugin, pluginDirectory, type HostWorld } from "./world.ts";
+import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
+import { realStandard } from "../real-standard.ts";
+import { createHostWorld, echoLibraryPath, plugin, pluginDirectory, registerDirectory, type HostWorld } from "./world.ts";
 
 const echoFunctions = [
   { name: "echo", symbol: "echo_echo", kind: "bytes" },
@@ -10,16 +11,18 @@ const echoFunctions = [
   { name: "garbage", symbol: "echo_garbage", kind: "bytes" },
 ];
 
-function declaration(functions: readonly Record<string, unknown>[] = echoFunctions): string {
-  return JSON.stringify({ importName: "echo", version: "0.1.0", release: "echo_release", services: [{ id: "echo", functions }] });
+/** The echo library's declaration as the standard reads it. */
+function declaration(functions: readonly Record<string, unknown>[] = echoFunctions): LibraryDeclaration {
+  const json = JSON.stringify({ importName: "echo", version: "0.1.0", release: "echo_release", services: [{ id: "echo", functions }] });
+  const read = realStandard().readLibrary(json);
+  if (read.value === undefined) {
+    throw new Error(`the standard refused the echo declaration: ${read.refusal?.detail}`);
+  }
+  return read.value;
 }
 
 function loadedEcho(world: HostWorld): LibraryService {
-  const answer = world.host.loadLibrary(declaration(), echoLibraryPath);
-  if (answer.library === undefined) {
-    throw new Error(`the echo declaration was refused: ${answer.refusal.detail}`);
-  }
-  return answer.library.services.get("echo")!;
+  return world.host.loadLibrary(declaration(), echoLibraryPath).services.get("echo")!;
 }
 
 function hostReaches(world: HostWorld, id: string): boolean {
@@ -30,7 +33,8 @@ describe("a C library loaded as host services", () => {
   it("is reached by a plugin as the host's own object, each bytes function answering the library's bytes", async () => {
     const world = createHostWorld();
     const echo = loadedEcho(world);
-    const handles = world.host.discover(
+    const handles = registerDirectory(
+      world,
       pluginDirectory([
         plugin(
           { importName: "caller", services: { consumes: ["echo"] } },
@@ -39,7 +43,7 @@ describe("a C library loaded as host services", () => {
       ]),
     );
 
-    await world.host.activate(handles.registered.map((hosted) => hosted.plugin));
+    await world.host.activate([...handles.registered.values()]);
     const reached = globalThis.weivelHostProbe as unknown as { reached: unknown; answered: Uint8Array };
 
     expect(reached.reached).toBe(echo);
@@ -72,21 +76,21 @@ describe("a C library loaded as host services", () => {
 
   it("are unregistered when the library is unloaded", () => {
     const world = createHostWorld();
-    const answer = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const library = world.host.loadLibrary(declaration(), echoLibraryPath);
     expect(hostReaches(world, "echo")).toBe(true);
 
-    answer.library!.unload();
+    library.unload();
 
     expect(hostReaches(world, "echo")).toBe(false);
   });
 
   it("refuse a call a plugin still holds once unloaded, never reaching the unloaded code, and unload once", () => {
     const world = createHostWorld();
-    const answer = world.host.loadLibrary(declaration(), echoLibraryPath);
-    const held = answer.library!.services.get("echo")!;
+    const library = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const held = library.services.get("echo")!;
 
-    answer.library!.unload();
-    answer.library!.unload();
+    library.unload();
+    library.unload();
 
     expect(() => held.echo!(new Uint8Array([1]))).toThrow(LibraryUnloadedError);
     expect(() => held.echo!(new Uint8Array([1]))).toThrow("echo_echo belongs to a C library that has been unloaded.");
@@ -94,8 +98,8 @@ describe("a C library loaded as host services", () => {
 
   it("unload once, so a second unload leaves another load of the same file working", () => {
     const world = createHostWorld();
-    const first = world.host.loadLibrary(declaration(), echoLibraryPath).library!;
-    const second = world.host.loadLibrary(declaration(), echoLibraryPath).library!;
+    const first = world.host.loadLibrary(declaration(), echoLibraryPath);
+    const second = world.host.loadLibrary(declaration(), echoLibraryPath);
 
     first.unload();
     first.unload();
@@ -105,7 +109,7 @@ describe("a C library loaded as host services", () => {
 
   it("are unloaded when the host is destroyed, so a held call is refused and a later unload does nothing", async () => {
     const world = createHostWorld();
-    const library = world.host.loadLibrary(declaration(), echoLibraryPath).library!;
+    const library = world.host.loadLibrary(declaration(), echoLibraryPath);
     const held = library.services.get("echo")!;
 
     await world.host.destroy();
@@ -114,23 +118,13 @@ describe("a C library loaded as host services", () => {
     expect(() => library.unload()).not.toThrow();
   });
 
-  it("answers the standard's refusal of a json function by its field path, binding and registering nothing", () => {
+  it("refuses a declaration built with a kind other than bytes, binding and registering nothing", () => {
     const world = createHostWorld();
-    const withJson = [echoFunctions[0]!, { name: "repeat", symbol: "echo_echo", kind: "json" }];
+    const read = declaration();
+    const retired = { ...read, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: 1, context: 0 }] }] };
 
-    const answer = world.host.loadLibrary(declaration(withJson), echoLibraryPath);
-
-    expect(answer.library).toBeUndefined();
-    expect(answer.refusal).toMatchObject({ code: StandardRefusalCode.InvalidValue, path: "services[0].functions[1].kind" });
-    expect(hostReaches(world, "echo")).toBe(false);
-  });
-
-  it("answers the standard's refusal of a declaration it will not read", () => {
-    const world = createHostWorld();
-
-    const answer = world.host.loadLibrary(declaration([{ name: "echo", symbol: "not a symbol", kind: "bytes" }]), echoLibraryPath);
-
-    expect(answer.refusal).toMatchObject({ code: StandardRefusalCode.InvalidValue, path: "services[0].functions[0].symbol" });
+    expect(() => world.host.loadLibrary(retired, echoLibraryPath)).toThrow(/function echo is of kind 1; this layer binds the bytes kind alone/);
+    expect(read.services[0]!.functions[0]!.kind).toBe(FunctionKind.Bytes);
     expect(hostReaches(world, "echo")).toBe(false);
   });
 

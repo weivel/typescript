@@ -1,22 +1,17 @@
-import type {
-  ActivationPlan,
-  CoreOptions,
-  EdgeSource,
-  ListenerErrorSink,
-  Manifest,
-  Refusal,
-  Support,
-} from "../core/index.js";
+import type { ActivationPlan, CoreOptions, EdgeSource, ListenerErrorSink, Manifest, Refusal } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
-import type { DiscoveryFailure, LibraryDeclaration, StandardRefusal } from "../standard/index.js";
+import type { LibraryDeclaration } from "../standard/answers.js";
 import type { Clock, Scheduler, TimerMoveListener } from "../timer/index.js";
 
-/** What a plugin's entry module exports as its default. */
+/**
+ * A plugin's entry as the host's caller hands it to `register`: in TypeScript, an object whose `activate` takes the
+ * plugin's context and may finish later, and whose optional `deactivate` may finish later too.
+ */
 export interface Plugin {
   /** Supplies the implementation behind every capability the manifest declares. */
   activate(context: PluginContext): void | Promise<void>;
   /** Releases whatever `activate` took: timers, watchers, child processes. */
-  deactivate(): void | Promise<void>;
+  deactivate?(): void | Promise<void>;
 }
 
 export interface HostOptions {
@@ -24,9 +19,7 @@ export interface HostOptions {
   readonly edgeSource: EdgeSource;
   /** The core's shared library; `native/` beside the package by default. */
   readonly coreLibraryPath?: string;
-  /** The standard's shared library; `native/` beside the package by default. */
-  readonly standardLibraryPath?: string;
-  /** Handed to weivel_core_create unchanged; its well-known services are also handed to discovery. */
+  /** Handed to weivel_core_create unchanged. */
   readonly core?: CoreOptions;
   /** The time handed to the core; the timer's clock by default. */
   readonly clock?: Clock;
@@ -42,44 +35,21 @@ export interface HostOptions {
   readonly log?: Logger;
   /** The log a plugin's context forwards to; the host's log by default. */
   readonly pluginLog?: (manifest: Manifest) => Logger;
-  /** Where an error thrown by a listener the core wrapper calls goes; the wrapper's default by default. */
+  /** Where an error thrown by code the layer calls goes; the wrapper's default by default. */
   readonly onListenerError?: ListenerErrorSink;
 }
 
-/** A plugin the core registered for this host, and where its entry module is. */
+/** A plugin the core registered for this host, with the entry its caller handed in. */
 export interface HostedPlugin {
   readonly plugin: bigint;
   readonly manifest: Manifest;
-  readonly manifestPath: string;
-  /** The entry the standard resolved against the plugin's directory; null when the manifest names none. */
-  readonly entryPath: string | null;
-  /** Whether the standard found the entry a regular file reached through no link; only then is it imported. */
-  readonly entryPresent: boolean;
+  readonly entry: Plugin;
 }
 
-/** A discovered plugin the core answered this host cannot load, with the core's answer as it stands. */
-export interface UnsupportedPlugin {
-  readonly manifestPath: string;
-  readonly manifest: Manifest;
-  readonly support: Support;
-}
-
-/** A discovered plugin the core refused to register. */
-export interface RefusedPlugin {
-  readonly manifestPath: string;
-  readonly manifest: Manifest;
-  readonly refusal: Refusal;
-}
-
-export interface DiscoveryReport {
-  /** The standard's refusal of the directory itself; every list is then empty. */
-  readonly refusal: StandardRefusal | undefined;
-  readonly registered: readonly HostedPlugin[];
-  readonly unsupported: readonly UnsupportedPlugin[];
-  readonly refused: readonly RefusedPlugin[];
-  /** Every file the standard could not take a plugin from. */
-  readonly failures: readonly DiscoveryFailure[];
-}
+/** The answer to registering a plugin: its handle, or the core's refusal. */
+export type RegisterAnswer =
+  | { readonly plugin: bigint; readonly refusal: undefined }
+  | { readonly plugin: undefined; readonly refusal: Refusal };
 
 export type ActivationState = "active" | "quarantined" | "refused";
 
@@ -112,8 +82,3 @@ export interface LoadedLibrary {
 export type LibraryFunction = (input: Uint8Array) => Uint8Array;
 
 export type LibraryService = Readonly<Record<string, LibraryFunction>>;
-
-/** The answer to loading a library: the library, or the standard's or the layer's refusal of its declaration. */
-export type LibraryAnswer =
-  | { readonly library: LoadedLibrary; readonly refusal: undefined }
-  | { readonly library: undefined; readonly refusal: StandardRefusal };

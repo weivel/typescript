@@ -10,27 +10,36 @@ import {
   type ServiceType,
 } from "../context/index.js";
 import { HandleTable } from "../handles/index.js";
-import { loadStandard, type Standard } from "../standard/index.js";
+import type { LibraryDeclaration } from "../standard/answers.js";
+import { FunctionKind } from "../standard/constants.js";
 import { CoreTimer } from "../timer/index.js";
 import { writeCoreLog } from "./core-log.js";
-import { discoverPlugins } from "./discovery.js";
 import { bindLibrary } from "./libraries.js";
+import { activationFailureOf, messageOf, type ActivationFailure } from "./activation-failure.js";
 import type {
   ActivationOutcome,
   ActivationReport,
   ActivationState,
-  DiscoveryReport,
   HostedPlugin,
   HostOptions,
-  LibraryAnswer,
+  LoadedLibrary,
   Plugin,
+  RegisterAnswer,
 } from "./model.js";
-import { activateThrew, ActivationFailure, importPlugin, messageOf } from "./plugin-module.js";
 
 interface PluginRecord {
   readonly hosted: HostedPlugin;
-  /** The entry's default export once its activate has been called, until its deactivate is. */
+  /** The entry once its activate has been called, until its deactivate is. */
   definition: Plugin | undefined;
+}
+
+function refuseUnboundKinds(declaration: LibraryDeclaration): void {
+  for (const service of declaration.services) {
+    const unbound = service.functions.find((declared) => declared.kind !== FunctionKind.Bytes);
+    if (unbound !== undefined) {
+      throw new Error(`${declaration.importName}'s function ${unbound.name} is of kind ${unbound.kind}; this layer binds the bytes kind alone.`);
+    }
+  }
 }
 
 function succeeded(call: string, result: { status: Status; events: readonly CoreEvent[] }): void {
@@ -40,12 +49,13 @@ function succeeded(call: string, result: { status: Status; events: readonly Core
 }
 
 /**
- * Discovers, loads, activates, releases and forgets plugins on one core, and offers the host's own services and C
- * libraries to them. Every decision is the core's or the standard's; the host carries their answers out.
+ * Registers, activates, releases and forgets plugins on one core, and offers the host's own services and C libraries
+ * to them. Every decision is the core's; the host carries its answers out. It never needs the standard: reading
+ * manifests, discovering plugins on disk and reading library declarations are the standard module's, which feeds
+ * `register` and `loadLibrary`.
  */
 export class Host {
   readonly core: Core;
-  readonly standard: Standard;
   readonly contexts: PluginContexts;
   readonly #options: HostOptions;
   readonly #log: Logger;
@@ -58,19 +68,17 @@ export class Host {
   #destroyed = false;
   #destruction: Promise<void> | undefined;
 
-  /** @throws Error when either library is missing or the core cannot be created. */
+  /** @throws Error when the core's library is missing or the core cannot be created. */
   static create(options: HostOptions): Host {
-    const standard = loadStandard(options.standardLibraryPath);
     const created = createCore({ libraryPath: options.coreLibraryPath, options: options.core, onListenerError: options.onListenerError });
     if (created.value === undefined) {
       throw new Error(`weivel_core_create answered status ${created.status}.`);
     }
-    return new Host(created.value, standard, options);
+    return new Host(created.value, options);
   }
 
-  private constructor(core: Core, standard: Standard, options: HostOptions) {
+  private constructor(core: Core, options: HostOptions) {
     this.core = core;
-    this.standard = standard;
     this.#options = options;
     this.#log = options.log ?? consoleLogger;
     this.contexts = new PluginContexts(core, { clock: options.clock, log: this.#log });
@@ -96,14 +104,22 @@ export class Host {
     return `${name} was refused ${event.id ?? "an id"}: ${event.refusal.detail ?? `code ${event.refusal.code}`}`;
   }
 
-  /** Discovers the plugins in `directory`, reports the ones the core does not support, and registers the rest. */
-  discover(directory: string): DiscoveryReport {
-    const wellKnownServices = this.#options.core?.wellKnownServices;
-    const report = discoverPlugins(this.core, this.standard, directory, wellKnownServices === undefined ? {} : { wellKnownServices });
-    for (const hosted of report.registered) {
-      this.#plugins.add(hosted.plugin, { hosted, definition: undefined });
+  /**
+   * Registers a plugin from its manifest and the entry its caller hands in, answering its handle or the core's refusal.
+   *
+   * @throws Error when the core answers the call malformed, which is a defect of this layer, not the caller's.
+   */
+  register(manifest: Manifest, entry: Plugin): RegisterAnswer {
+    const registered = this.core.registerManifest(manifest);
+    if (registered.status === Status.Ok && registered.value !== undefined) {
+      this.#plugins.add(registered.value, { hosted: { plugin: registered.value, manifest, entry }, definition: undefined });
+      return { plugin: registered.value, refusal: undefined };
     }
-    return report;
+    const failure = failureOf("weivel_register_manifest", registered);
+    if (!(failure instanceof RefusalError)) {
+      throw failure;
+    }
+    return { plugin: undefined, refusal: failure };
   }
 
   /** The plugin the host registered under `plugin`, or undefined once it is forgotten or for a handle never known. */
@@ -135,20 +151,15 @@ export class Host {
   }
 
   /**
-   * Reads a C library's declaration with the standard, binds each function, and registers each declared service
-   * under WEIVEL_HOST.
+   * Binds each function of a C library's declaration, read by the standard or built by the caller, and registers each
+   * declared service under WEIVEL_HOST.
    *
-   * @throws Error when the library file is missing or lacks a symbol its declaration names.
+   * @throws Error when a function is of a kind other than bytes, the library file is missing, or it lacks a symbol
+   * its declaration names.
    */
-  loadLibrary(declaration: string, libraryPath: string): LibraryAnswer {
-    const read = this.standard.readLibrary(declaration);
-    if (read.value === undefined) {
-      if (read.refusal === undefined) {
-        throw new Error(`weivel_standard_read_library answered status ${read.status}.`);
-      }
-      return { library: undefined, refusal: read.refusal };
-    }
-    const bound = bindLibrary(libraryPath, read.value);
+  loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary {
+    refuseUnboundKinds(declaration);
+    const bound = bindLibrary(libraryPath, declaration);
     const unregisters = [...bound.services].map(([id, service]) => this.registerHostService({ id }, service));
     const unload = (): void => {
       this.#libraryUnloads.delete(unload);
@@ -156,7 +167,7 @@ export class Host {
       bound.unload();
     };
     this.#libraryUnloads.add(unload);
-    return { library: { declaration: read.value, services: bound.services, unload }, refusal: undefined };
+    return { declaration, services: bound.services, unload };
   }
 
   /**
@@ -193,17 +204,8 @@ export class Host {
       }
       throw error;
     }
-    const imported = await this.#import(record);
-    const failure = imported instanceof ActivationFailure ? Promise.resolve(imported) : this.#callActivate(record, imported, context);
+    const failure = this.#callActivate(record, record.hosted.entry, context);
     return { settled: failure.then((settledFailure) => this.#checkActivation(record, settledFailure)) };
-  }
-
-  async #import(record: PluginRecord): Promise<Plugin | ActivationFailure> {
-    try {
-      return await importPlugin(record.hosted.entryPath, record.hosted.entryPresent);
-    } catch (error) {
-      return error instanceof ActivationFailure ? error : activateThrew(error);
-    }
   }
 
   async #callActivate(record: PluginRecord, definition: Plugin, context: PluginContext): Promise<ActivationFailure | undefined> {
@@ -212,7 +214,7 @@ export class Host {
       await definition.activate(context);
       return undefined;
     } catch (error) {
-      return activateThrew(error);
+      return activationFailureOf(error);
     }
   }
 

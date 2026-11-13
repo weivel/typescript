@@ -1,15 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { EdgeSource, type CoreOptions, type Manifest } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
-import { Host } from "../host/index.js";
+import { Host, type Plugin } from "../host/index.js";
 import type { Clock, Scheduler } from "../timer/index.js";
 
-/** Where the driver finds the core and the standard; `native/` beside the package by default, as for the host. */
+/** Where the driver finds the core; `native/` beside the package by default, as for the host. */
 export interface DriverOptions {
   readonly coreLibraryPath?: string;
-  readonly standardLibraryPath?: string;
   /** Sees the host after the last step, before the driver destroys it. */
   readonly inspect?: (host: Host) => void;
 }
@@ -83,47 +79,42 @@ function recordingLogger(source: string, entries: DriverLogEntry[]): Logger {
   };
 }
 
-/** A plugin's manifest as the standard reads it from disk, written by the driver. */
-export type WrittenManifest = Record<string, unknown> & { readonly importName: string };
+/** A plugin the driver builds from a vector: its manifest value and the entry the host is handed. */
+export interface BuiltPlugin {
+  readonly manifest: Manifest;
+  readonly entry: Plugin;
+}
 
-/** A host on virtual time over plugins the driver wrote into a directory of its own, every log recorded. */
+/** An entry for a plugin the driver opens itself and never activates. */
+export const inertEntry: Plugin = { activate() {} };
+
+/** A host on virtual time over plugins the driver builds as values, every log recorded. */
 export class DriverWorld {
   readonly host: Host;
   readonly time = new VirtualTime();
   readonly logs: DriverLogEntry[] = [];
-  readonly #directory = mkdtempSync(join(tmpdir(), "weivel-conformance-"));
   readonly #plugins = new Map<string, bigint>();
 
   constructor(options: DriverOptions, core: CoreOptions = {}) {
-    try {
-      this.host = Host.create({
-        edgeSource: EdgeSource.Capabilities,
-        ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
-        ...(options.standardLibraryPath === undefined ? {} : { standardLibraryPath: options.standardLibraryPath }),
-        core,
-        clock: this.time,
-        scheduler: this.time,
-        log: recordingLogger("host", this.logs),
-        pluginLog: (manifest: Manifest) => recordingLogger(manifest.importName, this.logs),
-      });
-    } catch (error) {
-      rmSync(this.#directory, { recursive: true, force: true });
-      throw error;
-    }
+    this.host = Host.create({
+      edgeSource: EdgeSource.Capabilities,
+      ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
+      core,
+      clock: this.time,
+      scheduler: this.time,
+      log: recordingLogger("host", this.logs),
+      pluginLog: (manifest: Manifest) => recordingLogger(manifest.importName, this.logs),
+    });
   }
 
-  /** Writes each manifest, has the host discover them, and fails unless the host registered every one. */
-  discover(manifests: readonly WrittenManifest[]): void {
-    for (const manifest of manifests) {
-      writeFileSync(join(this.#directory, `${manifest.importName}.json`), JSON.stringify({ api: 1, ...manifest }));
-    }
-    const report = this.host.discover(this.#directory);
-    for (const hosted of report.registered) {
-      this.#plugins.set(hosted.manifest.importName, hosted.plugin);
-    }
-    const missing = manifests.filter((manifest) => !this.#plugins.has(manifest.importName));
-    if (missing.length > 0) {
-      throw new Error(`The host did not register ${missing.map((manifest) => manifest.importName).join(", ")}.`);
+  /** Registers each plugin through the host, and fails unless the core registered every one. */
+  register(plugins: readonly BuiltPlugin[]): void {
+    for (const { manifest, entry } of plugins) {
+      const answer = this.host.register(manifest, entry);
+      if (answer.plugin === undefined) {
+        throw new Error(`The host did not register ${manifest.importName}: ${answer.refusal.detail ?? `code ${answer.refusal.code}`}.`);
+      }
+      this.#plugins.set(manifest.importName, answer.plugin);
     }
   }
 
@@ -143,11 +134,7 @@ export class DriverWorld {
     try {
       options.inspect?.(this.host);
     } finally {
-      try {
-        await this.host.destroy();
-      } finally {
-        rmSync(this.#directory, { recursive: true, force: true });
-      }
+      await this.host.destroy();
     }
   }
 }

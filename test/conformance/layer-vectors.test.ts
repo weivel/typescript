@@ -3,12 +3,11 @@ import { PluginStatus } from "../../src/core/index.ts";
 import { readLayerVector, witnessLayerVector, type LayerVector, type LayerWitness } from "../../src/conformance/index.ts";
 import type { Host } from "../../src/host/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
-import { standardLibraryPath } from "../real-standard.ts";
 import { layerVectorDirectory } from "./kit.ts";
 
 async function witness(id: string, inspect?: (host: Host) => void): Promise<{ vector: LayerVector; witness: LayerWitness }> {
   const vector = readLayerVector(layerVectorDirectory, id);
-  return { vector, witness: await witnessLayerVector(vector, { coreLibraryPath, standardLibraryPath, ...(inspect === undefined ? {} : { inspect }) }) };
+  return { vector, witness: await witnessLayerVector(vector, { coreLibraryPath, ...(inspect === undefined ? {} : { inspect }) }) };
 }
 
 describe("consume/a-throwing-listener-does-not-silence-the-others", () => {

@@ -1,21 +1,9 @@
 import { pathToFileURL } from "node:url";
-import type { QuarantineReason } from "../core/index.js";
-import type { Plugin } from "./model.js";
-
-/** Why a plugin could not be activated, as the reason its quarantine carries. */
-export class ActivationFailure extends Error {
-  readonly reason: QuarantineReason;
-
-  constructor(detail: string, fix: string) {
-    super(detail);
-    this.name = "ActivationFailure";
-    this.reason = { detail, fix };
-  }
-}
-
-export function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import type { Manifest } from "../core/values.js";
+import { ActivationFailure, messageOf } from "../host/activation-failure.js";
+import type { Plugin } from "../host/model.js";
+import type { DiscoveredPlugin } from "./answers.js";
+import { identifiedManifest } from "./standard.js";
 
 function isPlugin(value: unknown): value is Plugin {
   return typeof value === "object" && value !== null && typeof (value as Partial<Plugin>).activate === "function";
@@ -37,8 +25,10 @@ function uniqueUrlOf(entryPath: string): string {
 /**
  * Imports the entry the standard resolved for a plugin and answers its default export. An entry the standard did not
  * find present, a regular file reached through no link, is never imported.
+ *
+ * @throws ActivationFailure saying why the entry cannot be activated.
  */
-export async function importPlugin(entryPath: string | null, entryPresent: boolean): Promise<Plugin> {
+async function importPlugin(entryPath: string | null, entryPresent: boolean): Promise<Plugin> {
   if (entryPath === null) {
     throw new ActivationFailure("its manifest names no entry", 'name the plugin\'s entry module in its manifest\'s "entry"');
   }
@@ -63,6 +53,33 @@ export async function importPlugin(entryPath: string | null, entryPresent: boole
   return entry.default;
 }
 
-export function activateThrew(error: unknown): ActivationFailure {
-  return new ActivationFailure(`its activate threw: ${messageOf(error)}`, "make the plugin's activate return without throwing");
+/**
+ * The entry of a plugin laid out on disk: its activate imports the module the standard resolved and calls that
+ * module's activate; its deactivate calls the module's, once one was imported.
+ */
+export function entryOnDisk(entryPath: string | null, entryPresent: boolean): Plugin {
+  let imported: Plugin | undefined;
+  return {
+    async activate(context) {
+      imported = await importPlugin(entryPath, entryPresent);
+      await imported.activate(context);
+    },
+    deactivate() {
+      return imported?.deactivate?.();
+    },
+  };
+}
+
+/** What the host registers for a plugin the standard discovered: its manifest, and an entry. */
+export interface PluginRegistration {
+  readonly manifest: Manifest;
+  readonly entry: Plugin;
+}
+
+/**
+ * The manifest and entry a discovered plugin is registered with: the standard's manifest carrying the identity file's
+ * id when there is one, and the entry on disk.
+ */
+export function registrationOf(discovered: DiscoveredPlugin): PluginRegistration {
+  return { manifest: identifiedManifest(discovered), entry: entryOnDisk(discovered.entryPath, discovered.entryPresent) };
 }

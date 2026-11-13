@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { readLayerVector, witnessLayerVector, type LayerVector } from "../../src/conformance/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
-import { standardLibraryPath } from "../real-standard.ts";
 import { layerVectorDirectory } from "./kit.ts";
 
-const options = { coreLibraryPath, standardLibraryPath };
+const options = { coreLibraryPath };
 
 function kitVector(id: string): LayerVector {
   return readLayerVector(layerVectorDirectory, id);
@@ -17,7 +17,22 @@ function withThen(vector: LayerVector, then: Record<string, unknown>): LayerVect
 const consumeId = "consume/a-throwing-listener-does-not-silence-the-others";
 const wantId = "want/a-registration-at-the-deadline-loses";
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, mkdtempSync: vi.fn(actual.mkdtempSync), writeFileSync: vi.fn(actual.writeFileSync) };
+});
+
 describe("the layer driver", () => {
+  it("registers each vector's plugins as manifest values, writing no file", async () => {
+    vi.mocked(mkdtempSync).mockClear();
+    vi.mocked(writeFileSync).mockClear();
+
+    await witnessLayerVector(kitVector(consumeId), options);
+
+    expect(vi.mocked(mkdtempSync)).not.toHaveBeenCalled();
+    expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+  });
+
   it("fails a then field it does not witness", async () => {
     await expect(witnessLayerVector(withThen(kitVector(consumeId), { echoed: { equals: [] } }), options)).rejects.toThrow(
       /then\.echoed, which this driver does not witness/,

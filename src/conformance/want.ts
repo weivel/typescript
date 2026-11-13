@@ -2,7 +2,7 @@ import { RefusalError } from "../context/index.js";
 import { refuseUnknownKeys, type Observer } from "./expectations.js";
 import { kitRefusal, type KitRefusal } from "./refusals.js";
 import type { LayerVector } from "./vectors.js";
-import { settled, type DriverWorld } from "./world.js";
+import { inertEntry, settled, type DriverWorld } from "./world.js";
 
 interface WantGiven {
   readonly service: { readonly id: string };
@@ -55,9 +55,9 @@ function followWant(want: Promise<unknown>, world: DriverWorld): WantOutcome {
 export async function driveWant(vector: LayerVector, world: DriverWorld): Promise<Record<string, Observer>> {
   const given = checkGiven(vector);
   const id = given.service.id;
-  world.discover([
-    { importName: consumerName, services: { consumes: [id] } },
-    { importName: providerName, services: { provides: [id] }, entry: `${providerName}.ts` },
+  world.register([
+    { manifest: { importName: consumerName, api: 1, services: { consumes: [{ id }] } }, entry: inertEntry },
+    { manifest: { importName: providerName, api: 1, services: { provides: [{ id }] }, entry: `${providerName}.ts` }, entry: inertEntry },
   ]);
   const consumer = world.open(consumerName);
   const provider = world.open(providerName);
