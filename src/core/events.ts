@@ -76,6 +76,12 @@ export interface CapabilityEvent {
   readonly change: CapabilityChange;
 }
 
+/** The core's earliest deadline changed: `at` is the deadline to arm, or undefined when nothing waits on time. */
+export interface DeadlineEvent {
+  readonly kind: "deadline";
+  readonly at: number | undefined;
+}
+
 /** One drained event as a plain value: nothing in it points into the core. */
 export type CoreEvent =
   | LogEvent
@@ -85,7 +91,8 @@ export type CoreEvent =
   | RevokedEvent
   | ReachRefusedEvent
   | CapacityWantedEvent
-  | CapabilityEvent;
+  | CapabilityEvent
+  | DeadlineEvent;
 
 type PayloadReader = (event: object, payloadOffset: number) => CoreEvent;
 
@@ -163,6 +170,11 @@ function readCapability(event: object, payloadOffset: number): CapabilityEvent {
   };
 }
 
+function readDeadline(event: object, payloadOffset: number): DeadlineEvent {
+  const deadline = decodeStruct(event, payloadOffset, "weivel_deadline_event");
+  return { kind: "deadline", at: deadline.set === 1 ? Number(deadline.at) : undefined };
+}
+
 const payloadReaders = new Map<number, PayloadReader>([
   [EventKind.Log, readLog],
   [EventKind.Refusal, readRefused],
@@ -172,6 +184,7 @@ const payloadReaders = new Map<number, PayloadReader>([
   [EventKind.ReachRefused, readReachRefused],
   [EventKind.CapacityWanted, readCapacityWanted],
   [EventKind.Capability, readCapability],
+  [EventKind.Deadline, readDeadline],
 ]);
 
 export function eventKindAt(event: object): number {

@@ -16,7 +16,7 @@ import {
 } from "./answers.js";
 import { Status, type EdgeSource, type HandleCondition } from "./constants.js";
 import { bindCoreFunctions, coreStructs, type CoreFunctions, type CoreStructName } from "./declarations.js";
-import { copyEvent, type CoreEvent } from "./events.js";
+import { copyEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
 import { allocateSized, toBigInt } from "./memory.js";
 import {
@@ -48,10 +48,12 @@ export type EventDispatcher = (event: CoreEvent) => void;
 export type DrainListener = () => void;
 
 /**
- * Called once an outermost call has settled when it, or a call made while its events were dispatched, could have
- * moved the core's next deadline.
+ * Told of each WEIVEL_EVENT_DEADLINE as the wrapper drains it, before any event is dispatched: the deadline to arm,
+ * or undefined to disarm.
+ *
+ * @implNote Read at drain time and not at dispatch, because a dispatch can run after a newer announcement was drained.
  */
-export type DeadlineListener = () => void;
+export type DeadlineReader = (deadline: number | undefined) => void;
 
 /**
  * Receives what a dispatcher, a drain listener or a timer-driven call threw, with the event being dispatched when
@@ -177,9 +179,10 @@ function allocateZeroed(name: CoreStructName): object {
 /**
  * One core, every call to which goes through one function that makes the call and then drains the event queue.
  *
- * @remarks Events are copied and released as they are drained, then dispatched after the whole queue is empty, so a
- * call the dispatcher makes drains its own events, which are dispatched after the event being dispatched. The
- * dispatcher is therefore never re-entered and sees every event in the core's order.
+ * @remarks Events are copied and released as they are drained, then dispatched first in, first out once the whole
+ * queue is empty. A call the dispatcher makes drains its own events onto the end of what is already drained, so they
+ * are dispatched after every event drained before them. The dispatcher is therefore never re-entered and sees every
+ * event in the core's order.
  */
 export class Core {
   readonly #functions: CoreFunctions;
@@ -187,9 +190,8 @@ export class Core {
   #core: object | null;
   #dispatcher: EventDispatcher | undefined;
   readonly #drainListeners = new Set<DrainListener>();
-  readonly #deadlineListeners = new Set<DeadlineListener>();
+  #deadlineReader: DeadlineReader | undefined;
   readonly #pending = new Uint32Array(1);
-  #deadlineMayHaveMoved = false;
   readonly #undispatched: CoreEvent[] = [];
   #settling = false;
   readonly #onListenerError: ListenerErrorSink;
@@ -220,10 +222,9 @@ export class Core {
     return () => this.#drainListeners.delete(listener);
   }
 
-  /** Adds a listener told when the core's next deadline may have moved; the answer removes it. */
-  addDeadlineListener(listener: DeadlineListener): () => void {
-    this.#deadlineListeners.add(listener);
-    return () => this.#deadlineListeners.delete(listener);
+  /** Sets the one reader told of every deadline announcement at drain time; undefined removes it. */
+  setDeadlineReader(reader: DeadlineReader | undefined): void {
+    this.#deadlineReader = reader;
   }
 
   get destroyed(): boolean {
@@ -248,7 +249,6 @@ export class Core {
   }
 
   advance(now: number): CallResult<undefined> {
-    this.#deadlineMayHaveMoved = true;
     return this.#invoke((core, pending) => this.#functions.weivel_advance(core, now, pending));
   }
 
@@ -289,12 +289,10 @@ export class Core {
   }
 
   releasePlugin(plugin: bigint): CallResult<undefined> {
-    this.#deadlineMayHaveMoved = true;
     return this.#invoke((core, pending) => this.#functions.weivel_release_plugin(core, plugin, pending));
   }
 
   quarantinePlugin(plugin: bigint, reason?: QuarantineReason): CallResult<undefined> {
-    this.#deadlineMayHaveMoved = true;
     const encoded = reason === undefined ? null : encodeQuarantineReason(reason);
     return this.#invoke((core, pending) => this.#functions.weivel_quarantine_plugin(core, plugin, encoded, pending));
   }
@@ -304,12 +302,10 @@ export class Core {
   }
 
   registerService(owner: bigint, id: string): CallResult<bigint> {
-    this.#deadlineMayHaveMoved = true;
     return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
   }
 
   unregister(handle: bigint): CallResult<undefined> {
-    this.#deadlineMayHaveMoved = true;
     return this.#invoke((core, pending) => this.#functions.weivel_unregister(core, handle, pending));
   }
 
@@ -326,7 +322,6 @@ export class Core {
   }
 
   wantService(plugin: bigint, id: string, options?: WantOptions): CallResult<bigint> {
-    this.#deadlineMayHaveMoved = true;
     const encoded = options === undefined ? null : encodeWantOptions(options);
     return this.#invokeForHandle((core, handle, pending) =>
       this.#functions.weivel_want_service(core, plugin, id, encoded, handle, pending),
@@ -334,7 +329,6 @@ export class Core {
   }
 
   reportCapacity(want: bigint, registration: bigint, answer: CapacityAnswer, now: number): CallResult<undefined> {
-    this.#deadlineMayHaveMoved = true;
     const encoded = encodeCapacity(answer);
     return this.#invoke((core, pending) => this.#functions.weivel_report_capacity(core, want, registration, encoded, now, pending));
   }
@@ -454,13 +448,29 @@ export class Core {
         core,
         this.#event,
         events,
-        copyEvent,
+        (event) => this.#copyAndReadDeadline(event),
         (error, event) => this.reportListenerError(error, event),
         pending,
       );
     } finally {
       this.#undispatched.push(...events);
       this.#settle();
+    }
+  }
+
+  #copyAndReadDeadline(eventBuffer: object): CoreEvent | undefined {
+    const event = copyEvent(eventBuffer);
+    if (event?.kind === "deadline") {
+      this.#readDeadline(event);
+    }
+    return event;
+  }
+
+  #readDeadline(event: DeadlineEvent): void {
+    try {
+      this.#deadlineReader?.(event.at);
+    } catch (error) {
+      this.reportListenerError(error, event);
     }
   }
 
@@ -484,10 +494,6 @@ export class Core {
     } finally {
       this.#settling = false;
     }
-    if (this.#deadlineMayHaveMoved) {
-      this.#deadlineMayHaveMoved = false;
-      this.#notify(this.#deadlineListeners);
-    }
   }
 
   #dispatchUndispatched(): void {
@@ -501,11 +507,7 @@ export class Core {
   }
 
   #notifyDrainListeners(): void {
-    this.#notify(this.#drainListeners);
-  }
-
-  #notify(listeners: ReadonlySet<() => void>): void {
-    for (const listener of [...listeners]) {
+    for (const listener of [...this.#drainListeners]) {
       try {
         listener();
       } catch (error) {

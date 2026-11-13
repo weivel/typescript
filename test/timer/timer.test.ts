@@ -84,7 +84,7 @@ describe("the core timer", () => {
     clock.current = 1250;
     scheduler.fireNext();
 
-    expect(dispatched.at(-1)).toMatchObject({ kind: "want-settled", want, refusal: { code: RefusalCode.TimedOut } });
+    expect(dispatched.filter((event) => event.kind === "want-settled").at(-1)).toMatchObject({ kind: "want-settled", want, refusal: { code: RefusalCode.TimedOut } });
     expect(timer.armedDeadline).toBeUndefined();
     expect(scheduler.live()).toEqual([]);
   });
@@ -137,7 +137,7 @@ afterEach(() => {
   }
 });
 
-/** A real core whose every weivel_next_deadline is counted: each one is a re-arm of the timer. */
+/** A real core whose every weivel_next_deadline is counted: the timer must never ask it. */
 function deadlineCountingCore(): { core: Core; deadlineQuestions: () => number } {
   const library = loadCoreLibrary(coreLibraryPath);
   let questions = 0;
@@ -158,39 +158,95 @@ function provider(core: Core): bigint {
 }
 
 describe("re-arming", () => {
-  it("asks the core for its deadline only after a call that could have moved it", () => {
+  it("arms from the core's announcements alone, never asking the core for its deadline", () => {
     const { core, deadlineQuestions } = deadlineCountingCore();
     const clock = new FakeClock();
-    const timer = new CoreTimer(core, { clock, scheduler: new FakeScheduler() });
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
     const beta = waitingConsumer(core);
-    const before = deadlineQuestions();
 
-    core.ledger();
-    core.getService(beta, "alpha:greeting");
-    core.watchService(beta, "alpha:greeting");
-    const afterQuietCalls = deadlineQuestions();
     timedWant(core, beta, clock, 250);
+    clock.current = 1250;
+    scheduler.fireNext();
 
-    expect(afterQuietCalls).toBe(before);
-    expect(deadlineQuestions()).toBe(before + 1);
-    expect(timer.armedDeadline).toBe(1250);
+    expect(deadlineQuestions()).toBe(0);
+    expect(timer.armedDeadline).toBeUndefined();
   });
 
-  it("asks once per outermost call, however many deadline-moving calls its events lead to", () => {
-    const { core, deadlineQuestions } = deadlineCountingCore();
+  it("is armed by the time the events of the call that moved the deadline are dispatched", () => {
+    const { core, dispatched } = createRecordedCore();
     const clock = new FakeClock();
     const timer = new CoreTimer(core, { clock, scheduler: new FakeScheduler() });
-    const beta = waitingConsumer(core);
-    core.setDispatcher(() => {
-      timedWant(core, beta, clock, 100);
-      timedWant(core, beta, clock, 300);
+    const alpha = provider(core);
+    const want = timedWant(core, waitingConsumer(core), clock, 250);
+    const armedAtDispatch: (number | undefined)[] = [];
+    core.setDispatcher((event) => {
+      dispatched.push(event);
+      if (event.kind === "want-settled") {
+        armedAtDispatch.push(timer.armedDeadline);
+      }
     });
-    const before = deadlineQuestions();
+
+    core.registerService(alpha, "alpha:greeting");
+
+    expect(dispatched.at(-1)).toMatchObject({ kind: "deadline", at: undefined });
+    expect(dispatched.find((event) => event.kind === "want-settled")).toMatchObject({ want });
+    expect(armedAtDispatch).toEqual([undefined]);
+  });
+
+  it("arms for the latest announcement when calls made during a dispatch move the deadline", () => {
+    const { core } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
+    const beta = waitingConsumer(core);
+    let asked = false;
+    core.setDispatcher(() => {
+      if (!asked) {
+        asked = true;
+        timedWant(core, beta, clock, 300);
+        timedWant(core, beta, clock, 100);
+      }
+    });
 
     core.registerService(HOST, "");
 
-    expect(deadlineQuestions()).toBe(before + 1);
     expect(timer.armedDeadline).toBe(1100);
+    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([100]);
+  });
+
+  it("waits again when its longest wait ends before the deadline, never advancing the core early", () => {
+    const { core, dispatched } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
+    const farAway = 3_000_000_000;
+    timedWant(core, waitingConsumer(core), clock, farAway);
+
+    clock.current = 1000 + 2_147_483_647;
+    scheduler.fireNext();
+
+    expect(timer.armedDeadline).toBe(1000 + farAway);
+    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([farAway - 2_147_483_647]);
+    expect(dispatched.some((event) => event.kind === "want-settled")).toBe(false);
+  });
+
+  it("tells its move listener of every arm and disarm, in the order the core announced them", () => {
+    const { core } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    const moves: (number | undefined)[] = [];
+    new CoreTimer(core, { clock, scheduler, onMove: (deadline) => moves.push(deadline) });
+    const beta = waitingConsumer(core);
+    timedWant(core, beta, clock, 500);
+    timedWant(core, beta, clock, 250);
+
+    clock.current = 1250;
+    scheduler.fireNext();
+    clock.current = 1500;
+    scheduler.fireNext();
+
+    expect(moves).toEqual([1500, 1250, 1500, undefined]);
   });
 
   const endingCalls: Record<string, (core: Core, plugins: { readonly alpha: bigint; readonly beta: bigint; readonly want: bigint }) => void> = {
@@ -244,7 +300,7 @@ describe("re-arming", () => {
     }
 
     expect(armedWhileAsking).toBe(1100);
-    expect(dispatched.at(-1)).toMatchObject({ kind: "want-settled", want, implementation: registration });
+    expect(dispatched.filter((event) => event.kind === "want-settled").at(-1)).toMatchObject({ kind: "want-settled", want, implementation: registration });
     expect(timer.armedDeadline).toBeUndefined();
   });
 
