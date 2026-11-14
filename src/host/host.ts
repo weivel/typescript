@@ -1,4 +1,4 @@
-import { createCore, Status, type Core, type CoreEvent, type Manifest, type QuarantineReason, type ReachRefusedEvent, type Refusal } from "../core/index.js";
+import { createCore, PluginStatus, Status, type CallResult, type Core, type CoreEvent, type Manifest, type QuarantineReason, type ReachRefusedEvent, type Refusal } from "../core/index.js";
 import {
   consoleLogger,
   failureOf,
@@ -141,10 +141,15 @@ export class Host {
     if (this.#destroyed) {
       return hostDestroyed;
     }
-    const registered = this.core.registerManifest(manifest);
+    const registered = this.core.holdDispatch(() => {
+      const answer = this.core.registerManifest(manifest);
+      if (answer.status === Status.Ok && answer.value !== undefined) {
+        const hosted = { plugin: answer.value, manifest, entry };
+        this.#plugins.add(answer.value, { hosted, activated: false, settleOutcome: undefined, release: undefined });
+      }
+      return answer;
+    });
     if (registered.status === Status.Ok && registered.value !== undefined) {
-      const hosted = { plugin: registered.value, manifest, entry };
-      this.#plugins.add(registered.value, { hosted, activated: false, settleOutcome: undefined, release: undefined });
       return { plugin: registered.value, refusal: undefined };
     }
     const failure = failureOf("weivel_register_manifest", registered);
@@ -297,11 +302,40 @@ export class Host {
     return this.#open(this.#record(plugin));
   }
 
+  /**
+   * Builds the plugin's context, then opens it, the host's record of it as opened made before any event of the open
+   * is dispatched.
+   *
+   * @implNote An open that throws may have reached the core or not; the ledger says whether the core holds the plugin
+   * open, and only then is it kept as opened, for the release that follows.
+   */
   #open(record: PluginRecord): PluginContext {
     const plugin = record.hosted.plugin;
-    succeeded("weivel_open_plugin", this.core.openPlugin(plugin, plugin));
-    this.#opened.push(record);
-    return this.contexts.create(plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
+    const context = this.contexts.create(plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
+    try {
+      succeeded("weivel_open_plugin", this.core.holdDispatch(() => this.#openInCore(record)));
+    } catch (error) {
+      this.#keepIfHeldOpen(record);
+      throw error;
+    }
+    return context;
+  }
+
+  #openInCore(record: PluginRecord): CallResult<undefined> {
+    const opened = this.core.openPlugin(record.hosted.plugin, record.hosted.plugin);
+    if (opened.status === Status.Ok) {
+      this.#opened.push(record);
+    }
+    return opened;
+  }
+
+  #keepIfHeldOpen(record: PluginRecord): void {
+    const plugin = record.hosted.plugin;
+    if (this.core.ledgerEntry(plugin).value?.status !== PluginStatus.Active) {
+      this.contexts.forget(plugin);
+    } else if (!this.#opened.includes(record)) {
+      this.#opened.push(record);
+    }
   }
 
   #pluginLog(manifest: Manifest): Logger {

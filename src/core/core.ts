@@ -247,6 +247,8 @@ export class Core {
   readonly #pending = new Uint32Array(1);
   readonly #undispatched: (CoreEvent | DeferredStep)[] = [];
   #settling = false;
+  #drainedCount = 0;
+  readonly #sequences = new WeakMap<CoreEvent, number>();
   readonly #onListenerError: ListenerErrorSink;
 
   constructor(
@@ -281,6 +283,34 @@ export class Core {
 
   setDispatcher(dispatcher: EventDispatcher | undefined): void {
     this.#dispatcher = dispatcher;
+  }
+
+  /** How many events this core's wrapper has drained so far; each event's sequence is its place in that count. */
+  get drainedCount(): number {
+    return this.#drainedCount;
+  }
+
+  /** The place of a drained event in the order this core's events were drained, counted from 1. */
+  sequenceOf(event: CoreEvent): number | undefined {
+    return this.#sequences.get(event);
+  }
+
+  /**
+   * Runs `step`, holding back the dispatch of every event drained meanwhile until it returns, so what `step` records
+   * of a call's answer is in place before any event that call queued is dispatched. Inside a dispatch they wait
+   * behind it already.
+   */
+  holdDispatch<Value>(step: () => Value): Value {
+    if (this.#settling) {
+      return step();
+    }
+    this.#settling = true;
+    try {
+      return step();
+    } finally {
+      this.#settling = false;
+      this.#settle();
+    }
   }
 
   /** Adds a listener told after every drain; the answer removes it. */
@@ -583,8 +613,16 @@ export class Core {
         pending,
       );
     } finally {
+      this.#number(events);
       this.#undispatched.push(...events);
       this.#settle();
+    }
+  }
+
+  #number(events: readonly CoreEvent[]): void {
+    for (const event of events) {
+      this.#drainedCount += 1;
+      this.#sequences.set(event, this.#drainedCount);
     }
   }
 

@@ -1,7 +1,7 @@
 import { Choice, HandleCondition, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
 import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, WantOptions } from "./model.js";
-import { failureOf } from "./refusal.js";
-import type { ContextState } from "./state.js";
+import { DetachedError, failureOf } from "./refusal.js";
+import { ensureAttached, type Attachment, type ContextState } from "./state.js";
 
 function encodeWant(options: WantOptions, now: number): CoreWantOptions {
   return {
@@ -112,20 +112,32 @@ function want(state: ContextState, plugin: bigint, id: string, options: WantOpti
   });
 }
 
-export function createServices(state: ContextState, plugin: bigint): Services {
+/** The services of a context; a call through a detached one throws, or rejects, DetachedError and reaches nothing. */
+export function createServices(state: ContextState, attachment: Attachment): Services {
+  const plugin = attachment.plugin;
   return {
-    get: <Service>(type: ServiceType<Service>) => get(state, plugin, type.id) as Service | undefined,
-    ids: () => state.call(() => state.core.serviceIds(plugin)).value ?? [],
-    register: <Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}) =>
-      registerService(state, plugin, type.id, service, options.capacity),
+    get: <Service>(type: ServiceType<Service>) => {
+      ensureAttached(attachment);
+      return get(state, plugin, type.id) as Service | undefined;
+    },
+    ids: () => {
+      ensureAttached(attachment);
+      return state.call(() => state.core.serviceIds(plugin)).value ?? [];
+    },
+    register: <Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}) => {
+      ensureAttached(attachment);
+      return registerService(state, plugin, type.id, service, options.capacity);
+    },
     want: <Service>(type: ServiceType<Service>, options: WantOptions = {}) =>
-      want(state, plugin, type.id, options) as Promise<Service>,
-    watch: <Service>(type: ServiceType<Service>, listener: ServiceListener<Service>) =>
-      startWatching(
+      attachment.detached ? Promise.reject(new DetachedError(plugin)) : (want(state, plugin, type.id, options) as Promise<Service>),
+    watch: <Service>(type: ServiceType<Service>, listener: ServiceListener<Service>) => {
+      ensureAttached(attachment);
+      return startWatching(
         state,
         plugin,
         () => state.core.watchService(plugin, type.id),
         listener as (implementation: unknown, change: string) => void,
-      ),
+      );
+    },
   };
 }

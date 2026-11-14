@@ -1,5 +1,5 @@
 export { PluginContexts, consoleLogger, type PluginContextsOptions } from "./contexts.js";
-export { RefusalError, failureOf } from "./refusal.js";
+export { DetachedError, RefusalError, failureOf } from "./refusal.js";
 export type {
   Capabilities,
   CapabilityType,

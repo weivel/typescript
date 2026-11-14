@@ -6,11 +6,15 @@ import type { LayerVector } from "./vectors.js";
 import { wantCoreOptions, driveWant } from "./want.js";
 import { DriverWorld, type DriverLogEntry, type DriverOptions } from "./world.js";
 
-/** What the driver saw of one vector: `observed` in the shape of the vector's `then`, and every log written. */
+/**
+ * What the driver saw of one vector: `observed` in the shape of the vector's `then`, every log written, and what
+ * reached the host's error sink.
+ */
 export interface LayerWitness {
   readonly id: string;
   readonly observed: Record<string, unknown>;
   readonly logs: readonly DriverLogEntry[];
+  readonly sunk: readonly unknown[];
 }
 
 interface OpDriver {
@@ -39,7 +43,7 @@ export async function witnessLayerVector(vector: LayerVector, options: DriverOpt
   const world = new DriverWorld(options, opDriver.coreOptions(vector), opDriver.edgeSource(vector));
   try {
     const observers = await opDriver.drive(vector, world);
-    return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: [...world.logs] };
+    return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: [...world.logs], sunk: [...world.sunk] };
   } finally {
     await world.close(options);
   }

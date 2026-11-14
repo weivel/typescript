@@ -3,6 +3,20 @@ import { HandleTable, HoldingTable } from "../handles/index.js";
 import type { Clock } from "../timer/index.js";
 import { DeferredEvents } from "./deferred-events.js";
 import type { CapacityProvider, Logger, PluginEvent, PluginEventListener } from "./model.js";
+import { DetachedError } from "./refusal.js";
+
+/** Whether a plugin's context still reaches the core: detached once the core has forgotten the plugin. */
+export interface Attachment {
+  readonly plugin: bigint;
+  detached: boolean;
+}
+
+/** Throws DetachedError for a call through a detached context, decided as the call is made. */
+export function ensureAttached(attachment: Attachment): void {
+  if (attachment.detached) {
+    throw new DetachedError(attachment.plugin);
+  }
+}
 
 /** An object a plugin or the host offered, by the handle the core answered for it. */
 export interface Offered {
@@ -37,6 +51,9 @@ export interface PluginState {
   readonly eventListeners: Set<PluginEventListener>;
   /** Every live handle the core answered this plugin, so forgetting it drops each from the tables. */
   readonly handles: Set<bigint>;
+  readonly attachment: Attachment;
+  /** How many events the core had drained when the context was made; none of those ever reaches it. */
+  readonly madeAfter: number;
 }
 
 /** The tables every context of one core shares, and the calls through which they change. */
@@ -122,13 +139,20 @@ export class ContextState {
     }
   }
 
-  /** Calls a plugin's listener; a throw is the plugin's own fault, logged on its log and never passed on. */
-  notify(plugin: bigint, listener: () => void): void {
+  /** Calls a plugin's listener; a throw goes to the error sink and never further, so the others still hear. */
+  notify(listener: () => void, event?: CoreEvent): void {
     try {
       listener();
     } catch (error) {
-      this.logOf(plugin).error("A listener threw; the others still hear every change.", error);
+      this.core.reportListenerError(error, event);
     }
+  }
+
+  /** Whether `event` was drained before the context of `plugin` was made, so it must never reach that context. */
+  precedesContextOf(plugin: bigint, event: CoreEvent): boolean {
+    const sequence = this.core.sequenceOf(event);
+    const state = this.plugins.get(plugin);
+    return sequence !== undefined && state !== undefined && sequence <= state.madeAfter;
   }
 
   emit(plugin: bigint, event: PluginEvent): void {
@@ -137,7 +161,7 @@ export class ContextState {
       return;
     }
     for (const listener of [...state.eventListeners]) {
-      this.notify(plugin, () => listener(event));
+      this.notify(() => listener(event));
     }
   }
 

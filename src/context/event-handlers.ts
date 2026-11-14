@@ -44,10 +44,10 @@ function hearService(state: ContextState, event: WatchEvent): void {
     const offered = state.services.lookup(event.implementation);
     if (offered !== undefined) {
       state.hold(event.plugin, event.implementation, ReachKind.Service, offered);
-      state.notify(event.plugin, () => watching.listener(offered.object, "register"));
+      state.notify(() => watching.listener(offered.object, "register"), event);
     }
   } else if (event.change === Change.Unregistered) {
-    state.notify(event.plugin, () => watching.listener(undefined, "unregister"));
+    state.notify(() => watching.listener(undefined, "unregister"), event);
   }
 }
 
@@ -59,9 +59,9 @@ function hearCapability(state: ContextState, event: CapabilityEvent): void {
   }
   if (event.change === CapabilityChange.Provided) {
     state.hold(event.plugin, event.implementation, ReachKind.Capability, offered);
-    state.notify(event.plugin, () => watching.listener(offered.object, "provide"));
+    state.notify(() => watching.listener(offered.object, "provide"), event);
   } else if (event.change === CapabilityChange.Withdrawn) {
-    state.notify(event.plugin, () => watching.listener(offered.object, "withdraw"));
+    state.notify(() => watching.listener(offered.object, "withdraw"), event);
   }
 }
 
@@ -77,8 +77,15 @@ function reportReachRefused(state: ContextState, event: ReachRefusedEvent): void
   state.emit(event.plugin, { kind: "reach-refused", reach: event.reachKind, id: event.id, refusal: event.refusal });
 }
 
-/** Acts on one event the core reported; a log or a refusal belongs to the host, which hears every event itself. */
+/**
+ * Acts on one event the core reported; a log or a refusal belongs to the host, which hears every event itself. An
+ * event drained before the context of the plugin it names was made is left alone, since the handle may then have
+ * stood for another plugin; a capacity question names its consumer, and is answered by the registration's owner.
+ */
 export function handleEvent(state: ContextState, event: CoreEvent): void {
+  if ("plugin" in event && event.kind !== "capacity-wanted" && state.precedesContextOf(event.plugin, event)) {
+    return;
+  }
   switch (event.kind) {
     case "want-settled":
       settleWant(state, event);
