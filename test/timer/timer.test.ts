@@ -413,6 +413,21 @@ describe("a call made once the clock has reached the armed deadline", () => {
     expect(timer.armedDeadline).toBeUndefined();
   });
 
+  it("hands the core the time first when the clock reads the deadline exactly, so a registration then loses", () => {
+    const { core, dispatched } = advanceCountingCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    new CoreTimer(core, { clock, scheduler });
+    const want = timedWant(core, waitingConsumer(core), clock, 250);
+    const alpha = provider(core);
+    clock.current = 1250;
+
+    core.registerService(alpha, "alpha:greeting");
+
+    expect(dispatched.filter((event) => event.kind === "want-settled" && event.want === want)).toMatchObject([{ refusal: { code: RefusalCode.TimedOut } }]);
+    expect(scheduler.scheduled.some((entry) => entry.fired)).toBe(false);
+  });
+
   it("never checks the advance it makes, so a timer firing at the deadline reaches the core once", () => {
     const { core, advances } = advanceCountingCore();
     const clock = new FakeClock();

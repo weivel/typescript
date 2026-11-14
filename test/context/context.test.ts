@@ -44,7 +44,7 @@ describe("services.get", () => {
     expect(beta.context.services.get(key)?.greet("beta")).toBe("hello beta");
   });
 
-  it("answers nothing for an id the plugin does not reach, and reports the refusal on its events", () => {
+  it("throws the core's refusal for an id the plugin does not reach, and reports the refusal on its events too", () => {
     const world = createWorld();
     const alpha = world.open(provider);
     alpha.context.services.register(alpha.context.service(greetingId), greeting());
@@ -52,7 +52,9 @@ describe("services.get", () => {
     const heard: PluginEvent[] = [];
     gamma.context.events.listen((event) => heard.push(event));
 
-    expect(gamma.context.services.get(gamma.context.service(greetingId))).toBeUndefined();
+    expect(() => gamma.context.services.get(gamma.context.service(greetingId))).toThrow(
+      expect.objectContaining({ name: "RefusalError", code: RefusalCode.Undeclared }),
+    );
 
     expect(heard).toHaveLength(1);
     expect(heard[0]).toMatchObject({ kind: "reach-refused", reach: ReachKind.Service, id: greetingId });
@@ -217,6 +219,88 @@ describe("a host service", () => {
     expect(beta.context.services.get(beta.context.service("weivel.config"))).toBe(config);
     unregister();
     expect(beta.context.services.get(beta.context.service("weivel.config"))).toBeUndefined();
+  });
+});
+
+/** A context whose plugin is registered and was never opened, so the core refuses every call it makes. */
+function neverOpened(world: ReturnType<typeof createWorld>) {
+  const plugin = world.core.registerManifest({ importName: "idle", services: { consumes: [{ id: greetingId }] }, capabilities: { consumes: ["screens"] } }).value!;
+  return world.contexts.create(plugin, { importName: "idle" }, recordingLogger().logger);
+}
+
+describe("a call the core refuses", () => {
+  it("is answered with the refusal, by ids, watch, all and a capability watch alike", () => {
+    const world = createWorld();
+    const idle = neverOpened(world);
+    const unreached = world.open(consumer("gamma", "gamma:other"));
+
+    const answers = [
+      () => idle.services.ids(),
+      () => unreached.context.services.watch(unreached.context.service(greetingId), () => {}),
+      () => unreached.context.capabilities.all(unreached.context.capability("screens")),
+      () => unreached.context.capabilities.watch(unreached.context.capability("widgets"), () => {}),
+    ].map((call) => {
+      try {
+        return call();
+      } catch (error) {
+        return error;
+      }
+    });
+
+    expect(answers.map((answer) => answer instanceof RefusalError)).toEqual([true, true, true, true]);
+  });
+});
+
+describe("the clock", () => {
+  it("is read for a want only when it has a timeout, a budget or a poll interval", () => {
+    const world = createWorld();
+    const beta = world.open(consumer("beta"));
+    const key = beta.context.service<Greeting>(greetingId);
+    const reads = vi.spyOn(world.clock, "now");
+
+    void beta.context.services.want(key).catch(() => undefined);
+    const readsWithoutTime = reads.mock.calls.length;
+    for (const options of [{ timeoutMillis: 100 }, { budgetMillis: 100 }, { pollMillis: 10 }]) {
+      void beta.context.services.want(key, options).catch(() => undefined);
+    }
+
+    expect(readsWithoutTime).toBe(0);
+    expect(reads).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("a plugin event listener that throws", () => {
+  it("is reported to the error sink and the next listener still hears the event", () => {
+    const world = createWorld();
+    const gamma = world.open(consumer("gamma", "gamma:other"));
+    const failure = new Error("event listener failed");
+    const heard: PluginEvent[] = [];
+    gamma.context.events.listen(() => {
+      throw failure;
+    });
+    gamma.context.events.listen((event) => heard.push(event));
+
+    expect(() => gamma.context.services.get(gamma.context.service(greetingId))).toThrow(RefusalError);
+
+    expect(heard.map((event) => event.kind)).toEqual(["reach-refused"]);
+    expect(world.sunk.map((sunk) => sunk.error)).toEqual([failure]);
+  });
+});
+
+describe("a want the core settles with a registration the layer holds no object for", () => {
+  it("is rejected with no refusal, and the layer's defect is reported to the error sink", async () => {
+    const world = createWorld();
+    const beta = world.open(consumer("beta"));
+    const wanted = track(beta.context.services.want(beta.context.service(greetingId)));
+    const alpha = openPlugin(world.core, provider);
+
+    world.core.registerService(alpha, greetingId);
+    await settle();
+
+    expect(wanted.settled).toBe(true);
+    expect(wanted.reason).toBeInstanceOf(Error);
+    expect(wanted.reason).not.toBeInstanceOf(RefusalError);
+    expect(world.sunk.map((sunk) => sunk.error)).toEqual([wanted.reason]);
   });
 });
 

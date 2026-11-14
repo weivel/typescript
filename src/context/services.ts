@@ -14,6 +14,14 @@ function encodeWant(options: WantOptions, now: number): CoreWantOptions {
   };
 }
 
+/**
+ * Whether the core reads the want's `now`: for a timeout, and for a constrained want, which needs a poll interval and
+ * may have a budget. Only then is the clock read.
+ */
+function needsTheTime(options: WantOptions): boolean {
+  return options.timeoutMillis !== undefined || options.budgetMillis !== undefined || options.pollMillis !== undefined;
+}
+
 function answered(result: CallResult<bigint>): bigint | undefined {
   return result.status === Status.Ok ? result.value : undefined;
 }
@@ -65,40 +73,63 @@ export function stopWatching(state: ContextState, watch: bigint): void {
   });
 }
 
-/** Records a watch the core answered, or answers an inert one when it refused. */
+/**
+ * Records a watch the core answered, answering its disposer.
+ *
+ * @throws RefusalError, or the status alone where the core queued no refusal, when the core refused the watch.
+ */
 export function startWatching(
   state: ContextState,
   plugin: bigint,
+  call: string,
   watch: () => CallResult<bigint>,
   listener: (implementation: unknown, change: string) => void,
 ): () => void {
-  const watchHandle = state.call(() => {
-    const handle = answered(watch());
+  const result = state.call(() => {
+    const watched = watch();
+    const handle = answered(watched);
     if (handle !== undefined) {
       state.watches.add(handle, { plugin, listener });
       state.rememberHandle(plugin, handle);
     }
-    return handle;
+    return watched;
   });
-  return watchHandle === undefined ? () => {} : () => stopWatching(state, watchHandle);
+  const watchHandle = answered(result);
+  if (watchHandle === undefined) {
+    throw failureOf(call, result);
+  }
+  return () => stopWatching(state, watchHandle);
 }
 
+/** The provider's object, or undefined when nothing is registered under `id`; a refusal is thrown, absence is not. */
 function get(state: ContextState, plugin: bigint, id: string): unknown {
-  return state.call(() => {
-    const registration = answered(state.core.getService(plugin, id));
+  const { got, offered } = state.call(() => {
+    const got = state.core.getService(plugin, id);
+    const registration = answered(got);
     const offered = registration === undefined ? undefined : state.services.lookup(registration);
-    if (registration === undefined || offered === undefined) {
-      return undefined;
+    if (registration !== undefined && offered !== undefined) {
+      state.hold(plugin, registration, ReachKind.Service, offered);
     }
-    state.hold(plugin, registration, ReachKind.Service, offered);
-    return offered.object;
+    return { got, offered };
   });
+  if (got.status !== Status.Ok && got.status !== Status.None) {
+    throw failureOf("weivel_get_service", got);
+  }
+  return offered?.object;
+}
+
+function ids(state: ContextState, plugin: bigint): string[] {
+  const listed = state.call(() => state.core.serviceIds(plugin));
+  if (listed.status !== Status.Ok || listed.value === undefined) {
+    throw failureOf("weivel_service_ids", listed);
+  }
+  return listed.value;
 }
 
 function want(state: ContextState, plugin: bigint, id: string, options: WantOptions): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const result = state.call(() => {
-      const wanted = state.core.wantService(plugin, id, encodeWant(options, state.clock.now()));
+      const wanted = state.core.wantService(plugin, id, encodeWant(options, needsTheTime(options) ? state.clock.now() : 0));
       const wantHandle = answered(wanted);
       if (wantHandle !== undefined) {
         state.wants.add(wantHandle, { plugin, id, resolve, reject });
@@ -122,7 +153,7 @@ export function createServices(state: ContextState, attachment: Attachment): Ser
     },
     ids: () => {
       ensureAttached(attachment);
-      return state.call(() => state.core.serviceIds(plugin)).value ?? [];
+      return ids(state, plugin);
     },
     register: <Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}) => {
       ensureAttached(attachment);
@@ -135,6 +166,7 @@ export function createServices(state: ContextState, attachment: Attachment): Ser
       return startWatching(
         state,
         plugin,
+        "weivel_watch_service",
         () => state.core.watchService(plugin, type.id),
         listener as (implementation: unknown, change: string) => void,
       );

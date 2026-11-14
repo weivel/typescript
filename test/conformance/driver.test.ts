@@ -80,9 +80,9 @@ describe("the layer driver", () => {
   it("answers a reach a plugin was refused and the first refusal a step met", async () => {
     const vector = kitVector(consumeId);
     const steps = [
+      { plugin: "calendar", provide: "screens" },
+      { plugin: "calendar", provide: "screens" },
       { plugin: "agenda", watch: "extras" },
-      { plugin: "calendar", provide: "screens" },
-      { plugin: "calendar", provide: "screens" },
     ];
 
     const seen = await witnessLayerVector({ ...vector, given: { ...vector.given, steps } }, options);

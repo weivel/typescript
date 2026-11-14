@@ -163,7 +163,7 @@ describe("release", () => {
     });
     await alive(world.host.activate([plugin])).outcomes;
 
-    await expect(world.host.release(plugin)).resolves.toBeUndefined();
+    await expect(world.host.release(plugin)).resolves.toBe(true);
 
     expect(world.errors).toEqual([failure]);
     expect(world.host.plugin(plugin)).toBeUndefined();

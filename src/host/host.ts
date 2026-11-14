@@ -470,15 +470,21 @@ export class Host {
    * release queued reach it, then ends its entries, forgets it and drops it from every table. A plugin whose activate
    * is still running is released the same way, and its activate settling later does nothing.
    *
+   * It answers true once the release has run, and false at once, doing nothing, for a plugin the host has not opened:
+   * one registered only, or one already forgotten.
+   *
    * @remarks Inside a dispatch the release's events cannot be dispatched before the call returns, so ending the
    * entries and forgetting wait as a step behind them; the promise settles once that step has run.
    */
-  release(plugin: bigint): Promise<void | HostDestroyed> {
+  release(plugin: bigint): Promise<boolean | HostDestroyed> {
     if (this.#destroyed) {
       return Promise.resolve(hostDestroyed);
     }
     const record = this.#plugins.lookup(plugin);
-    return record === undefined ? Promise.resolve() : this.#release(record);
+    if (record === undefined || (record.release === undefined && !this.#opened.includes(record))) {
+      return Promise.resolve(false);
+    }
+    return this.#release(record).then(() => true);
   }
 
   #release(record: PluginRecord): Promise<void> {

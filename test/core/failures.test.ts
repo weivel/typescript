@@ -1,5 +1,5 @@
 import koffi from "koffi";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { drainEvents, readThenRelease } from "../../src/core/core.ts";
 import { copyEvent } from "../../src/core/events.ts";
 import {
@@ -159,6 +159,29 @@ describe("a dispatcher that throws", () => {
     expect(registered.status).toBe(Status.Ok);
     expect(typeof registered.value).toBe("bigint");
     expect(sunk).toEqual([{ error: failure, event: undefined }]);
+  });
+});
+
+describe("an error sink that throws", () => {
+  it("is reported to standard error and never rethrown, so the call that set it off still answers", () => {
+    const sinkFailure = new Error("sink failed");
+    const { core } = createRecordedCore({
+      onListenerError: () => {
+        throw sinkFailure;
+      },
+    });
+    const beta = openPlugin(core, { importName: "beta" });
+    core.setDispatcher(() => {
+      throw new Error("listener failed");
+    });
+    const standardError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const got = core.getService(beta, "alpha:greeting");
+
+    expect(got.status).toBe(Status.Refused);
+    expect(got.events.map((event) => event.kind)).toContain("reach-refused");
+    expect(standardError.mock.calls.some((call) => call.includes(sinkFailure))).toBe(true);
+    standardError.mockRestore();
   });
 });
 

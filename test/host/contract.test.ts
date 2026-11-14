@@ -170,6 +170,22 @@ describe("a plugin the host holds open", () => {
   });
 });
 
+describe("a release", () => {
+  it("of a plugin registered and never opened answers that there was nothing to release, and does nothing", async () => {
+    const world = sinkingWorld();
+    const plugin = registered(world, "idle", { activate() {} });
+
+    await expect(world.host.release(plugin)).resolves.toBe(false);
+
+    expect(world.host.core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
+    expect(world.host.plugin(plugin)).toBeDefined();
+    const [outcome] = await alive(world.host.activate([plugin])).outcomes;
+    expect(outcome!.state).toBe("active");
+    await expect(world.host.release(plugin)).resolves.toBe(true);
+    await expect(world.host.release(plugin)).resolves.toBe(false);
+  });
+});
+
 describe("a verification the caller asks for", () => {
   it("of a plugin the host never opened is answered as the core answers it, quarantining nothing", () => {
     const world = createHostWorld();
@@ -331,7 +347,21 @@ function countLibraryCalls(): LibraryCounts {
   return counts;
 }
 
+const echoFunctions = ["echo", "fail", "garbage"].map((name) => ({ name, symbol: `echo_${name}`, kind: FunctionKind.Bytes, context: 0 }));
+
 describe("loading a C library", () => {
+  it("releases the library's output after every call, a failed one included", () => {
+    const world = sinkingWorld();
+    const counts = countLibraryCalls();
+    const echo = alive(world.host.loadLibrary({ ...echoDeclaration([]), services: [{ id: "echo", functions: echoFunctions }] }, echoLibraryPath)).services.get("echo")!;
+
+    echo.echo!(new Uint8Array([1, 2]));
+    expect(() => echo.fail!(new Uint8Array([1]))).toThrow();
+    echo.garbage!(new Uint8Array(0));
+
+    expect(counts.releases).toBe(3);
+  });
+
   it("undoes a load that fails partway as an unload, what it registered unregistered and its binary closed", () => {
     const world = sinkingWorld();
     const counts = countLibraryCalls();

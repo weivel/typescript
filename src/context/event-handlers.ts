@@ -13,6 +13,12 @@ import { answerCapacity } from "./capacity.js";
 import { RefusalError } from "./refusal.js";
 import type { ContextState } from "./state.js";
 
+/**
+ * Settles a want the core settled: with the provider's object, or rejected with the core's refusal.
+ *
+ * @implNote A registration the layer holds no object for is a defect of the layer, not a refusal of the core's, so it
+ * goes to the error sink and the want is rejected with that same error, which carries no refusal.
+ */
 function settleWant(state: ContextState, event: WantSettledEvent): void {
   const pending = state.wants.lookup(event.want);
   if (pending === undefined) {
@@ -25,7 +31,9 @@ function settleWant(state: ContextState, event: WantSettledEvent): void {
   }
   const offered = state.services.lookup(event.implementation);
   if (offered === undefined) {
-    pending.reject(new Error(`The core settled a want for ${pending.id} with a registration this layer holds no object for.`));
+    const defect = new Error(`The core settled a want for ${pending.id} with a registration this layer holds no object for.`);
+    state.core.reportListenerError(defect, event);
+    pending.reject(defect);
     return;
   }
   state.hold(event.plugin, event.implementation, ReachKind.Service, offered);

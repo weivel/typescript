@@ -72,6 +72,16 @@ describe("a C library loaded as host services", () => {
     expect((thrown as LibraryCallError).status).toBe(1);
     expect((thrown as LibraryCallError).symbol).toBe("echo_fail");
     expect((thrown as LibraryCallError).message).toBe("echo_fail answered status 1: echo refused on purpose");
+    expect((thrown as LibraryCallError).body).toEqual(new TextEncoder().encode("echo refused on purpose"));
+    expect((thrown as LibraryCallError).text).toBe("echo refused on purpose");
+  });
+
+  it("carries a failure's body as bytes, and its text only where the body is UTF-8", () => {
+    const failure = new LibraryCallError("echo_fail", 3, new Uint8Array([0xff, 0xfe]));
+
+    expect(failure.status).toBe(3);
+    expect(failure.body).toEqual(new Uint8Array([0xff, 0xfe]));
+    expect(failure.text).toBeUndefined();
   });
 
   it("are unregistered when the library is unloaded", () => {
