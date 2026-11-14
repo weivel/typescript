@@ -3,7 +3,7 @@ import { PluginStatus, type CoreEvent, type Manifest } from "../../src/core/inde
 import { DetachedError, RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { hostDestroyed, type ActivationOutcome, type Plugin } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
-import { alive, createHostWorld, echoLibraryPath, settle, type HostWorld } from "./world.ts";
+import { alive, createHostWorld, echoLibraryPath, ManualScheduler, settle, type HostWorld } from "./world.ts";
 
 interface Sunk {
   readonly errors: unknown[];
@@ -193,6 +193,26 @@ describe("a verification the caller asks for", () => {
 });
 
 describe("destroy", () => {
+  it("destroys the core and never rejects when the scheduler's cancel throws, the throw reported to the sink", async () => {
+    const errors: unknown[] = [];
+    const cancelFailure = new Error("cancel failed");
+    const scheduler = new ManualScheduler();
+    scheduler.cancel = () => {
+      throw cancelFailure;
+    };
+    const world = createHostWorld({}, { scheduler, onListenerError: (error) => void errors.push(error) });
+    const plugin = registered(world, "waiter", { activate: (context) => void context.services.want(context.service("nobody:thing"), { timeoutMillis: 1000 }).catch(() => undefined) }, {
+      services: { consumes: [{ id: "nobody:thing" }] },
+    });
+    await alive(world.host.activate([plugin])).outcomes;
+    expect(scheduler.armed.size).toBe(1);
+
+    await expect(world.host.destroy()).resolves.toBeUndefined();
+
+    expect(world.host.core.destroyed).toBe(true);
+    expect(errors).toContain(cancelFailure);
+  });
+
   it("made inside an activate, starts no later plugin of the plan, answering it released", async () => {
     const world = sinkingWorld();
     const activated: string[] = [];

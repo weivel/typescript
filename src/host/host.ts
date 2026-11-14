@@ -568,9 +568,12 @@ export class Host {
       await this.#releasesSettled();
       await new Promise<void>((resolve) => this.contexts.whenEventsHandled(resolve));
     } finally {
-      this.#unloadEveryLibrary();
-      this.#timer.stop();
-      this.core.destroy();
+      try {
+        this.#unloadEveryLibrary();
+        this.#timer.stop();
+      } finally {
+        this.core.destroy();
+      }
     }
   }
 
