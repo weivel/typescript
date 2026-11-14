@@ -14,6 +14,7 @@ export {
   deviation,
   kitPlatformOf,
   loadLanguageBudget,
+  noiseBoundsOf,
   pairRatio,
   ratioBound,
   readLanguageBudget,
@@ -21,6 +22,7 @@ export {
   tooNoisyToJudge,
   withinRatio,
   type LanguageBudget,
+  type NoiseBounds,
   type RatioGate,
 } from "./budgets.js";
 export {
