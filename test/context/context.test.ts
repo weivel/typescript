@@ -287,6 +287,23 @@ describe("a plugin event listener that throws", () => {
   });
 });
 
+describe("a want the core settles with a registration the layer holds no object for", () => {
+  it("is rejected with no refusal, and the layer's defect is reported to the error sink", async () => {
+    const world = createWorld();
+    const beta = world.open(consumer("beta"));
+    const wanted = track(beta.context.services.want(beta.context.service(greetingId)));
+    const alpha = openPlugin(world.core, provider);
+
+    world.core.registerService(alpha, greetingId);
+    await settle();
+
+    expect(wanted.settled).toBe(true);
+    expect(wanted.reason).toBeInstanceOf(Error);
+    expect(wanted.reason).not.toBeInstanceOf(RefusalError);
+    expect(world.sunk.map((sunk) => sunk.error)).toEqual([wanted.reason]);
+  });
+});
+
 describe("services.ids", () => {
   it("answers the reachable ids registered now, as the core lists them", () => {
     const world = createWorld();
