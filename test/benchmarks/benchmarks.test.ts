@@ -172,7 +172,7 @@ describe("a core control call through koffi", () => {
     expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("controlCall"));
   });
 
-  it("crosses into the core once for every call of each path, with no drain or re-arm of its own", { timeout }, () => {
+  it("crosses into the core's weivel_get_service once for every call of both paths, with no drain or re-arm of its own", { timeout }, () => {
     const crossings = new Map<string, number>();
     const paths = countingPaths();
     const coreLibrary = countingCoreLibrary(
@@ -183,8 +183,9 @@ describe("a core control call through koffi", () => {
     benchmarkControlCall({ ...libraries, coreLibrary, sampling: briefSampling, decorate: paths.decorate });
 
     expect(paths.calls.get("weivelCall")).toBe(callsPerPath(briefSampling));
-    expect(crossings.get("weivel_get_service")).toBe(paths.calls.get("weivelCall"));
-    expect(crossings.get("weivel_support_release")).toBe(paths.calls.get("bareCall"));
+    expect(paths.calls.get("bareCall")).toBe(callsPerPath(briefSampling));
+    expect(crossings.get("weivel_get_service")).toBe(paths.calls.get("weivelCall")! + paths.calls.get("bareCall")!);
+    expect(crossings.get("weivel_support_release") ?? 0).toBe(0);
     expect(crossings.get("weivel_next_deadline") ?? 0).toBe(0);
     expect(crossings.get("weivel_next_event") ?? 0).toBeLessThan(callsPerPath(briefSampling));
   });
@@ -205,7 +206,7 @@ describe("a C library call through the host's bytes binding", () => {
     expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("libraryCall"));
   });
 
-  it("crosses into the library once for every call of each path, releasing every answer", { timeout }, async () => {
+  it("crosses into the library's echo_echo once for every call of both paths, releasing every answer", { timeout }, async () => {
     const crossings = new Map<string, number>();
     const paths = countingPaths();
 
@@ -213,9 +214,11 @@ describe("a C library call through the host's bytes binding", () => {
       benchmarkLibraryCall({ ...libraries, echoLibraryPath, sampling: briefSampling, decorate: paths.decorate }),
     );
 
+    const callsOfBothPaths = paths.calls.get("weivelCall")! + paths.calls.get("bareCall")!;
     expect(paths.calls.get("weivelCall")).toBe(callsPerPath(briefSampling));
-    expect(crossings.get("echo_echo")).toBe(paths.calls.get("weivelCall"));
-    expect(crossings.get("echo_release")).toBe(paths.calls.get("weivelCall")! + paths.calls.get("bareCall")!);
+    expect(paths.calls.get("bareCall")).toBe(callsPerPath(briefSampling));
+    expect(crossings.get("echo_echo")).toBe(callsOfBothPaths);
+    expect(crossings.get("echo_release")).toBe(callsOfBothPaths);
   });
 });
 

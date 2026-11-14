@@ -54,8 +54,13 @@ function copyBody(pointer: object | null, length: number): Uint8Array {
   return new Uint8Array(koffi.view(pointer, length)).slice();
 }
 
+/** Binds `symbol` through koffi as the bytes ABI of weivel_standard_function_kind, with nothing of the layer around it. */
+export function bindBareBytesFunction(library: koffi.IKoffiLib, symbol: string): NativeFunction {
+  return library.func(symbol, "int32_t", bytesParameters) as NativeFunction;
+}
+
 function bindFunction(library: koffi.IKoffiLib, symbol: string, release: NativeFunction, state: LoadState): LibraryFunction {
-  const native = library.func(symbol, "int32_t", bytesParameters) as NativeFunction;
+  const native = bindBareBytesFunction(library, symbol);
   return (input) => {
     if (!state.loaded) {
       throw new LibraryUnloadedError(symbol);
