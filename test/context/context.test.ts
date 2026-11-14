@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { Bound, HOST, ReachKind, RefusalCode, Status, type Manifest } from "../../src/core/index.ts";
+import { describe, expect, it, vi } from "vitest";
+import { Bound, HOST, ReachKind, RefusalCode, Status, type CoreEvent, type Manifest } from "../../src/core/index.ts";
 import { RefusalError, type PluginEvent } from "../../src/context/index.ts";
 import { createWorld, settle } from "./world.ts";
 
@@ -592,6 +592,47 @@ describe("a constrained want", () => {
     world.core.advance(100);
     await settle();
     expect(wanted.value).toBe(store);
+  });
+
+  it("leaves a question that arrived incomplete unanswered, never putting it to the answerer", async () => {
+    const world = createWorld(vocabulary);
+    const alpha = world.open(storeProvider);
+    const beta = world.open(storeConsumer);
+    let asked = 0;
+    const store = {
+      attributes: () => {
+        asked += 1;
+        return { replicas: 1 };
+      },
+    };
+    alpha.context.services.register(alpha.context.service(storeId), store, { capacity: store });
+    track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
+    await settle();
+    const question = world.dispatched.find((event) => event.kind === "capacity-wanted");
+    const askedBefore = asked;
+    const reports = vi.spyOn(world.core, "reportCapacity");
+
+    world.contexts.receive({ ...question!, constraints: [], incomplete: true } as CoreEvent);
+
+    expect(question).toBeDefined();
+    expect(asked).toBe(askedBefore);
+    expect(reports).not.toHaveBeenCalled();
+  });
+
+  it("reports to the error sink a capacity answer the core would not take, leaving the question unanswered", async () => {
+    const world = createWorld(vocabulary);
+    const alpha = world.open(storeProvider);
+    const beta = world.open(storeConsumer);
+    const store = { attributes: () => ({ replicas: 3 }) };
+    alpha.context.services.register(alpha.context.service(storeId), store, { capacity: store });
+    vi.spyOn(world.core, "reportCapacity").mockReturnValue({ status: Status.Malformed, events: [], value: undefined });
+
+    const wanted = track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
+    await settle();
+
+    expect(wanted.settled).toBe(false);
+    expect(world.sunk).toHaveLength(1);
+    expect(String(world.sunk[0]!.error)).toContain("weivel_report_capacity");
   });
 
   it("is refused by the core when asked without a poll interval, rejected with the refusal as data", async () => {

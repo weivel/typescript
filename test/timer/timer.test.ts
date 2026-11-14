@@ -5,14 +5,16 @@ import { coreLibraryPath, createRecordedCore, openPlugin } from "../real-core.ts
 
 class FakeClock implements Clock {
   current = 1000;
+  reads = 0;
   now(): number {
+    this.reads += 1;
     return this.current;
   }
 }
 
 interface Scheduled {
   readonly callback: () => void;
-  readonly delayMilliseconds: number;
+  readonly at: number;
   cancelled: boolean;
   fired: boolean;
 }
@@ -20,8 +22,10 @@ interface Scheduled {
 class FakeScheduler implements Scheduler {
   readonly scheduled: Scheduled[] = [];
 
-  schedule(callback: () => void, delayMilliseconds: number): unknown {
-    const entry: Scheduled = { callback, delayMilliseconds, cancelled: false, fired: false };
+  constructor(readonly maximumWaitMilliseconds?: number) {}
+
+  schedule(callback: () => void, at: number): unknown {
+    const entry: Scheduled = { callback, at, cancelled: false, fired: false };
     this.scheduled.push(entry);
     return entry;
   }
@@ -71,7 +75,7 @@ describe("the core timer", () => {
     timedWant(core, waitingConsumer(core), clock, 250);
 
     expect(timer.armedDeadline).toBe(1250);
-    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([250]);
+    expect(scheduler.live().map((entry) => entry.at)).toEqual([1250]);
   });
 
   it("advances the core when it fires, so the want times out, and arms nothing after", () => {
@@ -100,7 +104,7 @@ describe("the core timer", () => {
     timedWant(core, beta, clock, 100);
 
     expect(timer.armedDeadline).toBe(1100);
-    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([100]);
+    expect(scheduler.live().map((entry) => entry.at)).toEqual([1100]);
   });
 
   it("cancels its timer when the core no longer waits on time", () => {
@@ -212,13 +216,13 @@ describe("re-arming", () => {
     core.registerService(HOST, "");
 
     expect(timer.armedDeadline).toBe(1100);
-    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([100]);
+    expect(scheduler.live().map((entry) => entry.at)).toEqual([1100]);
   });
 
   it("waits again when its longest wait ends before the deadline, never advancing the core early", () => {
     const { core, dispatched } = createRecordedCore();
     const clock = new FakeClock();
-    const scheduler = new FakeScheduler();
+    const scheduler = new FakeScheduler(2_147_483_647);
     const timer = new CoreTimer(core, { clock, scheduler });
     const farAway = 3_000_000_000;
     timedWant(core, waitingConsumer(core), clock, farAway);
@@ -227,7 +231,7 @@ describe("re-arming", () => {
     scheduler.fireNext();
 
     expect(timer.armedDeadline).toBe(1000 + farAway);
-    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([farAway - 2_147_483_647]);
+    expect(scheduler.live().map((entry) => entry.at)).toEqual([1000 + farAway]);
     expect(dispatched.some((event) => event.kind === "want-settled")).toBe(false);
   });
 
@@ -269,7 +273,7 @@ describe("re-arming", () => {
     scheduler.fireNext();
 
     expect(timer.armedDeadline).toBe(1500);
-    expect(scheduler.live().map((entry) => entry.delayMilliseconds)).toEqual([250]);
+    expect(scheduler.live().map((entry) => entry.at)).toEqual([1500]);
   });
 
   it("cancels its timer after a capacity answer settles a constrained want", () => {
@@ -387,6 +391,42 @@ describe("a call made once the clock has reached the armed deadline", () => {
 
     expect(advances()).toBe(0);
     expect(dispatched.filter((event) => event.kind === "want-settled" && event.want === want)).toMatchObject([{ refusal: { code: RefusalCode.None } }]);
+  });
+});
+
+describe("the clock", () => {
+  it("is not read to arm a deadline on a scheduler that can wait any time", () => {
+    const { core } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    new CoreTimer(core, { clock, scheduler });
+    const beta = waitingConsumer(core);
+    const wantTime = clock.now();
+    core.wantService(beta, "alpha:greeting", { timed: Choice.Yes, now: wantTime, timeoutMillis: 250 });
+    const readsBeforeArming = clock.reads;
+
+    core.wantService(beta, "alpha:greeting", { timed: Choice.Yes, now: wantTime, timeoutMillis: 100 });
+
+    expect(scheduler.live().map((entry) => entry.at)).toEqual([1100]);
+    expect(clock.reads - readsBeforeArming).toBe(1);
+  });
+
+  it("is read once as a bounded scheduler is handed a wait, and once as the timer fires", () => {
+    const { core } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler(1_000_000);
+    new CoreTimer(core, { clock, scheduler });
+    const beta = waitingConsumer(core);
+    clock.reads = 0;
+    core.wantService(beta, "alpha:greeting", { timed: Choice.Yes, now: 1000, timeoutMillis: 250 });
+    const readsToArm = clock.reads;
+    clock.current = 1250;
+    clock.reads = 0;
+
+    scheduler.fireNext();
+
+    expect(readsToArm).toBe(1);
+    expect(clock.reads).toBe(1);
   });
 });
 
