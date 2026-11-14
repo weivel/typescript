@@ -107,8 +107,13 @@ export class CoreTimer {
     this.#onMove?.(deadline);
   }
 
+  /** Arms the scheduler for `deadline`; a schedule that throws goes to the error sink and leaves nothing armed. */
   #arm(deadline: number): void {
-    this.#armed = { deadline, token: this.#scheduler.schedule(() => this.#wake(deadline), this.#waitEnd(deadline)) };
+    try {
+      this.#armed = { deadline, token: this.#scheduler.schedule(() => this.#wake(deadline), this.#waitEnd(deadline)) };
+    } catch (error) {
+      this.#core.reportListenerError(error);
+    }
   }
 
   /** When the wait for `deadline` ends: the deadline itself, or sooner when the scheduler cannot wait that long. */
@@ -117,10 +122,17 @@ export class CoreTimer {
     return longest === undefined ? deadline : Math.min(deadline, this.#clock.now() + longest);
   }
 
+  /** Cancels what is armed; a cancel that throws goes to the error sink, and the timer counts itself disarmed. */
   #cancel(): void {
-    if (this.#armed !== undefined) {
-      this.#scheduler.cancel(this.#armed.token);
-      this.#armed = undefined;
+    const armed = this.#armed;
+    this.#armed = undefined;
+    if (armed === undefined) {
+      return;
+    }
+    try {
+      this.#scheduler.cancel(armed.token);
+    } catch (error) {
+      this.#core.reportListenerError(error);
     }
   }
 

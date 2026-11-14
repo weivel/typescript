@@ -120,6 +120,55 @@ describe("the core timer", () => {
     expect(scheduler.live()).toEqual([]);
   });
 
+  it("cancels the task it scheduled when stopped", () => {
+    const { core } = createRecordedCore();
+    const clock = new FakeClock();
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
+    timedWant(core, waitingConsumer(core), clock, 250);
+
+    timer.stop();
+
+    expect(scheduler.live()).toEqual([]);
+    expect(timer.armedDeadline).toBeUndefined();
+  });
+
+  it("reports a schedule that throws as it arms again after an early wake to the error sink, never to the scheduler", () => {
+    const errors: unknown[] = [];
+    const { core } = createRecordedCore({ onListenerError: (error) => void errors.push(error) });
+    const clock = new FakeClock();
+    const failure = new Error("schedule failed");
+    const scheduler = new FakeScheduler();
+    const timer = new CoreTimer(core, { clock, scheduler });
+    timedWant(core, waitingConsumer(core), clock, 250);
+    scheduler.schedule = () => {
+      throw failure;
+    };
+
+    expect(() => scheduler.fireNext()).not.toThrow();
+
+    expect(errors).toEqual([failure]);
+    expect(timer.armedDeadline).toBeUndefined();
+  });
+
+  it("reports a cancel that throws to the error sink and counts itself disarmed", () => {
+    const errors: unknown[] = [];
+    const { core } = createRecordedCore({ onListenerError: (error) => void errors.push(error) });
+    const clock = new FakeClock();
+    const failure = new Error("cancel failed");
+    const scheduler = new FakeScheduler();
+    scheduler.cancel = () => {
+      throw failure;
+    };
+    const timer = new CoreTimer(core, { clock, scheduler });
+    timedWant(core, waitingConsumer(core), clock, 250);
+
+    expect(() => timer.stop()).not.toThrow();
+
+    expect(errors).toEqual([failure]);
+    expect(timer.armedDeadline).toBeUndefined();
+  });
+
   it("stops re-arming once stopped", () => {
     const { core } = createRecordedCore();
     const clock = new FakeClock();

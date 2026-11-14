@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { PluginStatus, type CoreEvent, type Manifest } from "../../src/core/index.ts";
-import type { PluginContext } from "../../src/context/index.ts";
+import koffi from "koffi";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { HOST, PluginStatus, type CoreEvent, type Manifest } from "../../src/core/index.ts";
+import { DetachedError, RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { hostDestroyed, type ActivationOutcome, type Plugin } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
-import { alive, createHostWorld, echoLibraryPath, settle, type HostWorld } from "./world.ts";
+import { alive, createHostWorld, echoLibraryPath, ManualScheduler, settle, type HostWorld } from "./world.ts";
 
 interface Sunk {
   readonly errors: unknown[];
@@ -77,6 +78,98 @@ describe("a verification the core refuses", () => {
   });
 });
 
+let undeclaredIds = 0;
+
+/**
+ * Whether a refusal of reach reaches the context's event listeners, by getting an id its manifest never declared.
+ *
+ * @implNote The core reports a refusal of reach once per plugin and id, so each probe asks for a new id.
+ */
+function hearsItsEvents(context: PluginContext): boolean {
+  const heard: string[] = [];
+  const stop = context.events.listen((event) => void heard.push(event.kind));
+  undeclaredIds += 1;
+  try {
+    context.services.get(context.service(`undeclared:id${undeclaredIds}`));
+  } catch {
+    // the refusal is also answered to the caller; only what the listener heard counts here
+  }
+  stop();
+  return heard.includes("reach-refused");
+}
+
+describe("a plugin the host holds open", () => {
+  it("opened again is answered with the core's refusal, its context left whole and still the one detached", async () => {
+    const world = sinkingWorld();
+    const plugin = registered(world, "alpha", { activate() {} }, { services: { provides: [{ id: "alpha:thing" }] } });
+    const context = alive(world.host.open(plugin));
+    context.services.register(context.service("alpha:thing"), {});
+    const tracked = world.host.contexts.tracked(plugin);
+
+    expect(() => world.host.open(plugin)).toThrow(RefusalError);
+
+    expect(world.host.contexts.tracked(plugin)).toBe(tracked);
+    expect(hearsItsEvents(context)).toBe(true);
+    await world.host.release(plugin);
+    expect(() => context.services.ids()).toThrow(DetachedError);
+    expect(world.errors).toEqual([]);
+  });
+
+  it("activated again, or while its activate is in flight, is answered refused, its context left whole", async () => {
+    const world = sinkingWorld();
+    const contexts: PluginContext[] = [];
+    const pending = deferred();
+    const plugin = registered(
+      world,
+      "alpha",
+      {
+        activate(context) {
+          contexts.push(context);
+          return pending.promise;
+        },
+      },
+      { services: { provides: [{ id: "alpha:thing" }] } },
+    );
+    const first = alive(world.host.activate([plugin]));
+    contexts[0]!.services.register(contexts[0]!.service("alpha:thing"), {});
+    const tracked = world.host.contexts.tracked(plugin);
+
+    const [whileInFlight] = await alive(world.host.activate([plugin])).outcomes;
+    pending.resolve();
+    await first.outcomes;
+    const [whileActive] = await alive(world.host.activate([plugin])).outcomes;
+
+    expect([whileInFlight!.state, whileActive!.state]).toEqual(["refused", "refused"]);
+    expect(contexts).toHaveLength(1);
+    expect(world.host.contexts.tracked(plugin)).toBe(tracked);
+    expect(hearsItsEvents(contexts[0]!)).toBe(true);
+    await world.host.release(plugin);
+    expect(() => contexts[0]!.services.ids()).toThrow(DetachedError);
+  });
+
+  it("quarantined and activated again keeps its context", async () => {
+    const world = sinkingWorld();
+    const contexts: PluginContext[] = [];
+    const plugin = registered(world, "alpha", {
+      activate(context) {
+        contexts.push(context);
+        if (contexts.length === 1) {
+          throw new Error("not yet");
+        }
+      },
+    });
+
+    const [quarantined] = await alive(world.host.activate([plugin])).outcomes;
+    const [reopened] = await alive(world.host.activate([plugin])).outcomes;
+
+    expect([quarantined!.state, reopened!.state]).toEqual(["quarantined", "active"]);
+    expect(contexts[1]).toBe(contexts[0]);
+    expect(hearsItsEvents(contexts[0]!)).toBe(true);
+    await world.host.release(plugin);
+    expect(() => contexts[0]!.services.ids()).toThrow(DetachedError);
+  });
+});
+
 describe("a verification the caller asks for", () => {
   it("of a plugin the host never opened is answered as the core answers it, quarantining nothing", () => {
     const world = createHostWorld();
@@ -101,6 +194,26 @@ describe("a verification the caller asks for", () => {
 });
 
 describe("destroy", () => {
+  it("destroys the core and never rejects when the scheduler's cancel throws, the throw reported to the sink", async () => {
+    const errors: unknown[] = [];
+    const cancelFailure = new Error("cancel failed");
+    const scheduler = new ManualScheduler();
+    scheduler.cancel = () => {
+      throw cancelFailure;
+    };
+    const world = createHostWorld({}, { scheduler, onListenerError: (error) => void errors.push(error) });
+    const plugin = registered(world, "waiter", { activate: (context) => void context.services.want(context.service("nobody:thing"), { timeoutMillis: 1000 }).catch(() => undefined) }, {
+      services: { consumes: [{ id: "nobody:thing" }] },
+    });
+    await alive(world.host.activate([plugin])).outcomes;
+    expect(scheduler.armed.size).toBe(1);
+
+    await expect(world.host.destroy()).resolves.toBeUndefined();
+
+    expect(world.host.core.destroyed).toBe(true);
+    expect(errors).toContain(cancelFailure);
+  });
+
   it("made inside an activate, starts no later plugin of the plan, answering it released", async () => {
     const world = sinkingWorld();
     const activated: string[] = [];
@@ -183,7 +296,53 @@ const echoDeclaration = (ids: readonly string[]): LibraryDeclaration => ({
   services: ids.map((id) => ({ id, functions: [{ name: "echo", symbol: "echo_echo", kind: FunctionKind.Bytes, context: 0 }] })),
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+interface LibraryCounts {
+  unloads: number;
+  releases: number;
+}
+
+/** Counts, until the test ends, every unload of a library koffi loads and every call of the echo library's release. */
+function countLibraryCalls(): LibraryCounts {
+  const counts: LibraryCounts = { unloads: 0, releases: 0 };
+  const load = koffi.load.bind(koffi);
+  vi.spyOn(koffi, "load").mockImplementation((path: string | null) => {
+    const library = load(path);
+    const unload = library.unload.bind(library);
+    const bind = library.func.bind(library) as (...parameters: unknown[]) => (...arguments_: unknown[]) => unknown;
+    library.unload = () => {
+      counts.unloads += 1;
+      unload();
+    };
+    library.func = ((...parameters: unknown[]) => {
+      const bound = bind(...parameters);
+      return parameters[0] === "echo_release"
+        ? (...arguments_: unknown[]) => {
+            counts.releases += 1;
+            return bound(...arguments_);
+          }
+        : bound;
+    }) as typeof library.func;
+    return library;
+  });
+  return counts;
+}
+
 describe("loading a C library", () => {
+  it("undoes a load that fails partway as an unload, what it registered unregistered and its binary closed", () => {
+    const world = sinkingWorld();
+    const counts = countLibraryCalls();
+
+    expect(() => world.host.loadLibrary(echoDeclaration(["echo", ""]), echoLibraryPath)).toThrow();
+
+    expect(world.host.core.getService(HOST, "echo").value).toBeUndefined();
+    expect(counts.unloads).toBe(1);
+    expect(() => world.host.registerHostService({ id: "echo" }, {})).not.toThrow();
+  });
+
   it("refuses a declaration that lists an id twice, registering nothing and telling no sink", () => {
     const world = sinkingWorld();
 

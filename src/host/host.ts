@@ -39,6 +39,8 @@ interface PluginRecord {
   settleOutcome: ((outcome: ActivationOutcome) => void) | undefined;
   /** Its release, once one began; a later release answers the same. */
   release: Promise<void> | undefined;
+  /** Its context, built at its first open and kept until it is forgotten, a quarantined plugin's opened again included. */
+  context: PluginContext | undefined;
 }
 
 function refuseUnboundKinds(declaration: LibraryDeclaration): void {
@@ -152,7 +154,7 @@ export class Host {
       const answer = this.core.registerManifest(kept);
       if (answer.status === Status.Ok && answer.value !== undefined) {
         const hosted = { plugin: answer.value, manifest: kept, entry };
-        this.#plugins.add(answer.value, { hosted, activated: false, settleOutcome: undefined, release: undefined });
+        this.#plugins.add(answer.value, { hosted, activated: false, settleOutcome: undefined, release: undefined, context: undefined });
       }
       return answer;
     });
@@ -216,7 +218,8 @@ export class Host {
    *
    * @throws Error when a function is of a kind other than bytes, an id is declared twice or is already registered,
    * by another live library, a plugin or the host itself, the library file is missing, or it lacks a symbol its
-   * declaration names: each the caller's mistake, reported to no sink.
+   * declaration names: each the caller's mistake, reported to no sink. RefusalError when the core refuses one of its
+   * registrations, the load then undone as an unload.
    */
   loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
     if (this.#destroyed) {
@@ -225,9 +228,8 @@ export class Host {
     refuseUnboundKinds(declaration);
     this.#refuseHeldIds(declaration);
     const bound = bindLibrary(libraryPath, declaration);
-    const unregisters = [...bound.services].map(([id, service]) => this.#registerHostService({ id }, service, {}));
+    const unregisters: (() => void)[] = [];
     const ids = [...bound.services.keys()];
-    ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
     const unload = (): void => {
       this.#libraryUnloads.delete(unload);
       ids.forEach((id) => this.#libraryIds.delete(id));
@@ -235,6 +237,15 @@ export class Host {
       bound.unload();
     };
     this.#libraryUnloads.add(unload);
+    ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
+    try {
+      for (const [id, service] of bound.services) {
+        unregisters.push(this.#registerHostService({ id }, service, {}));
+      }
+    } catch (error) {
+      unload();
+      throw error;
+    }
     return { declaration, services: bound.services, unload };
   }
 
@@ -359,19 +370,22 @@ export class Host {
   }
 
   /**
-   * Builds the plugin's context, then opens it, the host's record of it as opened made before any event of the open
-   * is dispatched.
+   * Builds the plugin's context unless it has one, then opens it, the host's record of it as opened made before any
+   * event of the open is dispatched.
    *
-   * @implNote An open that throws may have reached the core or not; the ledger says whether the core holds the plugin
-   * open, and only then is it kept as opened, for the release that follows.
+   * @implNote A plugin the host holds open, its activate in flight or not, keeps the context it has: the core refuses
+   * to open it again, and a context built for that open would take the place of the one the plugin still uses. A
+   * quarantined plugin opened again keeps its context the same way. An open that throws may have reached the core or
+   * not; the ledger says whether the core holds the plugin open, and only then is it kept as opened.
    */
   #open(record: PluginRecord): PluginContext {
-    const plugin = record.hosted.plugin;
-    const context = this.contexts.create(plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
+    const built = record.context === undefined;
+    const context = record.context ?? this.contexts.create(record.hosted.plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
+    record.context = context;
     try {
       succeeded("weivel_open_plugin", this.core.holdDispatch(() => this.#openInCore(record)));
     } catch (error) {
-      this.#keepIfHeldOpen(record);
+      this.#keepIfHeldOpen(record, built);
       throw error;
     }
     return context;
@@ -380,15 +394,19 @@ export class Host {
   #openInCore(record: PluginRecord): CallResult<undefined> {
     const opened = this.core.openPlugin(record.hosted.plugin, record.hosted.plugin);
     if (opened.status === Status.Ok) {
+      this.#dropFromOpened(record);
       this.#opened.push(record);
     }
     return opened;
   }
 
-  #keepIfHeldOpen(record: PluginRecord): void {
+  #keepIfHeldOpen(record: PluginRecord, built: boolean): void {
     const plugin = record.hosted.plugin;
     if (this.core.ledgerEntry(plugin).value?.status !== PluginStatus.Active) {
-      this.contexts.forget(plugin);
+      if (built) {
+        this.contexts.forget(plugin);
+        record.context = undefined;
+      }
     } else if (!this.#opened.includes(record)) {
       this.#opened.push(record);
     }
@@ -559,9 +577,12 @@ export class Host {
       await this.#releasesSettled();
       await new Promise<void>((resolve) => this.contexts.whenEventsHandled(resolve));
     } finally {
-      this.#unloadEveryLibrary();
-      this.#timer.stop();
-      this.core.destroy();
+      try {
+        this.#unloadEveryLibrary();
+        this.#timer.stop();
+      } finally {
+        this.core.destroy();
+      }
     }
   }
 
