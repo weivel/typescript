@@ -115,12 +115,12 @@ export function directoryContents(directory: string): Record<string, string> {
 
 /** A scheduler the test fires by hand. */
 export class ManualScheduler implements Scheduler {
-  readonly armed = new Map<number, { readonly callback: () => void; readonly delayMilliseconds: number }>();
+  readonly armed = new Map<number, { readonly callback: () => void; readonly at: number }>();
   #next = 0;
 
-  schedule(callback: () => void, delayMilliseconds: number): unknown {
+  schedule(callback: () => void, at: number): unknown {
     this.#next += 1;
-    this.armed.set(this.#next, { callback, delayMilliseconds });
+    this.armed.set(this.#next, { callback, at });
     return this.#next;
   }
 

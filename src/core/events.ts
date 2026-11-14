@@ -1,7 +1,8 @@
 import koffi from "koffi";
 import { EventKind, type CapabilityChange, type CapacityQuestion, type Change, type LogLevel, type ReachKind } from "./constants.js";
-import { offsetOf } from "./declarations.js";
+import { offsetOf, type CoreStructName } from "./declarations.js";
 import {
+  decodeFixedPart,
   decodeStruct,
   readNumbers,
   readRefusal,
@@ -9,15 +10,25 @@ import {
   type DecodedList,
   type DecodedRefusal,
 } from "./memory.js";
+
+export { TEXT_NOT_COPIED } from "./memory.js";
 import type { NamedNumber, Refusal } from "./values.js";
 
-export interface LogEvent {
+/**
+ * Present only on an event the layer could not copy whole: every handle, kind, code and number exact, each text the
+ * core gave TEXT_NOT_COPIED, and a capacity question's constraints left out.
+ */
+interface Completeness {
+  readonly incomplete?: true;
+}
+
+export interface LogEvent extends Completeness {
   readonly kind: "log";
   readonly level: LogLevel;
   readonly text: string | null;
 }
 
-export interface RefusalEvent {
+export interface RefusalEvent extends Completeness {
   readonly kind: "refusal";
   readonly refusal: Refusal;
 }
@@ -26,7 +37,7 @@ export interface RefusalEvent {
  * A want settled. `implementation` is 0n when it was rejected, and `refusal` then says why; for a degraded want the
  * refusal's code is NONE and its `subject` names the constraint accepted unmet.
  */
-export interface WantSettledEvent {
+export interface WantSettledEvent extends Completeness {
   readonly kind: "want-settled";
   readonly want: bigint;
   readonly plugin: bigint;
@@ -35,7 +46,7 @@ export interface WantSettledEvent {
   readonly degraded: boolean;
 }
 
-export interface WatchEvent {
+export interface WatchEvent extends Completeness {
   readonly kind: "watch";
   readonly watch: bigint;
   readonly plugin: bigint;
@@ -43,13 +54,13 @@ export interface WatchEvent {
   readonly change: Change;
 }
 
-export interface RevokedEvent {
+export interface RevokedEvent extends Completeness {
   readonly kind: "revoked";
   readonly plugin: bigint;
   readonly implementation: bigint;
 }
 
-export interface ReachRefusedEvent {
+export interface ReachRefusedEvent extends Completeness {
   readonly kind: "reach-refused";
   readonly reachKind: ReachKind;
   readonly plugin: bigint;
@@ -57,7 +68,7 @@ export interface ReachRefusedEvent {
   readonly refusal: Refusal;
 }
 
-export interface CapacityWantedEvent {
+export interface CapacityWantedEvent extends Completeness {
   readonly kind: "capacity-wanted";
   readonly want: bigint;
   readonly plugin: bigint;
@@ -67,7 +78,7 @@ export interface CapacityWantedEvent {
   readonly constraints: readonly NamedNumber[];
 }
 
-export interface CapabilityEvent {
+export interface CapabilityEvent extends Completeness {
   readonly kind: "capability";
   readonly watch: bigint;
   readonly plugin: bigint;
@@ -77,7 +88,7 @@ export interface CapabilityEvent {
 }
 
 /** The core's earliest deadline changed: `at` is the deadline to arm, or undefined when nothing waits on time. */
-export interface DeadlineEvent {
+export interface DeadlineEvent extends Completeness {
   readonly kind: "deadline";
   readonly at: number | undefined;
 }
@@ -94,20 +105,31 @@ export type CoreEvent =
   | CapabilityEvent
   | DeadlineEvent;
 
-type PayloadReader = (event: object, payloadOffset: number) => CoreEvent;
+type DecodedFields = Record<string, unknown>;
 
-function readLog(event: object, payloadOffset: number): LogEvent {
-  const log = decodeStruct(event, payloadOffset, "weivel_log_event");
+/** How a payload is read: wholly, or its fixed part alone for an event that could not be copied whole. */
+interface Copying {
+  decode(event: object, offset: number, name: CoreStructName): DecodedFields;
+  numbers(list: DecodedList): NamedNumber[];
+}
+
+const wholly: Copying = { decode: decodeStruct, numbers: readNumbers };
+const fixedPartOnly: Copying = { decode: decodeFixedPart, numbers: () => [] };
+
+type PayloadReader = (event: object, payloadOffset: number, copying: Copying) => CoreEvent;
+
+function readLog(event: object, payloadOffset: number, copying: Copying): LogEvent {
+  const log = copying.decode(event, payloadOffset, "weivel_log_event");
   return { kind: "log", level: log.level as LogLevel, text: log.text as string | null };
 }
 
-function readRefused(event: object, payloadOffset: number): RefusalEvent {
-  const refused = decodeStruct(event, payloadOffset, "weivel_refusal_event");
+function readRefused(event: object, payloadOffset: number, copying: Copying): RefusalEvent {
+  const refused = copying.decode(event, payloadOffset, "weivel_refusal_event");
   return { kind: "refusal", refusal: readRefusal(refused.refusal as DecodedRefusal, refused.subject, refused.has_fix) };
 }
 
-function readWantSettled(event: object, payloadOffset: number): WantSettledEvent {
-  const want = decodeStruct(event, payloadOffset, "weivel_want_event");
+function readWantSettled(event: object, payloadOffset: number, copying: Copying): WantSettledEvent {
+  const want = copying.decode(event, payloadOffset, "weivel_want_event");
   return {
     kind: "want-settled",
     want: toBigInt(want.want),
@@ -118,8 +140,8 @@ function readWantSettled(event: object, payloadOffset: number): WantSettledEvent
   };
 }
 
-function readWatch(event: object, payloadOffset: number): WatchEvent {
-  const watch = decodeStruct(event, payloadOffset, "weivel_watch_event");
+function readWatch(event: object, payloadOffset: number, copying: Copying): WatchEvent {
+  const watch = copying.decode(event, payloadOffset, "weivel_watch_event");
   return {
     kind: "watch",
     watch: toBigInt(watch.watch),
@@ -129,13 +151,13 @@ function readWatch(event: object, payloadOffset: number): WatchEvent {
   };
 }
 
-function readRevoked(event: object, payloadOffset: number): RevokedEvent {
-  const revoked = decodeStruct(event, payloadOffset, "weivel_revoked_event");
+function readRevoked(event: object, payloadOffset: number, copying: Copying): RevokedEvent {
+  const revoked = copying.decode(event, payloadOffset, "weivel_revoked_event");
   return { kind: "revoked", plugin: toBigInt(revoked.plugin), implementation: toBigInt(revoked.implementation) };
 }
 
-function readReachRefused(event: object, payloadOffset: number): ReachRefusedEvent {
-  const reach = decodeStruct(event, payloadOffset, "weivel_reach_refusal");
+function readReachRefused(event: object, payloadOffset: number, copying: Copying): ReachRefusedEvent {
+  const reach = copying.decode(event, payloadOffset, "weivel_reach_refusal");
   return {
     kind: "reach-refused",
     reachKind: reach.kind as ReachKind,
@@ -145,8 +167,8 @@ function readReachRefused(event: object, payloadOffset: number): ReachRefusedEve
   };
 }
 
-function readCapacityWanted(event: object, payloadOffset: number): CapacityWantedEvent {
-  const capacity = decodeStruct(event, payloadOffset, "weivel_capacity_event");
+function readCapacityWanted(event: object, payloadOffset: number, copying: Copying): CapacityWantedEvent {
+  const capacity = copying.decode(event, payloadOffset, "weivel_capacity_event");
   return {
     kind: "capacity-wanted",
     want: toBigInt(capacity.want),
@@ -154,12 +176,12 @@ function readCapacityWanted(event: object, payloadOffset: number): CapacityWante
     registration: toBigInt(capacity.registration),
     request: toBigInt(capacity.request),
     question: capacity.question as CapacityQuestion,
-    constraints: readNumbers(capacity.constraints as DecodedList),
+    constraints: copying.numbers(capacity.constraints as DecodedList),
   };
 }
 
-function readCapability(event: object, payloadOffset: number): CapabilityEvent {
-  const capability = decodeStruct(event, payloadOffset, "weivel_capability_event");
+function readCapability(event: object, payloadOffset: number, copying: Copying): CapabilityEvent {
+  const capability = copying.decode(event, payloadOffset, "weivel_capability_event");
   return {
     kind: "capability",
     watch: toBigInt(capability.watch),
@@ -170,8 +192,8 @@ function readCapability(event: object, payloadOffset: number): CapabilityEvent {
   };
 }
 
-function readDeadline(event: object, payloadOffset: number): DeadlineEvent {
-  const deadline = decodeStruct(event, payloadOffset, "weivel_deadline_event");
+function readDeadline(event: object, payloadOffset: number, copying: Copying): DeadlineEvent {
+  const deadline = copying.decode(event, payloadOffset, "weivel_deadline_event");
   return { kind: "deadline", at: deadline.set === 1 ? Number(deadline.at) : undefined };
 }
 
@@ -197,5 +219,12 @@ export function eventKindAt(event: object): number {
  */
 export function copyEvent(event: object): CoreEvent | undefined {
   const reader = payloadReaders.get(eventKindAt(event));
-  return reader?.(event, offsetOf("weivel_event", "data"));
+  return reader?.(event, offsetOf("weivel_event", "data"), wholly);
+}
+
+/** Copies the fixed part of an event that could not be copied whole, marked incomplete. */
+export function copyIncompleteEvent(event: object): CoreEvent | undefined {
+  const reader = payloadReaders.get(eventKindAt(event));
+  const copied = reader?.(event, offsetOf("weivel_event", "data"), fixedPartOnly);
+  return copied === undefined ? undefined : { ...copied, incomplete: true };
 }

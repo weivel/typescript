@@ -35,9 +35,9 @@ export class VirtualTime implements Clock, Scheduler {
     return this.#now;
   }
 
-  schedule(callback: () => void, delayMilliseconds: number): unknown {
+  schedule(callback: () => void, at: number): unknown {
     this.#nextToken += 1;
-    this.#tasks.set(this.#nextToken, { callback, dueAt: this.#now + delayMilliseconds });
+    this.#tasks.set(this.#nextToken, { callback, dueAt: at });
     return this.#nextToken;
   }
 

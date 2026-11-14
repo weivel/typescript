@@ -185,7 +185,7 @@ describe("a timer-driven call that throws", () => {
 });
 
 describe("draining", () => {
-  it("releases an event it could not copy and drains the rest", () => {
+  it("releases and drops an event of which it could copy not even the fixed part, and drains the rest", () => {
     const core = createRawCore();
     rawCores.push(core);
     queueMalformedRefusal(core);
@@ -207,6 +207,9 @@ describe("draining", () => {
             throw new Error("uncopyable");
           }
           return copyEvent(event);
+        },
+        () => {
+          throw new Error("not even its fixed part");
         },
         (error) => reported.push(error),
       );

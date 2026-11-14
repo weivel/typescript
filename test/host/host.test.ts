@@ -483,7 +483,7 @@ describe("time", () => {
     );
     await activated(world.host, [handleOf(handles, "patient")]);
 
-    expect([...world.scheduler.armed.values()].map((task) => task.delayMilliseconds)).toEqual([50]);
+    expect([...world.scheduler.armed.values()].map((task) => task.at)).toEqual([50]);
     world.clock.time = 50;
     world.scheduler.fire();
     const wanted = await wantedOf();

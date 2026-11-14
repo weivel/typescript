@@ -15,9 +15,9 @@ import {
   type Support,
 } from "./answers.js";
 import { Status, type EdgeSource, type HandleCondition } from "./constants.js";
-import { bindCoreFunctions, coreStructs, type CoreFunctions, type CoreStructName } from "./declarations.js";
+import { bindCoreFunctions, coreStructs, type CoreFunctionName, type CoreFunctions, type CoreStructName } from "./declarations.js";
 import { DeferredStep } from "./deferred-step.js";
-import { copyEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
+import { copyEvent, copyIncompleteEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
 import { allocateSized, toBigInt } from "./memory.js";
 import {
@@ -108,20 +108,21 @@ export interface CreateCoreOptions {
   readonly onListenerError?: ListenerErrorSink;
 }
 
-/** Creates a core; a status other than OK answers no core, and no core exists to queue a refusal for it. */
+/**
+ * Creates a core and drains what its creation queued as any call's events, so only the dispatcher given here hears
+ * them. A status other than OK answers no core, and no core exists to queue a refusal for it.
+ */
 export function createCore(createOptions: CreateCoreOptions = {}): CallResult<Core> {
   const library = createOptions.library ?? loadCoreLibrary(createOptions.libraryPath);
   const created: unknown[] = [null];
+  const waiting = new Uint32Array(1);
   const options = createOptions.options === undefined ? null : encodeCoreOptions(createOptions.options);
-  const status = library.functions.weivel_core_create(options, created, null) as Status;
+  const status = library.functions.weivel_core_create(options, created, waiting) as Status;
   if (status !== Status.Ok) {
     return { status, events: [], value: undefined };
   }
-  const core = new Core(library.functions, created[0] as object, createOptions.onListenerError);
-  if (createOptions.dispatcher !== undefined) {
-    core.setDispatcher(createOptions.dispatcher);
-  }
-  return { status, events: [], value: core };
+  const core = new Core(library.functions, created[0] as object, createOptions.onListenerError, createOptions.dispatcher);
+  return { status, events: core.drainCreation(waiting[0]!), value: core };
 }
 
 type Release = (answer: object) => number;
@@ -141,8 +142,9 @@ type EventCopier = (event: object) => CoreEvent | undefined;
  * Moves every queued event into `drained`: the only caller of weivel_next_event. `pending` holds how many events the
  * core said wait and receives each later count, so a queue the core reported empty costs no crossing; without it the
  * drain runs until the core answers NONE. Each event is released whatever copying it does, so the next
- * weivel_next_event never meets an unreleased event, and an event that cannot be copied goes to `report` while the
- * rest are still drained.
+ * weivel_next_event never meets an unreleased event. An event `copy` cannot copy is drained as `copyIncomplete`
+ * copies it and `report` is told once; one neither can copy goes to `report` alone, and the rest are still drained.
+ * A status other than OK or NONE is a defect of the layer, since the layer built the event struct, and ends the drain.
  */
 export function drainEvents(
   functions: CoreFunctions,
@@ -150,6 +152,7 @@ export function drainEvents(
   eventBuffer: object,
   drained: CoreEvent[],
   copy: EventCopier,
+  copyIncomplete: EventCopier,
   report: ListenerErrorSink,
   pending: Uint32Array | null = null,
 ): void {
@@ -160,21 +163,65 @@ export function drainEvents(
       return;
     }
     if (status !== Status.Ok) {
-      throw new Error(`weivel_next_event answered status ${status}: the layer's event struct is malformed.`);
+      report(new Error(`weivel_next_event answered status ${status}: the core refused the layer's event struct, so the rest of its queue waits.`), undefined);
+      return;
     }
     waiting = pending === null ? waiting : pending[0]!;
     try {
-      const event = copy(eventBuffer);
+      const event = copyOrMarkIncomplete(eventBuffer, copy, copyIncomplete, report);
       if (event !== undefined) {
         drained.push(event);
       }
-    } catch (error) {
-      report(error, undefined);
     } finally {
       functions.weivel_event_release(eventBuffer);
     }
   }
 }
+
+function copyOrMarkIncomplete(
+  eventBuffer: object,
+  copy: EventCopier,
+  copyIncomplete: EventCopier,
+  report: ListenerErrorSink,
+): CoreEvent | undefined {
+  try {
+    return copy(eventBuffer);
+  } catch (error) {
+    return copyFixedPart(eventBuffer, error, copyIncomplete, report);
+  }
+}
+
+function copyFixedPart(eventBuffer: object, error: unknown, copyIncomplete: EventCopier, report: ListenerErrorSink): CoreEvent | undefined {
+  let event: CoreEvent | undefined;
+  try {
+    event = copyIncomplete(eventBuffer);
+  } catch {
+    event = undefined;
+  }
+  report(error, event);
+  return event;
+}
+
+/**
+ * The calls that hand the core something their caller made: a manifest, an edge source, options, a reason, an id or
+ * an answer. The core calling one of them malformed is the caller's mistake, answered with the core's refusal; any
+ * other call the layer built whole, so its being malformed is a defect of the layer.
+ */
+const callsCarryingTheCallersValues: ReadonlySet<CoreFunctionName> = new Set<CoreFunctionName>([
+  "weivel_advance",
+  "weivel_supports",
+  "weivel_register_manifest",
+  "weivel_plan_activation",
+  "weivel_quarantine_plugin",
+  "weivel_register_service",
+  "weivel_get_service",
+  "weivel_want_service",
+  "weivel_report_capacity",
+  "weivel_watch_service",
+  "weivel_provide_capability",
+  "weivel_all_capabilities",
+  "weivel_watch_capability",
+]);
 
 function allocateZeroed(name: CoreStructName): object {
   return allocateSized(coreStructs[name]);
@@ -202,11 +249,25 @@ export class Core {
   #settling = false;
   readonly #onListenerError: ListenerErrorSink;
 
-  constructor(functions: CoreFunctions, core: object, onListenerError: ListenerErrorSink = defaultListenerErrorSink) {
+  constructor(
+    functions: CoreFunctions,
+    core: object,
+    onListenerError: ListenerErrorSink = defaultListenerErrorSink,
+    dispatcher?: EventDispatcher,
+  ) {
     this.#functions = functions;
     this.#core = core;
     this.#onListenerError = onListenerError;
+    this.#dispatcher = dispatcher;
     this.#event = allocateZeroed("weivel_event");
+  }
+
+  /** Drains and dispatches the `waiting` events the core's creation queued, as a call's are; answers them. */
+  drainCreation(waiting: number): CoreEvent[] {
+    const events: CoreEvent[] = [];
+    this.#pending[0] = waiting;
+    this.#drainAndSettle(this.#liveCore(), events, this.#pending);
+    return events;
   }
 
   /** Hands an error to the core's listener error sink; a sink that throws is reported to the console instead. */
@@ -274,6 +335,7 @@ export class Core {
   nextDeadline(): CallResult<number> {
     const deadline: unknown[] = [0];
     return this.#invoke(
+      "weivel_next_deadline",
       (core, pending) => this.#functions.weivel_next_deadline(core, deadline, pending),
       () => Number(deadline[0]),
     );
@@ -285,6 +347,7 @@ export class Core {
 
   supports(manifest: Manifest): CallResult<Support> {
     return this.#invokeWithAnswer(
+      "weivel_supports",
       "weivel_support",
       (core, answer, pending) => this.#functions.weivel_supports(core, encodeManifest(manifest), answer, pending),
       readSupport,
@@ -293,7 +356,7 @@ export class Core {
   }
 
   registerManifest(manifest: Manifest): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle, pending) =>
+    return this.#invokeForHandle("weivel_register_manifest", (core, handle, pending) =>
       this.#functions.weivel_register_manifest(core, encodeManifest(manifest), handle, pending),
     );
   }
@@ -302,6 +365,7 @@ export class Core {
     const pluginList = plugins.length === 0 ? null : [...plugins];
     const provided = hostProvided === undefined ? null : encodeStrings(hostProvided);
     return this.#invokeWithAnswer(
+      "weivel_plan_activation",
       "weivel_activation_plan",
       (core, answer, pending) =>
         this.#functions.weivel_plan_activation(core, pluginList, plugins.length, edgeSource, provided, answer, pending),
@@ -312,84 +376,86 @@ export class Core {
 
   openPlugin(plugin: bigint, payload?: bigint): CallResult<undefined> {
     const options = payload === undefined ? null : encodePluginOptions(payload);
-    return this.#invoke((core, pending) => this.#functions.weivel_open_plugin(core, plugin, options, pending));
+    return this.#invoke("weivel_open_plugin", (core, pending) => this.#functions.weivel_open_plugin(core, plugin, options, pending));
   }
 
   pluginPayload(plugin: bigint): CallResult<bigint> {
-    return this.#invokeForHandle((core, payload, pending) => this.#functions.weivel_plugin_payload(core, plugin, payload, pending));
+    return this.#invokeForHandle("weivel_plugin_payload", (core, payload, pending) => this.#functions.weivel_plugin_payload(core, plugin, payload, pending));
   }
 
   releasePlugin(plugin: bigint): CallResult<undefined> {
-    return this.#invoke((core, pending) => this.#functions.weivel_release_plugin(core, plugin, pending));
+    return this.#invoke("weivel_release_plugin", (core, pending) => this.#functions.weivel_release_plugin(core, plugin, pending));
   }
 
   quarantinePlugin(plugin: bigint, reason?: QuarantineReason): CallResult<undefined> {
     const encoded = reason === undefined ? null : encodeQuarantineReason(reason);
-    return this.#invoke((core, pending) => this.#functions.weivel_quarantine_plugin(core, plugin, encoded, pending));
+    return this.#invoke("weivel_quarantine_plugin", (core, pending) => this.#functions.weivel_quarantine_plugin(core, plugin, encoded, pending));
   }
 
   forgetPlugin(plugin: bigint): CallResult<undefined> {
-    return this.#invoke((core, pending) => this.#functions.weivel_forget_plugin(core, plugin, pending));
+    return this.#invoke("weivel_forget_plugin", (core, pending) => this.#functions.weivel_forget_plugin(core, plugin, pending));
   }
 
   registerService(owner: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
+    return this.#invokeForHandle("weivel_register_service", (core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
   }
 
   unregister(handle: bigint): CallResult<undefined> {
-    return this.#invoke((core, pending) => this.#functions.weivel_unregister(core, handle, pending));
+    return this.#invoke("weivel_unregister", (core, pending) => this.#functions.weivel_unregister(core, handle, pending));
   }
 
   handleState(handle: bigint): CallResult<HandleCondition> {
     const condition: unknown[] = [0];
     return this.#invoke(
+      "weivel_handle_state",
       (core, pending) => this.#functions.weivel_handle_state(core, handle, condition, pending),
       () => condition[0] as HandleCondition,
     );
   }
 
   getService(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_get_service(core, plugin, id, handle, pending));
+    return this.#invokeForHandle("weivel_get_service", (core, handle, pending) => this.#functions.weivel_get_service(core, plugin, id, handle, pending));
   }
 
   wantService(plugin: bigint, id: string, options?: WantOptions): CallResult<bigint> {
     const encoded = options === undefined ? null : encodeWantOptions(options);
-    return this.#invokeForHandle((core, handle, pending) =>
+    return this.#invokeForHandle("weivel_want_service", (core, handle, pending) =>
       this.#functions.weivel_want_service(core, plugin, id, encoded, handle, pending),
     );
   }
 
   reportCapacity(want: bigint, registration: bigint, answer: CapacityAnswer, now: number): CallResult<undefined> {
     const encoded = encodeCapacity(answer);
-    return this.#invoke((core, pending) => this.#functions.weivel_report_capacity(core, want, registration, encoded, now, pending));
+    return this.#invoke("weivel_report_capacity", (core, pending) => this.#functions.weivel_report_capacity(core, want, registration, encoded, now, pending));
   }
 
   watchService(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle, pending) => this.#functions.weivel_watch_service(core, plugin, id, handle, pending));
+    return this.#invokeForHandle("weivel_watch_service", (core, handle, pending) => this.#functions.weivel_watch_service(core, plugin, id, handle, pending));
   }
 
   serviceIds(plugin: bigint): CallResult<string[]> {
-    return this.#invokeForServiceList((core, answer, pending) => this.#functions.weivel_service_ids(core, plugin, answer, pending));
+    return this.#invokeForServiceList("weivel_service_ids", (core, answer, pending) => this.#functions.weivel_service_ids(core, plugin, answer, pending));
   }
 
   unboundServices(plugin: bigint): CallResult<string[]> {
-    return this.#invokeForServiceList((core, answer, pending) =>
+    return this.#invokeForServiceList("weivel_unbound_services", (core, answer, pending) =>
       this.#functions.weivel_unbound_services(core, plugin, answer, pending),
     );
   }
 
   provideCapability(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle, pending) =>
+    return this.#invokeForHandle("weivel_provide_capability", (core, handle, pending) =>
       this.#functions.weivel_provide_capability(core, plugin, id, handle, pending),
     );
   }
 
   verifyActivation(plugin: bigint): CallResult<undefined> {
-    return this.#invoke((core, pending) => this.#functions.weivel_verify_activation(core, plugin, pending));
+    return this.#invoke("weivel_verify_activation", (core, pending) => this.#functions.weivel_verify_activation(core, plugin, pending));
   }
 
   allCapabilities(plugin: bigint, id: string): CallResult<CapabilityImplementation[]> {
     return this.#invokeWithAnswer(
+      "weivel_all_capabilities",
       "weivel_capability_list",
       (core, answer, pending) => this.#functions.weivel_all_capabilities(core, plugin, id, answer, pending),
       readCapabilityList,
@@ -398,13 +464,14 @@ export class Core {
   }
 
   watchCapability(plugin: bigint, id: string): CallResult<bigint> {
-    return this.#invokeForHandle((core, handle, pending) =>
+    return this.#invokeForHandle("weivel_watch_capability", (core, handle, pending) =>
       this.#functions.weivel_watch_capability(core, plugin, id, handle, pending),
     );
   }
 
   ledger(): CallResult<LedgerSnapshot> {
     return this.#invokeWithAnswer(
+      "weivel_ledger",
       "weivel_ledger_snapshot",
       (core, answer, pending) => this.#functions.weivel_ledger(core, answer, pending),
       readLedgerSnapshot,
@@ -414,6 +481,7 @@ export class Core {
 
   ledgerEntry(plugin: bigint): CallResult<LedgerRow> {
     return this.#invokeWithAnswer(
+      "weivel_ledger_entry",
       "weivel_ledger_row",
       (core, answer, pending) => this.#functions.weivel_ledger_entry(core, plugin, answer, pending),
       readLedgerRow,
@@ -421,21 +489,23 @@ export class Core {
     );
   }
 
-  #invokeForHandle(call: (core: object, handle: unknown[], pending: Uint32Array) => number): CallResult<bigint> {
+  #invokeForHandle(name: CoreFunctionName, call: (core: object, handle: unknown[], pending: Uint32Array) => number): CallResult<bigint> {
     const handle: unknown[] = [0];
     return this.#invoke(
+      name,
       (core, pending) => call(core, handle, pending),
       () => toBigInt(handle[0]),
     );
   }
 
-  #invokeForServiceList(call: (core: object, answer: object, pending: Uint32Array) => number): CallResult<string[]> {
-    return this.#invokeWithAnswer("weivel_service_list", call, readServiceList, (answer) =>
+  #invokeForServiceList(name: CoreFunctionName, call: (core: object, answer: object, pending: Uint32Array) => number): CallResult<string[]> {
+    return this.#invokeWithAnswer(name, "weivel_service_list", call, readServiceList, (answer) =>
       this.#functions.weivel_service_list_release(answer),
     );
   }
 
   #invokeWithAnswer<Value>(
+    name: CoreFunctionName,
     answerStruct: CoreStructName,
     call: (core: object, answer: object, pending: Uint32Array) => number,
     read: (answer: object) => Value,
@@ -444,6 +514,7 @@ export class Core {
     const answer = allocateZeroed(answerStruct);
     try {
       return this.#invoke(
+        name,
         (core, pending) => call(core, answer, pending),
         () => readThenRelease(answer, read, release),
       );
@@ -459,9 +530,19 @@ export class Core {
    * to it; a call that threw before the core answered says nothing of the queue, which is then drained until the core
    * answers NONE.
    */
-  #invoke<Value>(call: (core: object, pending: Uint32Array) => number, readValue?: () => Value): CallResult<Value> {
+  #invoke<Value>(name: CoreFunctionName, call: (core: object, pending: Uint32Array) => number, readValue?: () => Value): CallResult<Value> {
     this.#advanceToDueDeadline(this.#liveCore());
-    return this.#callAndDrain(this.#liveCore(), call, readValue);
+    const result = this.#callAndDrain(this.#liveCore(), call, readValue);
+    if (result.status === Status.Malformed && !callsCarryingTheCallersValues.has(name)) {
+      this.#reportMalformedLayerCall(name, result.events);
+    }
+    return result;
+  }
+
+  #reportMalformedLayerCall(name: CoreFunctionName, events: readonly CoreEvent[]): void {
+    const refusal = events.find((event) => event.kind === "refusal");
+    const detail = refusal?.kind === "refusal" && refusal.refusal.detail !== null ? `: ${refusal.refusal.detail}` : "";
+    this.reportListenerError(new Error(`The core called ${name}, a call the layer built whole, malformed${detail}.`), refusal);
   }
 
   /** Advances the core to the clock when it has reached the announced deadline; the advance itself is not checked. */
@@ -497,6 +578,7 @@ export class Core {
         this.#event,
         events,
         (event) => this.#copyAndReadDeadline(event),
+        copyIncompleteEvent,
         (error, event) => this.reportListenerError(error, event),
         pending,
       );

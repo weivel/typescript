@@ -80,20 +80,29 @@ export class Host {
 
   /** @throws Error when the core's library is missing or the core cannot be created. */
   static create(options: HostOptions): Host {
-    const created = createCore({ libraryPath: options.coreLibraryPath, options: options.core, onListenerError: options.onListenerError });
+    return new Host(options);
+  }
+
+  /**
+   * @implNote The core is created with the host's dispatcher, because its creation is drained as any call is: an
+   * event it queued would be heard by no one if the dispatcher were set afterwards. Such an event names no plugin,
+   * so the contexts not existing yet loses nothing.
+   */
+  private constructor(options: HostOptions) {
+    this.#options = options;
+    this.#log = options.log ?? consoleLogger;
+    const created = createCore({
+      libraryPath: options.coreLibraryPath,
+      options: options.core,
+      onListenerError: options.onListenerError,
+      dispatcher: (event) => this.#dispatch(event),
+    });
     if (created.value === undefined) {
       throw new Error(`weivel_core_create answered status ${created.status}.`);
     }
-    return new Host(created.value, options);
-  }
-
-  private constructor(core: Core, options: HostOptions) {
-    this.core = core;
-    this.#options = options;
-    this.#log = options.log ?? consoleLogger;
-    this.contexts = new PluginContexts(core, { clock: options.clock, log: this.#log });
-    core.setDispatcher((event) => this.#dispatch(event));
-    this.#timer = new CoreTimer(core, { clock: options.clock, scheduler: options.scheduler, onMove: options.onTimerMove });
+    this.core = created.value;
+    this.contexts = new PluginContexts(this.core, { clock: options.clock, log: this.#log });
+    this.#timer = new CoreTimer(this.core, { clock: options.clock, scheduler: options.scheduler, onMove: options.onTimerMove });
   }
 
   /** Whether `destroy` has begun its work; every call from then on answers `hostDestroyed`. */
@@ -111,7 +120,7 @@ export class Host {
     } else if (event.kind === "reach-refused") {
       this.#log.warn(this.#reachRefusedText(event));
     }
-    this.contexts.receive(event);
+    this.contexts?.receive(event);
   }
 
   #reachRefusedText(event: ReachRefusedEvent): string {

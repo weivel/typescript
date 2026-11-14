@@ -40,6 +40,38 @@ export function decodeStruct(pointer: object, offset: number, name: CoreStructNa
   return koffi.decode(pointer, offset, coreStructs[name]) as DecodedFields;
 }
 
+/** What stands in an incomplete event in place of each text the core gave; a text the core left NULL stays null. */
+export const TEXT_NOT_COPIED = "the layer could not copy this text";
+
+/**
+ * Reads only the fixed part of a struct: every number and handle, each text the core gave as TEXT_NOT_COPIED, and no
+ * pointer followed, so it reads nothing whose copy could fail.
+ */
+export function decodeFixedPart(pointer: object, offset: number, name: CoreStructName): DecodedFields {
+  return decodeFixedFields(pointer, offset, coreStructs[name]);
+}
+
+function decodeFixedFields(pointer: object, offset: number, type: ReturnType<typeof koffi.opaque>): DecodedFields {
+  const fields: DecodedFields = {};
+  for (const member of Object.values(koffi.introspect(type).members ?? {})) {
+    fields[member.name] = decodeFixedMember(pointer, offset + member.offset, member.type);
+  }
+  return fields;
+}
+
+function decodeFixedMember(pointer: object, offset: number, type: ReturnType<typeof koffi.opaque>): unknown {
+  switch (koffi.introspect(type).primitive) {
+    case "Record":
+      return decodeFixedFields(pointer, offset, type);
+    case "String":
+      return koffi.decode(pointer, offset, "void *") === null ? null : TEXT_NOT_COPIED;
+    case "Pointer":
+      return null;
+    default:
+      return koffi.decode(pointer, offset, type);
+  }
+}
+
 export function readRefusal(refusal: DecodedRefusal, subject: unknown, hasFix: unknown): Refusal {
   return {
     code: refusal.code as RefusalCode,
