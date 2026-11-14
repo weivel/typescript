@@ -2,7 +2,7 @@ import koffi from "koffi";
 import { afterEach, describe, expect, it } from "vitest";
 import { coreStructs, EventKind, HOST, loadCoreLibrary, offsetOf, RefusalCode, Status, type CoreFunctions } from "../../src/core/index.ts";
 import { RefusalError, type PluginContext } from "../../src/context/index.ts";
-import type { Plugin } from "../../src/host/index.ts";
+import type { Host, Plugin } from "../../src/host/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
 import { recordingLogger } from "../context/world.ts";
 import { alive, createHostWorld, settle, type HostWorld } from "./world.ts";
@@ -100,6 +100,32 @@ describe("a plugin's context", () => {
     await alive(world.host.activate([plugin])).outcomes;
 
     expect(order).toEqual(["context alpha", "warn alpha"]);
+  });
+});
+
+describe("a plugin opened as the destroy began", () => {
+  it("is released at once without its activate being called, answered released", async () => {
+    wrap("weivel_open_plugin", (...parameters) => {
+      const status = originals.weivel_open_plugin(...parameters);
+      const extra = new Uint32Array(1);
+      originals.weivel_get_service(parameters[0], parameters[1], "nobody:thing", [0], extra);
+      addPending(parameters[3], extra[0]!);
+      return status;
+    });
+    const destructions: Promise<void>[] = [];
+    const world: { host?: Host } = {};
+    const created = createHostWorld({}, { log: { ...recordingLogger().logger, warn: () => void destructions.push(world.host!.destroy()) } });
+    world.host = created.host;
+    let activated = false;
+    const plugin = alive(created.host.register({ importName: "alpha", api: 1 }, { activate: () => void (activated = true) })).plugin!;
+
+    const outcomes = await alive(created.host.activate([plugin])).outcomes;
+    await Promise.all(destructions);
+
+    expect(destructions).toHaveLength(1);
+    expect(activated).toBe(false);
+    expect(outcomes.map((outcome) => outcome.state)).toEqual(["released"]);
+    expect(created.host.core.destroyed).toBe(true);
   });
 });
 

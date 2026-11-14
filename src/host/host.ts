@@ -293,12 +293,11 @@ export class Host {
       const failed = this.#outcome(record, "failed", undefined);
       return this.#releaseIfOpened(record).then(() => failed);
     }
+    if (this.#destroyed) {
+      return this.#releaseWithoutActivating(record);
+    }
     return new Promise((resolve) => {
       record.settleOutcome = resolve;
-      if (this.#destroyed) {
-        void this.#release(record).catch((error: unknown) => this.#sink(error));
-        return;
-      }
       record.activated = true;
       const activating = settledCall(() => record.hosted.entry.activate(context));
       Promise.resolve(activating).then(
@@ -306,6 +305,17 @@ export class Host {
         (error: unknown) => this.#activationSettled(record, activationFailureOf(error)),
       );
     });
+  }
+
+  /**
+   * Releases a plugin opened as the destroy began, its activate never called, answering it `released` at once.
+   *
+   * @implNote The destroy's own release of it may already have begun inside the open's dispatch, before there was an
+   * outcome to settle, so the outcome is answered here rather than by the release.
+   */
+  #releaseWithoutActivating(record: PluginRecord): Promise<ActivationOutcome> {
+    void this.#release(record).catch((error: unknown) => this.#sink(error));
+    return Promise.resolve(this.#outcome(record, "released", undefined));
   }
 
   /** Verifies or quarantines a plugin whose activate settled, unless it was released or the host destroyed since. */

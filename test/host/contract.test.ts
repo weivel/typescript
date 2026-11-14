@@ -116,6 +116,7 @@ describe("destroy", () => {
     await world.host.destroy();
 
     expect(activated).toEqual(["first"]);
+    expect([...world.pluginLogs.keys()]).toEqual(["first"]);
     expect(outcomes.map((outcome) => [outcome.importName, outcome.state])).toEqual([
       ["first", "released"],
       ["second", "released"],
