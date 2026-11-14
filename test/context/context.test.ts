@@ -44,7 +44,7 @@ describe("services.get", () => {
     expect(beta.context.services.get(key)?.greet("beta")).toBe("hello beta");
   });
 
-  it("answers nothing for an id the plugin does not reach, and reports the refusal on its events", () => {
+  it("throws the core's refusal for an id the plugin does not reach, and reports the refusal on its events too", () => {
     const world = createWorld();
     const alpha = world.open(provider);
     alpha.context.services.register(alpha.context.service(greetingId), greeting());
@@ -52,7 +52,9 @@ describe("services.get", () => {
     const heard: PluginEvent[] = [];
     gamma.context.events.listen((event) => heard.push(event));
 
-    expect(gamma.context.services.get(gamma.context.service(greetingId))).toBeUndefined();
+    expect(() => gamma.context.services.get(gamma.context.service(greetingId))).toThrow(
+      expect.objectContaining({ name: "RefusalError", code: RefusalCode.Undeclared }),
+    );
 
     expect(heard).toHaveLength(1);
     expect(heard[0]).toMatchObject({ kind: "reach-refused", reach: ReachKind.Service, id: greetingId });
@@ -217,6 +219,35 @@ describe("a host service", () => {
     expect(beta.context.services.get(beta.context.service("weivel.config"))).toBe(config);
     unregister();
     expect(beta.context.services.get(beta.context.service("weivel.config"))).toBeUndefined();
+  });
+});
+
+/** A context whose plugin is registered and was never opened, so the core refuses every call it makes. */
+function neverOpened(world: ReturnType<typeof createWorld>) {
+  const plugin = world.core.registerManifest({ importName: "idle", services: { consumes: [{ id: greetingId }] }, capabilities: { consumes: ["screens"] } }).value!;
+  return world.contexts.create(plugin, { importName: "idle" }, recordingLogger().logger);
+}
+
+describe("a call the core refuses", () => {
+  it("is answered with the refusal, by ids, watch, all and a capability watch alike", () => {
+    const world = createWorld();
+    const idle = neverOpened(world);
+    const unreached = world.open(consumer("gamma", "gamma:other"));
+
+    const answers = [
+      () => idle.services.ids(),
+      () => unreached.context.services.watch(unreached.context.service(greetingId), () => {}),
+      () => unreached.context.capabilities.all(unreached.context.capability("screens")),
+      () => unreached.context.capabilities.watch(unreached.context.capability("widgets"), () => {}),
+    ].map((call) => {
+      try {
+        return call();
+      } catch (error) {
+        return error;
+      }
+    });
+
+    expect(answers.map((answer) => answer instanceof RefusalError)).toEqual([true, true, true, true]);
   });
 });
 

@@ -4,18 +4,24 @@ import { failureOf } from "./refusal.js";
 import { startWatching } from "./services.js";
 import { ensureAttached, type Attachment, type ContextState } from "./state.js";
 
+/** The verified implementations of `id`; a refusal is thrown. */
 function all(state: ContextState, plugin: bigint, id: string): unknown[] {
-  return state.call(() => {
+  const { listed, implementations } = state.call(() => {
+    const listed = state.core.allCapabilities(plugin, id);
     const implementations: unknown[] = [];
-    for (const { implementation } of state.core.allCapabilities(plugin, id).value ?? []) {
+    for (const { implementation } of listed.value ?? []) {
       const offered = state.implementations.lookup(implementation);
       if (offered !== undefined) {
         state.hold(plugin, implementation, ReachKind.Capability, offered);
         implementations.push(offered.object);
       }
     }
-    return implementations;
+    return { listed, implementations };
   });
+  if (listed.status !== Status.Ok) {
+    throw failureOf("weivel_all_capabilities", listed);
+  }
+  return implementations;
 }
 
 /** Provides `object` as the plugin's implementation of `id`, throwing the core's refusal. */
@@ -46,6 +52,7 @@ export function createCapabilities(state: ContextState, attachment: Attachment):
       return startWatching(
         state,
         plugin,
+        "weivel_watch_capability",
         () => state.core.watchCapability(plugin, type.id),
         listener as (implementation: unknown, change: string) => void,
       );

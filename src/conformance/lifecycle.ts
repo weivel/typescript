@@ -157,8 +157,17 @@ class LifecycleRun {
     );
   }
 
+  /** Traces a get that answered no object, absent or refused, as missed. */
   #get(name: string, context: PluginContext, id: string): void {
-    const served = context.services.get(context.service(id)) !== undefined;
+    let served: boolean;
+    try {
+      served = context.services.get(context.service(id)) !== undefined;
+    } catch (error) {
+      if (!(error instanceof RefusalError)) {
+        throw error;
+      }
+      served = false;
+    }
     this.trace.push(`${served ? "got" : "missed"} ${name} ${id}`);
   }
 
