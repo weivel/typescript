@@ -9,17 +9,17 @@
     {
       "id": "github:1455223370",
       "importName": "core",
-      "commit": "2521d9dce58191f7d97e82d32592059e8d3fca80"
+      "commit": "fa3f251b9b5e07060c786b49803fceb91b8a08bc"
     },
     {
       "id": "github:1456093642",
       "importName": "standard",
-      "commit": "4031ff8aa02cc8cb9a3d9ff71ce82c2fc46a8fcb"
+      "commit": "7bb6cf3aaf844aee5d8d1f914578dbd7060b21bd"
     },
     {
       "id": "github:1426141679",
       "importName": "conformance",
-      "commit": "9a03e312cb500241fc870eec1458acc8fad140ba"
+      "commit": "6bd2497b149fb552a53f77834c8110e72faf570b"
     }
   ]
 }
