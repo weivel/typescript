@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Bound, HOST, ReachKind, RefusalCode, Status, type CoreEvent, type Manifest } from "../../src/core/index.ts";
-import { RefusalError, type PluginEvent } from "../../src/context/index.ts";
-import { createWorld, settle } from "./world.ts";
+import { DetachedError, RefusalError, type PluginEvent } from "../../src/context/index.ts";
+import { openPlugin } from "../real-core.ts";
+import { createWorld, recordingLogger, settle } from "./world.ts";
 
 interface Greeting {
   greet(name: string): string;
@@ -293,7 +294,7 @@ describe("capabilities", () => {
 });
 
 describe("a listener that throws", () => {
-  it("lets every other listener hear, logs the throw on the plugin's log, and reports no refusal", () => {
+  it("lets every other listener hear, reports the throw to the error sink, and reports no refusal", () => {
     const world = createWorld();
     const calendar = world.open(screensProvider("calendar"));
     const bad = world.open(screensConsumer("bad"));
@@ -315,8 +316,8 @@ describe("a listener that throws", () => {
     expect(agendaHeard).toEqual([[screen, "provide"]]);
     expect(badHeard).toEqual([[screen, "provide"]]);
     expect(world.dispatched.filter((event) => event.kind === "refusal" || event.kind === "reach-refused")).toEqual([]);
-    expect(bad.log.entries.filter((entry) => entry.level === "error")).toHaveLength(1);
-    expect((bad.log.entries[0]?.cause as Error).message).toBe("bad listener");
+    expect(world.sunk.map((sunk) => (sunk.error as Error).message)).toEqual(["bad listener"]);
+    expect(bad.log.entries).toEqual([]);
     expect(agenda.log.entries).toEqual([]);
     expect(world.hostLog.entries).toEqual([]);
   });
@@ -336,7 +337,7 @@ describe("a listener that throws", () => {
     unregister();
 
     expect(betaHeard).toEqual(["register", "unregister"]);
-    expect(bad.log.entries.filter((entry) => entry.level === "error")).toHaveLength(2);
+    expect(world.sunk).toHaveLength(2);
   });
 });
 
@@ -425,6 +426,91 @@ describe("a plugin the core stopped", () => {
 
     expect(world.dispatched.filter((event) => event.kind === "refusal")).toHaveLength(refusalsBefore);
     expect(world.contexts.tracked(alpha.plugin)).toBe(0);
+  });
+});
+
+describe("an event drained before a context was made", () => {
+  it("never reaches it, though it names the plugin's handle", () => {
+    const world = createWorld();
+    const heard: PluginEvent[] = [];
+    let opened = false;
+    world.core.setDispatcher((event) => {
+      if (!opened) {
+        opened = true;
+        const plugin = openPlugin(world.core, consumer("beta"));
+        world.core.getService(plugin, "nobody:thing");
+        const context = world.contexts.create(plugin, consumer("beta"), recordingLogger().logger);
+        context.events.listen((pluginEvent) => heard.push(pluginEvent));
+      }
+      world.dispatched.push(event);
+      world.contexts.receive(event);
+    });
+
+    world.core.registerService(HOST, "");
+
+    expect(world.dispatched.some((event) => event.kind === "reach-refused")).toBe(true);
+    expect(heard).toEqual([]);
+  });
+});
+
+describe("a context whose plugin the core has forgotten", () => {
+  function forgotten() {
+    const world = createWorld();
+    const beta = world.open({ ...consumer("beta"), capabilities: { provides: ["screens"], consumes: ["screens"] } });
+    world.core.releasePlugin(beta.plugin);
+    world.contexts.stopped(beta.plugin);
+    world.core.forgetPlugin(beta.plugin);
+    world.contexts.forget(beta.plugin);
+    const coreCalls = [
+      vi.spyOn(world.core, "getService"),
+      vi.spyOn(world.core, "serviceIds"),
+      vi.spyOn(world.core, "registerService"),
+      vi.spyOn(world.core, "wantService"),
+      vi.spyOn(world.core, "watchService"),
+      vi.spyOn(world.core, "allCapabilities"),
+      vi.spyOn(world.core, "watchCapability"),
+      vi.spyOn(world.core, "provideCapability"),
+    ];
+    return { context: beta.context, coreCalls };
+  }
+
+  it("answers every call that would reach the core as detached, a DetachedError and no refusal, reaching nothing", async () => {
+    const { context, coreCalls } = forgotten();
+    const greetingType = context.service<Greeting>(greetingId);
+    const screens = context.capability<Screen>("screens");
+
+    const thrown = [
+      () => context.services.get(greetingType),
+      () => context.services.ids(),
+      () => context.services.register(greetingType, greeting()),
+      () => context.services.watch(greetingType, () => {}),
+      () => context.capabilities.all(screens),
+      () => context.capabilities.watch(screens, () => {}),
+      () => context.provide(screens, { name: "calendar" }),
+    ].map((call) => {
+      try {
+        call();
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    });
+    const rejected = await context.services.want(greetingType).catch((reason: unknown) => reason);
+
+    for (const answer of [...thrown, rejected]) {
+      expect(answer).toBeInstanceOf(DetachedError);
+      expect(answer).not.toBeInstanceOf(RefusalError);
+    }
+    for (const call of coreCalls) {
+      expect(call).not.toHaveBeenCalled();
+    }
+  });
+
+  it("still answers its manifest and its log", () => {
+    const { context } = forgotten();
+
+    expect(context.manifest.importName).toBe("beta");
+    expect(() => context.log.info("still here")).not.toThrow();
   });
 });
 
@@ -566,7 +652,7 @@ describe("a constrained want", () => {
     expect(wanted.settled).toBe(false);
   });
 
-  it("logs a provider's throw on its owner's log and leaves the question unanswered", async () => {
+  it("reports a provider's throw to the error sink and leaves the question unanswered", async () => {
     const world = createWorld(vocabulary);
     const alpha = world.open(storeProvider);
     const beta = world.open(storeConsumer);
@@ -584,7 +670,8 @@ describe("a constrained want", () => {
     const wanted = track(beta.context.services.want(beta.context.service(storeId), { pollMillis: 100 }));
     await settle();
     expect(wanted.settled).toBe(false);
-    expect(alpha.log.entries.map((entry) => entry.level)).toEqual(["error"]);
+    expect(world.sunk.map((sunk) => (sunk.error as Error).message)).toEqual(["no capacity yet"]);
+    expect(alpha.log.entries).toEqual([]);
     expect(beta.log.entries).toEqual([]);
 
     throwing = false;

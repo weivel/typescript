@@ -19,6 +19,23 @@ export class RefusalError extends Error implements Refusal {
   }
 }
 
+/**
+ * What a call through a context answers once the core has forgotten its plugin: neither a success nor a refusal of
+ * the core's, since the call never reached the core.
+ *
+ * @implNote The core may by then have issued the plugin's handle to another plugin, so a call made with it could act
+ * for that other plugin.
+ */
+export class DetachedError extends Error {
+  readonly plugin: bigint;
+
+  constructor(plugin: bigint) {
+    super(`The core has forgotten plugin ${plugin}, so its context reaches the core no more.`);
+    this.name = "DetachedError";
+    this.plugin = plugin;
+  }
+}
+
 function refusalOfEvent(event: CoreEvent): Refusal | undefined {
   switch (event.kind) {
     case "refusal":

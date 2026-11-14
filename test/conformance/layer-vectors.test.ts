@@ -18,8 +18,8 @@ describe("consume/a-throwing-listener-does-not-silence-the-others", () => {
     expect(seen.observed.heard).toEqual(vector.then.heard);
     expect(seen.observed.reported).toEqual(vector.then.reported);
     expect(seen.observed.refusal).toEqual(vector.then.refusal);
-    const errors = seen.logs.filter((entry) => entry.level === "error");
-    expect(errors.map((entry) => entry.source)).toEqual(["bad"]);
+    expect(seen.logs.filter((entry) => entry.level === "error")).toEqual([]);
+    expect(seen.sunk.map((error) => (error as Error).message)).toEqual([expect.stringMatching(/^the throwing listener of /)]);
   });
 });
 

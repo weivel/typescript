@@ -2,7 +2,7 @@ import { ReachKind, Status } from "../core/index.js";
 import type { Capabilities, CapabilityType, ImplementationListener } from "./model.js";
 import { failureOf } from "./refusal.js";
 import { startWatching } from "./services.js";
-import type { ContextState } from "./state.js";
+import { ensureAttached, type Attachment, type ContextState } from "./state.js";
 
 function all(state: ContextState, plugin: bigint, id: string): unknown[] {
   return state.call(() => {
@@ -33,15 +33,22 @@ export function provideCapability(state: ContextState, plugin: bigint, id: strin
   }
 }
 
-export function createCapabilities(state: ContextState, plugin: bigint): Capabilities {
+/** The capabilities of a context; a call through a detached one throws DetachedError and reaches nothing. */
+export function createCapabilities(state: ContextState, attachment: Attachment): Capabilities {
+  const plugin = attachment.plugin;
   return {
-    all: <Implementation>(type: CapabilityType<Implementation>) => all(state, plugin, type.id) as Implementation[],
-    watch: <Implementation>(type: CapabilityType<Implementation>, listener: ImplementationListener<Implementation>) =>
-      startWatching(
+    all: <Implementation>(type: CapabilityType<Implementation>) => {
+      ensureAttached(attachment);
+      return all(state, plugin, type.id) as Implementation[];
+    },
+    watch: <Implementation>(type: CapabilityType<Implementation>, listener: ImplementationListener<Implementation>) => {
+      ensureAttached(attachment);
+      return startWatching(
         state,
         plugin,
         () => state.core.watchCapability(plugin, type.id),
         listener as (implementation: unknown, change: string) => void,
-      ),
+      );
+    },
   };
 }

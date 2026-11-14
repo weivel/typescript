@@ -44,7 +44,7 @@ function answerOf(provider: CapacityProvider, event: CapacityWantedEvent): Capac
 /**
  * Puts a constrained want's question to the provider's object and reports its answer to the core.
  *
- * @remarks A provider that throws is logged on its owner's log and left unanswered, which the core reads as "not
+ * @remarks A provider that throws is reported to the error sink and left unanswered, which the core reads as "not
  * right now" when the question's time ends. A question that arrived incomplete is left unanswered the same way and
  * put to no one: its constraints are missing rather than empty, and the wrapper that marked it told the sink.
  */
@@ -57,7 +57,7 @@ export function answerCapacity(state: ContextState, event: CapacityWantedEvent):
   try {
     answer = answerOf(offered.capacity ?? plainRegistration, event);
   } catch (error) {
-    state.logOf(offered.owner).error(`The provider of ${offered.id} threw while asked about its capacity.`, error);
+    state.core.reportListenerError(error, event);
     return;
   }
   if (answer !== undefined) {

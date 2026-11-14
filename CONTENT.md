@@ -29,6 +29,12 @@ standard discovered into its manifest and an entry whose `activate` imports the 
 - `WEIVEL_STATUS_MALFORMED` is reported to the error sink as a defect of the layer only for a call the layer built
   whole. A call carrying what its caller made (a manifest, an edge source, options, a reason, an id, a time or a
   capacity answer) is answered with the core's refusal and reported nowhere.
+- A listener, a plugin's event listener or a capacity answerer that throws is reported to the error sink, never to a
+  plugin's log.
+- A context is built before its plugin is opened, and no event the wrapper drained before it was built reaches it.
+  Once the core has forgotten the plugin the context is detached: a call that would reach the core throws, or for
+  `want` rejects, a `DetachedError`, which is not a `RefusalError`, and reaches nothing. A want still pending then is
+  settled by the core's own settlement of it, already queued.
 
 ## Siblings and native libraries
 

@@ -89,15 +89,16 @@ describe("activation", () => {
     const world = sinkingWorld();
     const trace: Trace = [];
     const contexts = new Map<string, PluginContext>();
-    const failure = new Error("context failed");
+    const failure = new Error("open failed after the core opened it");
     const broken = registered(world, "broken", recordingEntry(trace, "broken", contexts));
     const sound = registered(world, "sound", recordingEntry(trace, "sound", contexts));
-    const create = world.host.contexts.create.bind(world.host.contexts);
-    world.host.contexts.create = (plugin, ...rest) => {
+    const openPlugin = world.host.core.openPlugin.bind(world.host.core);
+    world.host.core.openPlugin = (plugin, ...rest) => {
+      const opened = openPlugin(plugin, ...rest);
       if (plugin === broken) {
         throw failure;
       }
-      return create(plugin, ...rest);
+      return opened;
     };
 
     const started = alive(world.host.activate([broken, sound]));

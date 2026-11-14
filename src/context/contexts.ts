@@ -5,7 +5,7 @@ import { createCapabilities, provideCapability } from "./capabilities.js";
 import { handleEvent } from "./event-handlers.js";
 import type { CapabilityType, Logger, PluginContext, PluginEventListener, RegisterOptions, ServiceType } from "./model.js";
 import { createServices, registerService } from "./services.js";
-import { ContextState } from "./state.js";
+import { ContextState, ensureAttached, type Attachment } from "./state.js";
 
 export interface PluginContextsOptions {
   /** The time handed to the core with a want or a capacity answer; the timer's clock by default. */
@@ -36,7 +36,13 @@ export class PluginContexts {
   constructor(core: Core, options: PluginContextsOptions = {}) {
     const hostLog = options.log ?? consoleLogger;
     this.#state = new ContextState(core, options.clock ?? systemClock, hostLog, (event) => handleEvent(this.#state, event));
-    this.#state.plugins.set(HOST, { log: hostLog, eventListeners: new Set(), handles: new Set() });
+    this.#state.plugins.set(HOST, {
+      log: hostLog,
+      eventListeners: new Set(),
+      handles: new Set(),
+      attachment: { plugin: HOST, detached: false },
+      madeAfter: 0,
+    });
   }
 
   /**
@@ -47,13 +53,17 @@ export class PluginContexts {
     this.#state.core.whenDispatched(() => this.#state.whenHandled(step));
   }
 
-  /** Builds the context of a plugin the core has opened, its log forwarded to `log`. */
+  /**
+   * Builds the context of a plugin, its log forwarded to `log`, no later than the host opens it. No event the core
+   * drained before this reaches it.
+   */
   create(plugin: bigint, manifest: Manifest, log: Logger): PluginContext {
-    const handles = this.#state.plugins.get(plugin)?.handles ?? new Set<bigint>();
     const eventListeners = new Set<PluginEventListener>();
-    this.#state.plugins.set(plugin, { log, eventListeners, handles });
+    const attachment: Attachment = { plugin, detached: false };
+    const madeAfter = this.#state.core.drainedCount;
+    this.#state.plugins.set(plugin, { log, eventListeners, handles: new Set(), attachment, madeAfter });
     return {
-      capabilities: createCapabilities(this.#state, plugin),
+      capabilities: createCapabilities(this.#state, attachment),
       capability: <Implementation>(id: string): CapabilityType<Implementation> => ({ id }),
       events: {
         listen: (listener) => {
@@ -63,9 +73,12 @@ export class PluginContexts {
       },
       log,
       manifest,
-      provide: (type, implementation) => provideCapability(this.#state, plugin, type.id, implementation),
+      provide: (type, implementation) => {
+        ensureAttached(attachment);
+        provideCapability(this.#state, plugin, type.id, implementation);
+      },
       service: <Service>(id: string): ServiceType<Service> => ({ id }),
-      services: createServices(this.#state, plugin),
+      services: createServices(this.#state, attachment),
     };
   }
 
@@ -105,16 +118,19 @@ export class PluginContexts {
     return this.#state.plugins.get(plugin)?.handles.size ?? 0;
   }
 
-  /** Drops everything of a plugin the core has forgotten: its context, and every object behind its handles. */
+  /**
+   * Detaches the context of a plugin the core has forgotten and drops every object behind its handles. A want still
+   * pending stays until the core's settlement of it is dispatched, which its release or the late want itself queued.
+   */
   forget(plugin: bigint): void {
     const forgotten = this.#state.plugins.get(plugin);
     if (forgotten === undefined || plugin === HOST) {
       return;
     }
+    forgotten.attachment.detached = true;
     for (const handle of forgotten.handles) {
       this.#state.services.drop(handle);
       this.#state.implementations.drop(handle);
-      this.#state.wants.drop(handle);
       this.#state.watches.drop(handle);
     }
     this.#state.plugins.delete(plugin);
