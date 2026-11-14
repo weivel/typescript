@@ -60,7 +60,8 @@ export type ActivationState = "active" | "quarantined" | "refused" | "released" 
 /** Where one plugin's activation ended, and why when it did not end active. */
 export interface ActivationOutcome {
   readonly plugin: bigint;
-  readonly importName: string;
+  /** Undefined only for a verification the caller asked for of a handle the host never registered. */
+  readonly importName: string | undefined;
   readonly state: ActivationState;
   /** For a quarantined plugin, the reason its ledger row shows; for a refused one, the core's refusal. */
   readonly refusal: Refusal | undefined;

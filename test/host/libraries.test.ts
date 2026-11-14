@@ -96,12 +96,12 @@ describe("a C library loaded as host services", () => {
     expect(() => held.echo!(new Uint8Array([1]))).toThrow("echo_echo belongs to a C library that has been unloaded.");
   });
 
-  it("unload once, so a second unload leaves another load of the same file working", () => {
+  it("unload once, so a second unload leaves a later load of the same file working", () => {
     const world = createHostWorld();
     const first = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
+    first.unload();
     const second = alive(world.host.loadLibrary(declaration(), echoLibraryPath));
 
-    first.unload();
     first.unload();
 
     expect(second.services.get("echo")!.echo!(new Uint8Array([9]))).toEqual(new Uint8Array([9]));

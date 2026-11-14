@@ -26,6 +26,10 @@ export class HandleTable<Value> {
   get size(): number {
     return this.#entries.size;
   }
+
+  entries(): IterableIterator<[bigint, Value]> {
+    return this.#entries.entries();
+  }
 }
 
 /**

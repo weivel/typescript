@@ -91,6 +91,16 @@ export class PluginContexts {
     return registerService(this.#state, HOST, type.id, service, options.capacity);
   }
 
+  /** Whether a registration under `id` that the core has not ended is live, a plugin's or the host's. */
+  registers(id: string): boolean {
+    for (const [registration, offered] of this.#state.services.entries()) {
+      if (offered.id === id && !this.#state.hasEnded(registration)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** What `plugin` holds for the implementation handle the core handed it, or undefined once revoked. */
   held(plugin: bigint, implementation: bigint): unknown {
     return this.#state.holdings.lookup(plugin, implementation)?.implementation;
