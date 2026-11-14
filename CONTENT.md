@@ -35,6 +35,13 @@ standard discovered into its manifest and an entry whose `activate` imports the 
   Once the core has forgotten the plugin the context is detached: a call that would reach the core throws, or for
   `want` rejects, a `DetachedError`, which is not a `RefusalError`, and reaches nothing. A want still pending then is
   settled by the core's own settlement of it, already queued.
+- `host.register` registers, keeps and answers a frozen copy of the manifest it is handed.
+- `host.verify` of a plugin the host holds nothing of open answers the core's answer, `active` or `refused`, and
+  quarantines nothing; for a handle it never registered the outcome's `importName` is undefined.
+- `host.destroy` makes the host quiet the moment it is called, starts no plugin of a plan not yet started (each
+  answered `released`), and waits for every release under way, however long its deactivate takes.
+- `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
+  `registerHostService` throws for an id a live library declares.
 
 ## Siblings and native libraries
 
