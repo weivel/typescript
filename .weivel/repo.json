@@ -9,7 +9,7 @@
     {
       "id": "github:1455223370",
       "importName": "core",
-      "commit": "78e706bb020f35699809ba93163ee09a26047ac6"
+      "commit": "c7ea3bca22e096be1834e2782b9b59fc8bad2486"
     },
     {
       "id": "github:1456093642",
@@ -19,7 +19,7 @@
     {
       "id": "github:1426141679",
       "importName": "conformance",
-      "commit": "b2494b1e1a6bd1d1155826427bf6601423734315"
+      "commit": "101dc0fa41cd755dd35a8b8dd105be85ceefc7f7"
     }
   ]
 }
