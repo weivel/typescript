@@ -269,6 +269,24 @@ describe("the clock", () => {
   });
 });
 
+describe("a plugin event listener that throws", () => {
+  it("is reported to the error sink and the next listener still hears the event", () => {
+    const world = createWorld();
+    const gamma = world.open(consumer("gamma", "gamma:other"));
+    const failure = new Error("event listener failed");
+    const heard: PluginEvent[] = [];
+    gamma.context.events.listen(() => {
+      throw failure;
+    });
+    gamma.context.events.listen((event) => heard.push(event));
+
+    expect(() => gamma.context.services.get(gamma.context.service(greetingId))).toThrow(RefusalError);
+
+    expect(heard.map((event) => event.kind)).toEqual(["reach-refused"]);
+    expect(world.sunk.map((sunk) => sunk.error)).toEqual([failure]);
+  });
+});
+
 describe("services.ids", () => {
   it("answers the reachable ids registered now, as the core lists them", () => {
     const world = createWorld();

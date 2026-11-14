@@ -347,7 +347,21 @@ function countLibraryCalls(): LibraryCounts {
   return counts;
 }
 
+const echoFunctions = ["echo", "fail", "garbage"].map((name) => ({ name, symbol: `echo_${name}`, kind: FunctionKind.Bytes, context: 0 }));
+
 describe("loading a C library", () => {
+  it("releases the library's output after every call, a failed one included", () => {
+    const world = sinkingWorld();
+    const counts = countLibraryCalls();
+    const echo = alive(world.host.loadLibrary({ ...echoDeclaration([]), services: [{ id: "echo", functions: echoFunctions }] }, echoLibraryPath)).services.get("echo")!;
+
+    echo.echo!(new Uint8Array([1, 2]));
+    expect(() => echo.fail!(new Uint8Array([1]))).toThrow();
+    echo.garbage!(new Uint8Array(0));
+
+    expect(counts.releases).toBe(3);
+  });
+
   it("undoes a load that fails partway as an unload, what it registered unregistered and its binary closed", () => {
     const world = sinkingWorld();
     const counts = countLibraryCalls();
