@@ -8,16 +8,22 @@ type NativeFunction = (...parameters: unknown[]) => unknown;
 const bytesParameters = ["const void *", "size_t", "_Out_ void **", "_Out_ size_t *"];
 const statusOk = 0;
 
-/** A bytes function's answer other than 0: its status, and the text its body carried. */
+/** A bytes function's answer other than 0: its status, its body as bytes, and the body's text where it is UTF-8. */
 export class LibraryCallError extends Error {
   readonly status: number;
   readonly symbol: string;
+  readonly body: Uint8Array;
+  /** The body read as UTF-8, or undefined when it is not UTF-8. */
+  readonly text: string | undefined;
 
   constructor(symbol: string, status: number, body: Uint8Array) {
-    super(`${symbol} answered status ${status}: ${textOf(body)}`);
+    const text = utf8TextOf(body);
+    super(`${symbol} answered status ${status}: ${describeBody(body, text)}`);
     this.name = "LibraryCallError";
     this.status = status;
     this.symbol = symbol;
+    this.body = body;
+    this.text = text;
   }
 }
 
@@ -36,15 +42,19 @@ interface LoadState {
   loaded: boolean;
 }
 
-function textOf(body: Uint8Array): string {
-  if (body.length === 0) {
-    return "and no text saying why";
-  }
+function utf8TextOf(body: Uint8Array): string | undefined {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(body);
   } catch {
-    return `and ${body.length} bytes that are not UTF-8`;
+    return undefined;
   }
+}
+
+function describeBody(body: Uint8Array, text: string | undefined): string {
+  if (body.length === 0) {
+    return "and no text saying why";
+  }
+  return text ?? `and ${body.length} bytes that are not UTF-8`;
 }
 
 function copyBody(pointer: object | null, length: number): Uint8Array {
