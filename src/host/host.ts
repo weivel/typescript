@@ -218,7 +218,8 @@ export class Host {
    *
    * @throws Error when a function is of a kind other than bytes, an id is declared twice or is already registered,
    * by another live library, a plugin or the host itself, the library file is missing, or it lacks a symbol its
-   * declaration names: each the caller's mistake, reported to no sink.
+   * declaration names: each the caller's mistake, reported to no sink. RefusalError when the core refuses one of its
+   * registrations, the load then undone as an unload.
    */
   loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
     if (this.#destroyed) {
@@ -227,9 +228,8 @@ export class Host {
     refuseUnboundKinds(declaration);
     this.#refuseHeldIds(declaration);
     const bound = bindLibrary(libraryPath, declaration);
-    const unregisters = [...bound.services].map(([id, service]) => this.#registerHostService({ id }, service, {}));
+    const unregisters: (() => void)[] = [];
     const ids = [...bound.services.keys()];
-    ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
     const unload = (): void => {
       this.#libraryUnloads.delete(unload);
       ids.forEach((id) => this.#libraryIds.delete(id));
@@ -237,6 +237,15 @@ export class Host {
       bound.unload();
     };
     this.#libraryUnloads.add(unload);
+    ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
+    try {
+      for (const [id, service] of bound.services) {
+        unregisters.push(this.#registerHostService({ id }, service, {}));
+      }
+    } catch (error) {
+      unload();
+      throw error;
+    }
     return { declaration, services: bound.services, unload };
   }
 

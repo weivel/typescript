@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { PluginStatus, type CoreEvent, type Manifest } from "../../src/core/index.ts";
+import koffi from "koffi";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { HOST, PluginStatus, type CoreEvent, type Manifest } from "../../src/core/index.ts";
 import { DetachedError, RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { hostDestroyed, type ActivationOutcome, type Plugin } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
@@ -295,7 +296,53 @@ const echoDeclaration = (ids: readonly string[]): LibraryDeclaration => ({
   services: ids.map((id) => ({ id, functions: [{ name: "echo", symbol: "echo_echo", kind: FunctionKind.Bytes, context: 0 }] })),
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+interface LibraryCounts {
+  unloads: number;
+  releases: number;
+}
+
+/** Counts, until the test ends, every unload of a library koffi loads and every call of the echo library's release. */
+function countLibraryCalls(): LibraryCounts {
+  const counts: LibraryCounts = { unloads: 0, releases: 0 };
+  const load = koffi.load.bind(koffi);
+  vi.spyOn(koffi, "load").mockImplementation((path: string | null) => {
+    const library = load(path);
+    const unload = library.unload.bind(library);
+    const bind = library.func.bind(library) as (...parameters: unknown[]) => (...arguments_: unknown[]) => unknown;
+    library.unload = () => {
+      counts.unloads += 1;
+      unload();
+    };
+    library.func = ((...parameters: unknown[]) => {
+      const bound = bind(...parameters);
+      return parameters[0] === "echo_release"
+        ? (...arguments_: unknown[]) => {
+            counts.releases += 1;
+            return bound(...arguments_);
+          }
+        : bound;
+    }) as typeof library.func;
+    return library;
+  });
+  return counts;
+}
+
 describe("loading a C library", () => {
+  it("undoes a load that fails partway as an unload, what it registered unregistered and its binary closed", () => {
+    const world = sinkingWorld();
+    const counts = countLibraryCalls();
+
+    expect(() => world.host.loadLibrary(echoDeclaration(["echo", ""]), echoLibraryPath)).toThrow();
+
+    expect(world.host.core.getService(HOST, "echo").value).toBeUndefined();
+    expect(counts.unloads).toBe(1);
+    expect(() => world.host.registerHostService({ id: "echo" }, {})).not.toThrow();
+  });
+
   it("refuses a declaration that lists an id twice, registering nothing and telling no sink", () => {
     const world = sinkingWorld();
 
