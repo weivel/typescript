@@ -170,6 +170,22 @@ describe("a plugin the host holds open", () => {
   });
 });
 
+describe("a release", () => {
+  it("of a plugin registered and never opened answers that there was nothing to release, and does nothing", async () => {
+    const world = sinkingWorld();
+    const plugin = registered(world, "idle", { activate() {} });
+
+    await expect(world.host.release(plugin)).resolves.toBe(false);
+
+    expect(world.host.core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
+    expect(world.host.plugin(plugin)).toBeDefined();
+    const [outcome] = await alive(world.host.activate([plugin])).outcomes;
+    expect(outcome!.state).toBe("active");
+    await expect(world.host.release(plugin)).resolves.toBe(true);
+    await expect(world.host.release(plugin)).resolves.toBe(false);
+  });
+});
+
 describe("a verification the caller asks for", () => {
   it("of a plugin the host never opened is answered as the core answers it, quarantining nothing", () => {
     const world = createHostWorld();
