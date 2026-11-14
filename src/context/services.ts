@@ -14,6 +14,14 @@ function encodeWant(options: WantOptions, now: number): CoreWantOptions {
   };
 }
 
+/**
+ * Whether the core reads the want's `now`: for a timeout, and for a constrained want, which needs a poll interval and
+ * may have a budget. Only then is the clock read.
+ */
+function needsTheTime(options: WantOptions): boolean {
+  return options.timeoutMillis !== undefined || options.budgetMillis !== undefined || options.pollMillis !== undefined;
+}
+
 function answered(result: CallResult<bigint>): bigint | undefined {
   return result.status === Status.Ok ? result.value : undefined;
 }
@@ -121,7 +129,7 @@ function ids(state: ContextState, plugin: bigint): string[] {
 function want(state: ContextState, plugin: bigint, id: string, options: WantOptions): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const result = state.call(() => {
-      const wanted = state.core.wantService(plugin, id, encodeWant(options, state.clock.now()));
+      const wanted = state.core.wantService(plugin, id, encodeWant(options, needsTheTime(options) ? state.clock.now() : 0));
       const wantHandle = answered(wanted);
       if (wantHandle !== undefined) {
         state.wants.add(wantHandle, { plugin, id, resolve, reject });

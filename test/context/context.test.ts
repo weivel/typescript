@@ -251,6 +251,24 @@ describe("a call the core refuses", () => {
   });
 });
 
+describe("the clock", () => {
+  it("is read for a want only when it has a timeout, a budget or a poll interval", () => {
+    const world = createWorld();
+    const beta = world.open(consumer("beta"));
+    const key = beta.context.service<Greeting>(greetingId);
+    const reads = vi.spyOn(world.clock, "now");
+
+    void beta.context.services.want(key).catch(() => undefined);
+    const readsWithoutTime = reads.mock.calls.length;
+    for (const options of [{ timeoutMillis: 100 }, { budgetMillis: 100 }, { pollMillis: 10 }]) {
+      void beta.context.services.want(key, options).catch(() => undefined);
+    }
+
+    expect(readsWithoutTime).toBe(0);
+    expect(reads).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("services.ids", () => {
   it("answers the reachable ids registered now, as the core lists them", () => {
     const world = createWorld();
