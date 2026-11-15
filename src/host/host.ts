@@ -551,8 +551,8 @@ export class Host {
 
   /**
    * Quarantines a plugin, its entries ending once the events its quarantine queued have reached it. With no reason,
-   * its ledger row shows the refusal its activation check answered. The outcome carries `decidedBy`, the refusal that
-   * quarantined it, and otherwise the reason its ledger row shows.
+   * its ledger row shows the refusal its activation check answered. The outcome carries `decidedBy`, the core's
+   * refusal that quarantined it, and nothing for a quarantine for a reason of the host's, which its ledger row keeps.
    */
   #quarantine(record: PluginRecord, reason: QuarantineReason | undefined, decidedBy?: Refusal): ActivationOutcome {
     const plugin = record.hosted.plugin;
@@ -561,7 +561,7 @@ export class Host {
       this.#sink(failureOf("weivel_quarantine_plugin", quarantined));
     }
     this.#contexts.whenEventsHandled(() => this.#contexts.stopped(plugin));
-    return this.#outcome(record, "quarantined", decidedBy ?? this.#core.ledgerEntry(plugin).value?.refusal);
+    return this.#outcome(record, "quarantined", decidedBy);
   }
 
   #outcome(record: PluginRecord, state: ActivationState, refusal: Refusal | undefined): ActivationOutcome {

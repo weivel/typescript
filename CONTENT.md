@@ -30,8 +30,8 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   before the next plugin starts. A plan the core refuses is answered as `{ refusal }`, with no plan and no outcomes,
   never thrown.
 - An outcome's `refusal` is the one that decided it: the core's refusal of the open for `refused`, the core's refusal
-  of the verification for a `quarantined` plugin that refusal quarantined, and the host's reason for one whose
-  activate failed.
+  of the verification for a `quarantined` plugin that refusal quarantined, and none for a plugin quarantined for a
+  reason of the host's, such as an activate that failed, whose reason its ledger row keeps.
 - `host.ledger()` answers the core's ledger, every plugin's row as the core keeps it, and `onTimerMove` in the host's
   options hears each move of its timer, the deadline it arms or `undefined` when it disarms. The host hands its caller
   nothing of the wrapper: the core, the contexts and the wrapper's dispatch, clock and deadline hooks are reached only

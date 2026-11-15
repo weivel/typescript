@@ -65,7 +65,8 @@ export interface ActivationOutcome {
   readonly state: ActivationState;
   /**
    * The refusal that decided it: for a refused plugin, the core's refusal of the open; for one quarantined because the
-   * core refused its verification, that refusal; for one quarantined because its activate failed, the host's reason.
+   * core refused its verification, that refusal; none for one quarantined for a reason of the host's, such as an
+   * activate that failed, whose reason its ledger row keeps.
    */
   readonly refusal: Refusal | undefined;
 }
