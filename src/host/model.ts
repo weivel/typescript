@@ -63,17 +63,26 @@ export interface ActivationOutcome {
   /** Undefined only for a verification the caller asked for of a handle the host never registered. */
   readonly importName: string | undefined;
   readonly state: ActivationState;
-  /** For a quarantined plugin, the reason its ledger row shows; for a refused one, the core's refusal. */
+  /**
+   * The refusal that decided it: for a refused plugin, the core's refusal of the open; for one quarantined because the
+   * core refused its verification, that refusal; for one quarantined because its activate failed, the host's reason.
+   */
   readonly refusal: Refusal | undefined;
 }
 
-/** What `activate` answers once every activate has been started, before any has settled. */
-export interface ActivationStart {
-  /** The core's plan, cycles and refusals included, exactly as answered; its order is the order activates started. */
-  readonly plan: ActivationPlan;
-  /** One outcome per plugin of the plan's order, in that order, once every activate has settled. */
-  readonly outcomes: Promise<readonly ActivationOutcome[]>;
-}
+/**
+ * What `activate` answers once every activate has been started, before any has settled: the plan and its outcomes,
+ * or, for a plan the core refused, that refusal and nothing started.
+ */
+export type ActivationStart =
+  | {
+      /** The core's plan, cycles and refusals included, exactly as answered; its order is the order activates started. */
+      readonly plan: ActivationPlan;
+      /** One outcome per plugin of the plan's order, in that order, once every activate has settled. */
+      readonly outcomes: Promise<readonly ActivationOutcome[]>;
+      readonly refusal: undefined;
+    }
+  | { readonly plan: undefined; readonly outcomes: undefined; readonly refusal: Refusal };
 
 /** What every call on a destroyed host answers, as a value: it neither throws nor writes anywhere. */
 export interface HostDestroyed {

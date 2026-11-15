@@ -4,7 +4,7 @@ import { HOST, PluginStatus, type CoreEvent, type Manifest } from "../../src/cor
 import { DetachedError, RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { hostDestroyed, type ActivationOutcome, type Plugin } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
-import { alive, createHostWorld, echoLibraryPath, ManualScheduler, settle, type HostWorld } from "./world.ts";
+import { alive, planned, createHostWorld, echoLibraryPath, ManualScheduler, settle, type HostWorld } from "./world.ts";
 import { hostInternals } from "../../src/host/host.ts";
 
 interface Sunk {
@@ -47,7 +47,7 @@ describe("registration", () => {
 
     manifest.importName = "changed";
     manifest.services.consumes.push({ id: "other:thing" });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
 
     const kept = world.host.plugin(plugin)!.manifest;
     expect(kept).not.toBe(manifest);
@@ -68,8 +68,8 @@ describe("a verification the core refuses", () => {
         statusesHeard.push(hostInternals(world.host).core.ledgerEntry(plugin).value?.status);
       }
     });
-    const started = alive(world.host.activate([plugin]));
     verifying = true;
+    const started = planned(world.host.activate([plugin]));
 
     const [outcome] = await started.outcomes;
 
@@ -131,14 +131,14 @@ describe("a plugin the host holds open", () => {
       },
       { services: { provides: [{ id: "alpha:thing" }] } },
     );
-    const first = alive(world.host.activate([plugin]));
+    const first = planned(world.host.activate([plugin]));
     contexts[0]!.services.register(contexts[0]!.service("alpha:thing"), {});
     const tracked = hostInternals(world.host).contexts.tracked(plugin);
 
-    const [whileInFlight] = await alive(world.host.activate([plugin])).outcomes;
+    const [whileInFlight] = await planned(world.host.activate([plugin])).outcomes;
     pending.resolve();
     await first.outcomes;
-    const [whileActive] = await alive(world.host.activate([plugin])).outcomes;
+    const [whileActive] = await planned(world.host.activate([plugin])).outcomes;
 
     expect([whileInFlight!.state, whileActive!.state]).toEqual(["refused", "refused"]);
     expect(contexts).toHaveLength(1);
@@ -160,8 +160,8 @@ describe("a plugin the host holds open", () => {
       },
     });
 
-    const [quarantined] = await alive(world.host.activate([plugin])).outcomes;
-    const [reopened] = await alive(world.host.activate([plugin])).outcomes;
+    const [quarantined] = await planned(world.host.activate([plugin])).outcomes;
+    const [reopened] = await planned(world.host.activate([plugin])).outcomes;
 
     expect([quarantined!.state, reopened!.state]).toEqual(["quarantined", "active"]);
     expect(contexts[1]).toBe(contexts[0]);
@@ -180,7 +180,7 @@ describe("a release", () => {
 
     expect(hostInternals(world.host).core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
     expect(world.host.plugin(plugin)).toBeDefined();
-    const [outcome] = await alive(world.host.activate([plugin])).outcomes;
+    const [outcome] = await planned(world.host.activate([plugin])).outcomes;
     expect(outcome!.state).toBe("active");
     await expect(world.host.release(plugin)).resolves.toBe(true);
     await expect(world.host.release(plugin)).resolves.toBe(false);
@@ -222,7 +222,7 @@ describe("destroy", () => {
     const plugin = registered(world, "waiter", { activate: (context) => void context.services.want(context.service("nobody:thing"), { timeoutMillis: 1000 }).catch(() => undefined) }, {
       services: { consumes: [{ id: "nobody:thing" }] },
     });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
     expect(scheduler.armed.size).toBe(1);
 
     await expect(world.host.destroy()).resolves.toBeUndefined();
@@ -242,7 +242,7 @@ describe("destroy", () => {
     });
     const second = registered(world, "second", { activate: () => void activated.push("second") });
 
-    const outcomes = await alive(world.host.activate([first, second])).outcomes;
+    const outcomes = await planned(world.host.activate([first, second])).outcomes;
     await world.host.destroy();
 
     expect(activated).toEqual(["first"]);
@@ -258,7 +258,7 @@ describe("destroy", () => {
     const world = sinkingWorld();
     const answers: unknown[] = [];
     const contexts = new Map<string, PluginContext>();
-    const provider = registered(world, "provider", { activate: (context) => context.provide(context.capability("screens"), {}) }, {
+    const provider = registered(world, "provider", { activate: async (context) => context.provide(context.capability("screens"), {}) }, {
       capabilities: { provides: ["screens"] },
     });
     const watcher = registered(
@@ -278,7 +278,7 @@ describe("destroy", () => {
       { capabilities: { consumes: ["screens"] } },
     );
 
-    await alive(world.host.activate([watcher, provider])).outcomes;
+    await planned(world.host.activate([watcher, provider])).outcomes;
     await world.host.destroy();
 
     expect(answers).toEqual([hostDestroyed, hostDestroyed]);
@@ -289,7 +289,7 @@ describe("destroy", () => {
     const world = sinkingWorld();
     const deactivating = deferred();
     const plugin = registered(world, "slow", { activate() {}, deactivate: () => deactivating.promise });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
     const released = world.host.release(plugin);
     let destroyed = false;
 
@@ -397,7 +397,7 @@ describe("loading a C library", () => {
     const plugin = registered(world, "echo", { activate: (context) => void context.services.register(context.service("echo:thing"), {}) }, {
       services: { provides: [{ id: "echo:thing" }] },
     });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
 
     expect(() => world.host.loadLibrary(echoDeclaration(["echo:thing"]), echoLibraryPath)).toThrow(/echo:thing/);
   });

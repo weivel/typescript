@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EmbeddedNulError, type Manifest } from "../../src/core/index.ts";
 import type { Plugin } from "../../src/host/index.ts";
 import { createWorld } from "../context/world.ts";
-import { alive, createHostWorld } from "../host/world.ts";
+import { alive, createHostWorld, planned } from "../host/world.ts";
 import { createRecordedCore } from "../real-core.ts";
 import { realStandard } from "../real-standard.ts";
 
@@ -75,7 +75,7 @@ describe("a text with an embedded NUL", () => {
       }),
     ).plugin!;
 
-    const [outcome] = await alive(world.host.activate([plugin])).outcomes;
+    const [outcome] = await planned(world.host.activate([plugin])).outcomes;
 
     expect(outcome!.state).toBe("quarantined");
     expect(outcome!.refusal?.detail).toBe("its activate threw: cut\\0short");

@@ -3,6 +3,7 @@ import {
   createCore,
   PluginStatus,
   Status,
+  type ActivationPlan,
   type CallResult,
   type Core,
   type CoreEvent,
@@ -73,6 +74,15 @@ function refuseUnboundKinds(declaration: LibraryDeclaration): void {
  */
 function reasonForC(reason: QuarantineReason): QuarantineReason {
   return { ...reason, detail: reason.detail.replaceAll("\u0000", "\\0"), fix: reason.fix.replaceAll("\u0000", "\\0") };
+}
+
+/** @throws Error when the core answers a status with no refusal for the plan. */
+function refusedPlan(planned: CallResult<ActivationPlan>): ActivationStart {
+  const failure = failureOf("weivel_plan_activation", planned);
+  if (!(failure instanceof RefusalError)) {
+    throw failure;
+  }
+  return { plan: undefined, outcomes: undefined, refusal: failure };
 }
 
 /** What the host's own modules reach of a host, and its exports never hand its caller. */
@@ -327,21 +337,34 @@ export class Host {
    * Plans the activation of `plugins` with the core, then starts each plugin of the plan's order in that order: opens
    * it, builds its context and calls its entry's activate, never waiting for one to finish before starting the next.
    * It answers the plan at once; `outcomes` settles once every activate has, each verified or quarantined as it settles.
+   * A plan the core refuses is answered as that refusal, with no plan and no outcomes.
+   *
+   * The plan is started as one step of a dispatch: as the dispatcher when none runs, so what the activates' own calls
+   * queue is dispatched once every activate has been called, and as a call made inside the dispatch that runs. An
+   * activate that settles before it returns, by returning something other than a promise or by throwing, is verified,
+   * or quarantined, before the next plugin starts; a promise is read when it settles, since its state cannot be read
+   * sooner.
    *
    * @implNote A plugin whose activate awaits a want of a service a later plugin registers would otherwise hold back
    * every plugin behind it for good, and the core sets no default timeout on a want; and a host whose activation
    * waited for every activate could never be destroyed while one waits on a want nothing provides.
+   * @throws Error when the core answers a status with no refusal for the plan, out of memory among them.
    */
   activate(plugins: readonly bigint[]): ActivationStart | HostDestroyed {
     if (this.#destroyed) {
       return hostDestroyed;
     }
     const planned = this.#core.planActivation(plugins, this.#options.edgeSource, [...this.#hostServiceCounts.keys()]);
-    if (planned.value === undefined) {
-      throw failureOf("weivel_plan_activation", planned);
+    const plan = planned.value;
+    if (plan === undefined) {
+      return refusedPlan(planned);
     }
-    const outcomes = planned.value.order.map((plugin) => this.#startActivation(this.#record(plugin)));
-    return { plan: planned.value, outcomes: Promise.all(outcomes) };
+    const outcomes = this.#hooks.holdDispatch(() => this.#startEveryPlugin(plan));
+    return { plan, outcomes: Promise.all(outcomes), refusal: undefined };
+  }
+
+  #startEveryPlugin(plan: ActivationPlan): Promise<ActivationOutcome>[] {
+    return plan.order.map((plugin) => this.#startActivation(this.#record(plugin)));
   }
 
   /**
@@ -370,12 +393,27 @@ export class Host {
     return new Promise((resolve) => {
       record.settleOutcome = resolve;
       record.activated = true;
-      const activating = settledCall(() => record.hosted.entry.activate(context));
-      Promise.resolve(activating).then(
-        () => this.#activationSettled(record, undefined),
-        (error: unknown) => this.#activationSettled(record, activationFailureOf(error)),
-      );
+      this.#callTheActivate(record, context);
     });
+  }
+
+  /** Calls the entry's activate, and verifies or quarantines it at once when it settled before returning. */
+  #callTheActivate(record: PluginRecord, context: PluginContext): void {
+    let activating: unknown;
+    try {
+      activating = record.hosted.entry.activate(context);
+    } catch (error) {
+      this.#activationSettled(record, activationFailureOf(error));
+      return;
+    }
+    if (!isThenable(activating)) {
+      this.#activationSettled(record, undefined);
+      return;
+    }
+    Promise.resolve(activating).then(
+      () => this.#activationSettled(record, undefined),
+      (error: unknown) => this.#activationSettled(record, activationFailureOf(error)),
+    );
   }
 
   /**
@@ -493,7 +531,11 @@ export class Host {
   #verify(record: PluginRecord): ActivationOutcome {
     return this.#hooks.holdDispatch(() => {
       const verified = this.#core.verifyActivation(record.hosted.plugin);
-      return verified.status === Status.Ok ? this.#outcome(record, "active", undefined) : this.#quarantine(record, undefined);
+      if (verified.status === Status.Ok) {
+        return this.#outcome(record, "active", undefined);
+      }
+      const failure = failureOf("weivel_verify_activation", verified);
+      return this.#quarantine(record, undefined, failure instanceof RefusalError ? failure : undefined);
     });
   }
 
@@ -509,16 +551,17 @@ export class Host {
 
   /**
    * Quarantines a plugin, its entries ending once the events its quarantine queued have reached it. With no reason,
-   * its ledger row shows the refusal its activation check answered.
+   * its ledger row shows the refusal its activation check answered. The outcome carries `decidedBy`, the refusal that
+   * quarantined it, and otherwise the reason its ledger row shows.
    */
-  #quarantine(record: PluginRecord, reason: QuarantineReason | undefined): ActivationOutcome {
+  #quarantine(record: PluginRecord, reason: QuarantineReason | undefined, decidedBy?: Refusal): ActivationOutcome {
     const plugin = record.hosted.plugin;
     const quarantined = this.#core.quarantinePlugin(plugin, reason === undefined ? undefined : reasonForC(reason));
     if (quarantined.status !== Status.Ok) {
       this.#sink(failureOf("weivel_quarantine_plugin", quarantined));
     }
     this.#contexts.whenEventsHandled(() => this.#contexts.stopped(plugin));
-    return this.#outcome(record, "quarantined", this.#core.ledgerEntry(plugin).value?.refusal);
+    return this.#outcome(record, "quarantined", decidedBy ?? this.#core.ledgerEntry(plugin).value?.refusal);
   }
 
   #outcome(record: PluginRecord, state: ActivationState, refusal: Refusal | undefined): ActivationOutcome {

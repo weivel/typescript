@@ -4,7 +4,7 @@ import { RefusalCode } from "../../src/core/index.ts";
 import { RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { hostDestroyed, type Plugin } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
-import { alive, createHostWorld, echoLibraryPath, settle, type HostWorld } from "./world.ts";
+import { alive, planned, createHostWorld, echoLibraryPath, settle, type HostWorld } from "./world.ts";
 import { hostInternals } from "../../src/host/host.ts";
 
 /** What the plugins of one test did, in the order they did it. */
@@ -59,7 +59,7 @@ describe("activation", () => {
     const first = registered(world, "first", recordingEntry(trace, "first", contexts, () => never));
     const second = registered(world, "second", recordingEntry(trace, "second", contexts, () => never));
 
-    const started = alive(world.host.activate([first, second]));
+    const started = planned(world.host.activate([first, second]));
 
     expect(started.plan.order).toEqual([first, second]);
     expect(trace).toEqual(["activate first", "activate second"]);
@@ -71,7 +71,7 @@ describe("activation", () => {
     const contexts = new Map<string, PluginContext>();
     let finish: () => void = () => undefined;
     const slow = registered(world, "slow", recordingEntry(trace, "slow", contexts, () => new Promise<void>((resolve) => (finish = resolve))));
-    const started = alive(world.host.activate([slow]));
+    const started = planned(world.host.activate([slow]));
 
     await world.host.release(slow);
     finish();
@@ -102,7 +102,7 @@ describe("activation", () => {
       return opened;
     };
 
-    const started = alive(world.host.activate([broken, sound]));
+    const started = planned(world.host.activate([broken, sound]));
     const outcomes = await started.outcomes;
 
     expect(started.plan.order).toEqual([broken, sound]);
@@ -139,7 +139,7 @@ describe("activation", () => {
       return releasePlugin(plugin);
     };
 
-    const outcomes = await alive(world.host.activate([broken, sound])).outcomes;
+    const outcomes = await planned(world.host.activate([broken, sound])).outcomes;
 
     expect(outcomes.map((outcome) => [outcome.importName, outcome.state, outcome.refusal])).toEqual([
       ["broken", "failed", undefined],
@@ -162,7 +162,7 @@ describe("release", () => {
         throw failure;
       },
     });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
 
     await expect(world.host.release(plugin)).resolves.toBe(true);
 
@@ -174,7 +174,7 @@ describe("release", () => {
     const world = sinkingWorld();
     const failure = new Error("forget failed");
     const plugin = registered(world, "forgetful", { activate() {} });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
     hostInternals(world.host).contexts.forget = () => {
       throw failure;
     };
@@ -212,7 +212,7 @@ describe("release", () => {
       }),
       { capabilities: { consumes: ["screens"] }, services: { consumes: [{ id: "nobody:thing" }] } },
     );
-    await alive(world.host.activate([provider, watcher])).outcomes;
+    await planned(world.host.activate([provider, watcher])).outcomes;
 
     await world.host.release(provider);
     await Promise.all(releases);
@@ -246,7 +246,7 @@ describe("destroy", () => {
       recordingEntry(trace, "waiting", contexts, (context) => followWant(trace, "waiting", context, "nobody:thing")),
       { services: { consumes: [{ id: "nobody:thing" }] } },
     );
-    const started = alive(world.host.activate([steady, broken, waiting]));
+    const started = planned(world.host.activate([steady, broken, waiting]));
     await settle();
 
     await world.host.destroy();
@@ -315,7 +315,7 @@ describe("destroy", () => {
       }),
       { capabilities: { consumes: ["screens"] }, services: { consumes: [{ id: "provider:thing" }] } },
     );
-    await alive(world.host.activate([provider, watcher])).outcomes;
+    await planned(world.host.activate([provider, watcher])).outcomes;
 
     await world.host.release(provider);
     await Promise.all(destructions);
@@ -334,7 +334,7 @@ describe("destroy", () => {
     const world = sinkingWorld();
     const failure = new Error("release failed");
     const plugin = registered(world, "stubborn", { activate() {} });
-    await alive(world.host.activate([plugin])).outcomes;
+    await planned(world.host.activate([plugin])).outcomes;
     hostInternals(world.host).core.releasePlugin = () => {
       throw failure;
     };

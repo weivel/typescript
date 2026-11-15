@@ -19,8 +19,19 @@ and never needs the standard. The `standard` module feeds it from disk: `registr
 turns a plugin the standard discovered into its manifest and an entry whose `activate` imports the module and
 activates the export named `exportName`. The caller names that export; the layer assumes none, `default` included.
 
+An activate settles at once when it returns something other than a promise, or throws. A promise is read when it
+settles, since its state cannot be read sooner, so an `async` activate is verified after the plan has started.
+
 ## How TypeScript reads the contract
 
+- `host.activate` starts the plan as one step of a dispatch: as the dispatcher when no dispatch runs, so what the
+  activates' own calls queue is dispatched once every activate of the plan has been called, and as a call made inside
+  the dispatch that runs otherwise. An activate that settled at once is verified, and quarantined if the core refuses,
+  before the next plugin starts. A plan the core refuses is answered as `{ refusal }`, with no plan and no outcomes,
+  never thrown.
+- An outcome's `refusal` is the one that decided it: the core's refusal of the open for `refused`, the core's refusal
+  of the verification for a `quarantined` plugin that refusal quarantined, and the host's reason for one whose
+  activate failed.
 - `host.ledger()` answers the core's ledger, every plugin's row as the core keeps it, and `onTimerMove` in the host's
   options hears each move of its timer, the deadline it arms or `undefined` when it disarms. The host hands its caller
   nothing of the wrapper: the core, the contexts and the wrapper's dispatch, clock and deadline hooks are reached only

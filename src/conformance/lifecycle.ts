@@ -195,6 +195,9 @@ class LifecycleRun {
   async #perform(step: Step): Promise<void> {
     if ("activate" in step) {
       const started = alive(this.world.host.activate(step.activate.map((name) => this.world.plugin(name))));
+      if (started.plan === undefined) {
+        throw new Error(`The core refused the plan of ${step.activate.join(", ")}: ${started.refusal.detail ?? started.refusal.code}`);
+      }
       this.plans.push(started.plan.order.map((plugin) => this.#nameOf(plugin)));
     } else if ("release" in step) {
       await this.world.host.release(this.world.plugin(step.release));
