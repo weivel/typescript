@@ -38,6 +38,12 @@ export interface RegisterOptions {
    * attributes, so its manifest's advertised attributes stand, and it serves every consumer.
    */
   readonly capacity?: CapacityProvider;
+  /**
+   * Keeps each holding of the registration past its revocation until its holder releases it, and tells this plugin
+   * by a `holdings-released` event once every holding has ended since it was unregistered, so whatever stood behind
+   * the object may be freed then.
+   */
+  readonly awaitReleases?: boolean;
 }
 
 export type ServiceChange = "register" | "unregister";
@@ -93,6 +99,20 @@ export interface RevokedPluginEvent {
   readonly reach: ReachKind;
   readonly id: string;
   readonly implementation: unknown;
+  /**
+   * Says this plugin no longer uses what was revoked, once it has let go of everything the object handed it. For a
+   * registration made awaiting releases it ends the holding the core keeps, and the last such end tells the owner;
+   * otherwise, and after the first call, it does nothing.
+   */
+  release(): void;
+}
+
+/** Every holding of a service this plugin registered awaiting releases has ended since it was unregistered. */
+export interface HoldingsReleasedPluginEvent {
+  readonly kind: "holdings-released";
+  readonly id: string;
+  /** The object it registered. */
+  readonly service: unknown;
 }
 
 /** The core refused this plugin a service or capability it does not reach. */
@@ -111,7 +131,7 @@ export interface DegradedPluginEvent {
 }
 
 /** What the core reported about this plugin. */
-export type PluginEvent = RevokedPluginEvent | ReachRefusedPluginEvent | DegradedPluginEvent;
+export type PluginEvent = RevokedPluginEvent | ReachRefusedPluginEvent | DegradedPluginEvent | HoldingsReleasedPluginEvent;
 
 export type PluginEventListener = (event: PluginEvent) => void;
 

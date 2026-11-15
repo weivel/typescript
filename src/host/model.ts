@@ -1,6 +1,7 @@
 import type { ActivationPlan, CoreOptions, EdgeSource, ListenerErrorSink, Manifest, Refusal } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
+import type { LibraryDefinition } from "./libraries.js";
 import type { Clock, Scheduler, TimerMoveListener } from "../timer/index.js";
 
 /**
@@ -99,9 +100,14 @@ export function isHostDestroyed(answer: unknown): answer is HostDestroyed {
 /** A C library bound as host services. */
 export interface LoadedLibrary {
   readonly declaration: LibraryDeclaration;
-  /** Each declared service's object, by id, as registered under the host: a method per declared function. */
+  /** Each service of bytes functions, by id, as registered under the host: a method per declared function. */
   readonly services: ReadonlyMap<string, LibraryService>;
-  /** Unregisters every service and unloads the library. */
+  /** Each definition service, by id, as registered under the host. */
+  readonly definitions: ReadonlyMap<string, LibraryDefinition>;
+  /**
+   * Unregisters every service at once and refuses every later bytes call; the binary closes once every holding of
+   * each definition has been released, as each holder's `release` of its revocation says.
+   */
   unload(): void;
 }
 

@@ -54,6 +54,7 @@ export const EventKind = {
   CapacityWanted: 7,
   Capability: 8,
   Deadline: 9,
+  HoldingsReleased: 10,
 } as const;
 export type EventKind = ValueOf<typeof EventKind>;
 

@@ -27,6 +27,7 @@ export type IdentityKind = ValueOf<typeof IdentityKind> | number;
 /** The value 1 is retired and never reused. */
 export const FunctionKind = {
   Bytes: 2,
+  Definition: 3,
 } as const;
 export type FunctionKind = ValueOf<typeof FunctionKind> | number;
 

@@ -3,12 +3,13 @@ import { PluginStatus } from "../../src/core/index.ts";
 import { readLayerVector, witnessLayerVector, type LayerVector, type LayerWitness } from "../../src/conformance/index.ts";
 import type { Host } from "../../src/host/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
+import { echoLibraryPath } from "../host/world.ts";
 import { layerVectorDirectory } from "./kit.ts";
 import { hostInternals } from "../../src/host/host.ts";
 
 async function witness(id: string, inspect?: (host: Host) => void): Promise<{ vector: LayerVector; witness: LayerWitness }> {
   const vector = readLayerVector(layerVectorDirectory, id);
-  return { vector, witness: await witnessLayerVector(vector, { coreLibraryPath, ...(inspect === undefined ? {} : { inspect }) }) };
+  return { vector, witness: await witnessLayerVector(vector, { coreLibraryPath, echoLibraryPath, ...(inspect === undefined ? {} : { inspect }) }) };
 }
 
 describe("consume/a-throwing-listener-does-not-silence-the-others", () => {
@@ -132,5 +133,96 @@ describe("lifecycle/an-activate-refused-at-once-is-quarantined-before-the-next-s
 
     expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
     expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-definition-is-the-providers-own-pointer", () => {
+  it("serves the very address the definition's symbol answered, and its echo answers through the library's own context", async () => {
+    const { vector, witness: seen } = await witness("library/a-definition-is-the-providers-own-pointer");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-null-definition-fails-the-load", () => {
+  it("refuses the load as the caller's mistake, registers neither service, and reports nothing", async () => {
+    const { vector, witness: seen } = await witness("library/a-null-definition-fails-the-load");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-definition-below-its-size-fails-the-load", () => {
+  it("refuses a struct one byte below two pointers as the caller's mistake, registering nothing", async () => {
+    const { vector, witness: seen } = await witness("library/a-definition-below-its-size-fails-the-load");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-definition-at-its-size-loads", () => {
+  it("loads a struct of exactly two pointers and serves it", async () => {
+    const { vector, witness: seen } = await witness("library/a-definition-at-its-size-loads");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/an-unload-revokes-every-holding-of-a-definition", () => {
+  it("revokes the definition to each holder by the core's event and serves it to no one after the unload", async () => {
+    const { vector, witness: seen } = await witness("library/an-unload-revokes-every-holding-of-a-definition");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-binary-stays-open-while-a-holding-lives", () => {
+  it("keeps the binary open past the unload until the last holding is released, then closes it", async () => {
+    const { vector, witness: seen } = await witness("library/a-binary-stays-open-while-a-holding-lives");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-binary-closes-once-every-definition-service-is-released", () => {
+  it("closes the binary only once the last definition service's holdings are released", async () => {
+    const { vector, witness: seen } = await witness("library/a-binary-closes-once-every-definition-service-is-released");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-binary-with-no-holding-closes-at-the-unload", () => {
+  it("closes the binary at the unload when nothing holds the definition", async () => {
+    const { vector, witness: seen } = await witness("library/a-binary-with-no-holding-closes-at-the-unload");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-holding-ended-with-its-holder-closes-the-binary", () => {
+  it("counts a holding the host ended by releasing or quarantining its holder towards the close", async () => {
+    const { vector, witness: seen } = await witness("library/a-holding-ended-with-its-holder-closes-the-binary");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holding", () => {
+  it("closes the binary at the last definition release, since a bytes answer is copied and released before its call answers", async () => {
+    const { vector, witness: seen } = await witness("library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holding");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual({ ...vector.then, unloads: { equals: [0, 1, 1] } });
+    expect(vector.then.unloads).toEqual({ equals: [0, 0, 1] });
   });
 });

@@ -55,17 +55,26 @@ export class HoldingTable<Value> {
     return this.#holdingsByPlugin.get(plugin)?.lookup(implementation);
   }
 
+  drop(plugin: bigint, implementation: bigint): boolean {
+    const holdings = this.#holdingsByPlugin.get(plugin);
+    const dropped = holdings?.drop(implementation) ?? false;
+    if (holdings?.size === 0) {
+      this.#holdingsByPlugin.delete(plugin);
+    }
+    return dropped;
+  }
+
+  /** Drops everything `plugin` holds. */
+  dropPlugin(plugin: bigint): void {
+    this.#holdingsByPlugin.delete(plugin);
+  }
+
   /** Drops the holding a revoked event names, when the event is one; answers whether it dropped one. */
   apply(event: CoreEvent): boolean {
     if (event.kind !== "revoked") {
       return false;
     }
-    const holdings = this.#holdingsByPlugin.get(event.plugin);
-    const dropped = holdings?.drop(event.implementation) ?? false;
-    if (holdings?.size === 0) {
-      this.#holdingsByPlugin.delete(event.plugin);
-    }
-    return dropped;
+    return this.drop(event.plugin, event.implementation);
   }
 
   /** How many plugins hold anything. */

@@ -449,7 +449,7 @@ describe("a registration ended while its events still wait", () => {
     await settle();
 
     expect(wanted.value).toBe(service);
-    expect(gammaHeard).toEqual([{ kind: "revoked", reach: ReachKind.Service, id: greetingId, implementation: service }]);
+    expect(gammaHeard).toEqual([{ kind: "revoked", reach: ReachKind.Service, id: greetingId, implementation: service, release: expect.any(Function) }]);
     expect(world.dispatched.filter((event) => event.kind === "refusal")).toEqual([]);
     expect(world.contexts.tracked(alpha.plugin)).toBe(1);
   });
@@ -616,7 +616,7 @@ describe("revocation", () => {
     world.core.releasePlugin(alpha.plugin);
 
     expect(world.contexts.held(beta.plugin, registration)).toBeUndefined();
-    expect(heard).toEqual([{ kind: "revoked", reach: ReachKind.Service, id: greetingId, implementation: service }]);
+    expect(heard).toEqual([{ kind: "revoked", reach: ReachKind.Service, id: greetingId, implementation: service, release: expect.any(Function) }]);
     expect(beta.context.services.get(key)).toBeUndefined();
   });
 });

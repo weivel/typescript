@@ -25,6 +25,15 @@ export interface Offered {
   readonly owner: bigint;
   /** What answers a constrained want's questions, when the registration declared one. */
   readonly capacity?: CapacityProvider;
+  /** Whether it was registered with weivel_register_service_awaiting_releases, so each holding outlives its revocation. */
+  readonly awaitsReleases?: boolean;
+}
+
+/** A registration made awaiting releases, kept until the core says every holding of it has ended. */
+export interface AwaitingReleases {
+  readonly owner: bigint;
+  /** Tells the owner nothing holds what it registered any more. */
+  readonly released: () => void;
 }
 
 /** What a plugin holds, by the implementation handle the core handed it. */
@@ -32,6 +41,7 @@ export interface Held {
   readonly reach: ReachKind;
   readonly id: string;
   readonly implementation: unknown;
+  readonly awaitsReleases: boolean;
 }
 
 export interface PendingWant {
@@ -65,6 +75,9 @@ export class ContextState {
   readonly holdings = new HoldingTable<Held>();
   readonly wants = new HandleTable<PendingWant>();
   readonly watches = new HandleTable<Watching>();
+  readonly awaitingReleases = new HandleTable<AwaitingReleases>();
+  /** Each revoked holding the core keeps until its holder releases it, by holder and registration. */
+  readonly revokedHoldings = new HoldingTable<true>();
   readonly plugins = new Map<bigint, PluginState>();
   readonly #fallbackLog: Logger;
   readonly #deferred: DeferredEvents;
@@ -166,7 +179,21 @@ export class ContextState {
   }
 
   hold(plugin: bigint, implementation: bigint, reach: ReachKind, offered: Offered): void {
-    this.holdings.hold(plugin, implementation, { reach, id: offered.id, implementation: offered.object });
+    this.holdings.hold(plugin, implementation, {
+      reach,
+      id: offered.id,
+      implementation: offered.object,
+      awaitsReleases: offered.awaitsReleases === true,
+    });
+  }
+
+  /** Drops every registration `owner` made awaiting releases, so it hears none of their releases. */
+  dropAwaitingReleasesOf(owner: bigint): void {
+    for (const [registration, awaiting] of [...this.awaitingReleases.entries()]) {
+      if (awaiting.owner === owner) {
+        this.awaitingReleases.drop(registration);
+      }
+    }
   }
 
   /** Drops what the core has ended, unless an event queued before the end may still wait to be handled. */

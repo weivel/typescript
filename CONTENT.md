@@ -83,6 +83,19 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
   `registerHostService` throws for an id a live library declares. A load the core refuses partway is undone as an
   unload before it throws: what it registered is unregistered and its binary closed.
+- A definition service is registered as a frozen `LibraryDefinition`, `{ library, pointer }`: the import name it came
+  from and koffi's pointer to the very struct its symbol answered, never a copy. Translating the library's header
+  into koffi types is the consumer's. A definition that answers NULL, or a struct whose `size` is below
+  `2 * sizeof(void *)`, makes `loadLibrary` throw, as the caller's mistake, before anything is registered.
+- A holder lets go of a revoked definition by calling the `release()` of the `revoked` event it was handed, once it
+  has released everything the definition gave it; for any other revocation `release()` does nothing. A holding a
+  watch made counts the same. The binary is closed once every definition service of the library has had every
+  holding released since the unload, a holder the host released, quarantined or forgot counting as released, or
+  when the host is destroyed. A bytes answer is copied and released before its call answers, so no held bytes keep
+  the binary open.
+- A plugin registers with `{ awaitReleases: true }` to keep each holding of its service past its revocation, and
+  hears a `holdings-released` event, carrying the id and the object it registered, once every holding has ended.
+  A plugin released since hears nothing.
 - A library function that answers a status other than 0 throws a `LibraryCallError` carrying the status and the body
   as bytes, and the body's `text` only where it is UTF-8.
 - The core's and the standard's library paths default to the package's own `native/`, which the package's build

@@ -6,6 +6,8 @@ import type { Clock, Scheduler } from "../timer/index.js";
 /** Where the driver finds the core; `native/` beside the package by default, as for the host. */
 export interface DriverOptions {
   readonly coreLibraryPath?: string;
+  /** A build of the core's `echo` test library, which a `library` vector loads. */
+  readonly echoLibraryPath?: string;
   /** Sees the host after the last step, before the driver destroys it. */
   readonly inspect?: (host: Host) => void;
 }

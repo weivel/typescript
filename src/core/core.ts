@@ -449,6 +449,17 @@ export class Core {
     return this.#invokeForHandle("weivel_register_service", (core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
   }
 
+  registerServiceAwaitingReleases(owner: bigint, id: string): CallResult<bigint> {
+    textForC(id);
+    return this.#invokeForHandle("weivel_register_service_awaiting_releases", (core, handle, pending) =>
+      this.#functions.weivel_register_service_awaiting_releases(core, owner, id, handle, pending),
+    );
+  }
+
+  releaseHolding(holder: bigint, registration: bigint): CallResult<undefined> {
+    return this.#invoke("weivel_release_holding", (core, pending) => this.#functions.weivel_release_holding(core, holder, registration, pending));
+  }
+
   unregister(handle: bigint): CallResult<undefined> {
     return this.#invoke("weivel_unregister", (core, pending) => this.#functions.weivel_unregister(core, handle, pending));
   }

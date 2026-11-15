@@ -21,6 +21,7 @@ export type {
   CapacityWantedEvent,
   CapabilityEvent,
   DeadlineEvent,
+  HoldingsReleasedEvent,
 } from "./events.js";
 export type {
   Refusal,
