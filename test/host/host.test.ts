@@ -17,6 +17,7 @@ import {
   settle,
   type HostWorld,
 } from "./world.ts";
+import { hostInternals } from "../../src/host/host.ts";
 
 const probe = () => globalThis.weivelHostProbe;
 
@@ -46,7 +47,7 @@ function handleOf(handles: Map<string, bigint>, name: string): bigint {
 }
 
 function quarantinedNames(world: HostWorld): (string | null)[] {
-  return world.host.core
+  return hostInternals(world.host).core
     .ledger()
     .value!.rows.filter((row) => row.status === PluginStatus.Quarantined)
     .map((row) => row.importName);
@@ -66,7 +67,7 @@ describe("registration", () => {
 
     expect(answer.refusal).toBeUndefined();
     expect(world.host.plugin(answer.plugin!)).toEqual({ plugin: answer.plugin, manifest: { importName: "inline", api: 1 }, entry });
-    expect(world.host.core.ledgerEntry(answer.plugin!).value?.importName).toBe("inline");
+    expect(hostInternals(world.host).core.ledgerEntry(answer.plugin!).value?.importName).toBe("inline");
     expect(report.outcomes.map((outcome) => outcome.state)).toEqual(["active"]);
     expect(probe().activated).toEqual(["inline"]);
   });
@@ -91,7 +92,7 @@ describe("plugins the standard discovers", () => {
 
     expect(registration.refusal).toBeUndefined();
     expect([...registration.registered.keys()]).toEqual(["alpha", "beta"]);
-    expect(world.host.core.ledgerEntry(registration.registered.get("beta")!).value?.importName).toBe("beta");
+    expect(hostInternals(world.host).core.ledgerEntry(registration.registered.get("beta")!).value?.importName).toBe("beta");
     expect(world.host.plugin(registration.registered.get("alpha")!)?.manifest.importName).toBe("alpha");
   });
 
@@ -115,7 +116,7 @@ describe("plugins the standard discovers", () => {
     const registration = registerDirectory(world, directory);
 
     expect(world.host.plugin(registration.registered.get("first")!)?.manifest.identity).toBe("forge:7");
-    expect(world.host.core.ledgerEntry(registration.registered.get("first")!).value?.identity).toBe("forge:7");
+    expect(hostInternals(world.host).core.ledgerEntry(registration.registered.get("first")!).value?.identity).toBe("forge:7");
   });
 
   it("are refused by the core as data when a plugin of the name is registered already", () => {
@@ -152,11 +153,11 @@ describe("activation", () => {
       ["calendar", "active"],
       ["agenda", "active"],
     ]);
-    expect(world.host.core.ledgerEntry(handleOf(handles, "calendar")).value).toMatchObject({
+    expect(hostInternals(world.host).core.ledgerEntry(handleOf(handles, "calendar")).value).toMatchObject({
       status: PluginStatus.Active,
       verified: true,
     });
-    expect(world.host.core.pluginPayload(handleOf(handles, "agenda")).value).toBe(handleOf(handles, "agenda"));
+    expect(hostInternals(world.host).core.pluginPayload(handleOf(handles, "agenda")).value).toBe(handleOf(handles, "agenda"));
   });
 
   it("starts a later plugin's activate while an earlier one still awaits the service that later plugin registers", async () => {
@@ -211,7 +212,7 @@ describe("activation", () => {
       ["angry", "quarantined"],
       ["calm", "active"],
     ]);
-    const row = world.host.core.ledgerEntry(handleOf(handles, "angry")).value!;
+    const row = hostInternals(world.host).core.ledgerEntry(handleOf(handles, "angry")).value!;
     expect(row.status).toBe(PluginStatus.Quarantined);
     expect(row.refusal.detail).toBe("its activate threw: no disk");
     expect(row.refusal.hasFix).toBe(true);
@@ -336,7 +337,7 @@ describe("release", () => {
     const handles = discovered(world, pluginDirectory([waiter]));
     const handle = handleOf(handles, "waiter");
     await activated(world.host, [handle]);
-    expect(world.host.contexts.tracked(handle)).toBeGreaterThan(0);
+    expect(hostInternals(world.host).contexts.tracked(handle)).toBeGreaterThan(0);
 
     await world.host.release(handle);
     const wanted = await Promise.race([wantedOf(), settle().then(() => "still pending")]);
@@ -344,10 +345,10 @@ describe("release", () => {
     expect(probe().deactivated).toEqual(["waiter"]);
     expect(wanted).toBeInstanceOf(RefusalError);
     expect((wanted as RefusalError).code).toBe(RefusalCode.Stopped);
-    expect(world.host.contexts.tracked(handle)).toBe(0);
+    expect(hostInternals(world.host).contexts.tracked(handle)).toBe(0);
     expect(world.host.plugin(handle)).toBeUndefined();
-    expect(world.host.core.ledgerEntry(handle).value).toBeUndefined();
-    expect(world.host.core.ledger().value!.rows).toEqual([]);
+    expect(hostInternals(world.host).core.ledgerEntry(handle).value).toBeUndefined();
+    expect(hostInternals(world.host).core.ledger().value!.rows).toEqual([]);
   });
 
   it("settles the pending want of a plugin released from a listener while the layer still handles events", async () => {
@@ -375,7 +376,7 @@ describe("release", () => {
     expect(released).toHaveLength(1);
     expect(wanted).toBeInstanceOf(RefusalError);
     expect((wanted as RefusalError).code).toBe(RefusalCode.Stopped);
-    expect(world.host.contexts.tracked(watcherHandle)).toBe(0);
+    expect(hostInternals(world.host).contexts.tracked(watcherHandle)).toBe(0);
     expect(world.host.plugin(watcherHandle)).toBeUndefined();
   });
 
@@ -442,7 +443,7 @@ describe("host services", () => {
     );
     const reader = handleOf(handles, "reader");
 
-    const unmet = world.host.core.planActivation([reader], EdgeSource.Services, []).value!;
+    const unmet = hostInternals(world.host).core.planActivation([reader], EdgeSource.Services, []).value!;
     alive(world.host.registerHostService({ id: "clock" }, clockService));
     const report = await activated(world.host, [reader]);
 

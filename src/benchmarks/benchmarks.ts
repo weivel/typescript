@@ -1,7 +1,8 @@
 import koffi from "koffi";
 import { createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
+import { wrapperHooks } from "../core/core.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
-import { Host } from "../host/index.js";
+import { Host, hostInternals } from "../host/host.js";
 import { bindBareBytesFunction } from "../host/libraries.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
@@ -101,7 +102,7 @@ class CoreWorld {
     this.core = created.value;
     this.bareCore = bareCore;
     const contexts = new PluginContexts(this.core, { log: silentLogger });
-    this.core.setDispatcher((event) => contexts.receive(event));
+    wrapperHooks(this.core).setDispatcher((event) => contexts.receive(event));
     this.#timer = new CoreTimer(this.core);
     this.provider = openPlugin(this.core, contexts, providerManifest);
     this.consumer = openPlugin(this.core, contexts, consumerManifest);
@@ -258,7 +259,8 @@ export async function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Pr
   const bareLibrary = koffi.load(options.echoLibraryPath);
   try {
     host.loadLibrary(echoDeclaration, options.echoLibraryPath);
-    const consumer = openPlugin(host.core, host.contexts, consumerManifest).context;
+    const { core, contexts } = hostInternals(host);
+    const consumer = openPlugin(core, contexts, consumerManifest).context;
     const echo = consumer.services.get(consumer.service<{ echo(input: Uint8Array): Uint8Array }>(echoId));
     if (echo === undefined) {
       throw new Error("The consumer could not reach the echo library's service.");

@@ -6,6 +6,7 @@ import type { Host, Plugin } from "../../src/host/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
 import { recordingLogger } from "../context/world.ts";
 import { alive, createHostWorld, settle, type HostWorld } from "./world.ts";
+import { hostInternals } from "../../src/host/host.ts";
 
 const functions = loadCoreLibrary(coreLibraryPath).functions;
 const originals = { ...functions };
@@ -125,7 +126,7 @@ describe("a plugin opened as the destroy began", () => {
     expect(destructions).toHaveLength(1);
     expect(activated).toBe(false);
     expect(outcomes.map((outcome) => outcome.state)).toEqual(["released"]);
-    expect(created.host.core.destroyed).toBe(true);
+    expect(hostInternals(created.host).core.destroyed).toBe(true);
   });
 });
 

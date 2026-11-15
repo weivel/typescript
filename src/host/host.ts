@@ -1,4 +1,17 @@
-import { createCore, PluginStatus, Status, type CallResult, type Core, type CoreEvent, type Manifest, type QuarantineReason, type ReachRefusedEvent, type Refusal } from "../core/index.js";
+import { wrapperHooks, type WrapperHooks } from "../core/core.js";
+import {
+  createCore,
+  PluginStatus,
+  Status,
+  type CallResult,
+  type Core,
+  type CoreEvent,
+  type LedgerSnapshot,
+  type Manifest,
+  type QuarantineReason,
+  type ReachRefusedEvent,
+  type Refusal,
+} from "../core/index.js";
 import {
   consoleLogger,
   failureOf,
@@ -62,6 +75,19 @@ function reasonForC(reason: QuarantineReason): QuarantineReason {
   return { ...reason, detail: reason.detail.replaceAll("\u0000", "\\0"), fix: reason.fix.replaceAll("\u0000", "\\0") };
 }
 
+/** What the host's own modules reach of a host, and its exports never hand its caller. */
+export interface HostInternals {
+  readonly core: Core;
+  readonly contexts: PluginContexts;
+}
+
+let internalsOf: (host: Host) => HostInternals;
+
+/** The core and contexts of `host`; exported from this file only, never from the host module. */
+export function hostInternals(host: Host): HostInternals {
+  return internalsOf(host);
+}
+
 function succeeded(call: string, result: { status: Status; events: readonly CoreEvent[] }): void {
   if (result.status !== Status.Ok) {
     throw failureOf(call, { ...result, value: undefined });
@@ -78,8 +104,13 @@ function succeeded(call: string, result: { status: Status; events: readonly Core
  * the caller. Once destroyed, every call answers `hostDestroyed` as a value, quietly.
  */
 export class Host {
-  readonly core: Core;
-  readonly contexts: PluginContexts;
+  static {
+    internalsOf = (host) => ({ core: host.#core, contexts: host.#contexts });
+  }
+
+  readonly #core: Core;
+  readonly #hooks: WrapperHooks;
+  readonly #contexts: PluginContexts;
   readonly #options: HostOptions;
   readonly #log: Logger;
   readonly #timer: CoreTimer;
@@ -117,9 +148,10 @@ export class Host {
     if (created.value === undefined) {
       throw new Error(`weivel_core_create answered status ${created.status}.`);
     }
-    this.core = created.value;
-    this.contexts = new PluginContexts(this.core, { clock: options.clock, log: this.#log });
-    this.#timer = new CoreTimer(this.core, { clock: options.clock, scheduler: options.scheduler, onMove: options.onTimerMove });
+    this.#core = created.value;
+    this.#hooks = wrapperHooks(this.#core);
+    this.#contexts = new PluginContexts(this.#core, { clock: options.clock, log: this.#log });
+    this.#timer = new CoreTimer(this.#core, { clock: options.clock, scheduler: options.scheduler, onMove: options.onTimerMove });
   }
 
   /** Whether `destroy` has begun its work; every call from then on answers `hostDestroyed`. */
@@ -137,7 +169,7 @@ export class Host {
     } else if (event.kind === "reach-refused") {
       this.#log.warn(this.#reachRefusedText(event));
     }
-    this.contexts?.receive(event);
+    this.#contexts?.receive(event);
   }
 
   #reachRefusedText(event: ReachRefusedEvent): string {
@@ -146,7 +178,7 @@ export class Host {
   }
 
   #sink(error: unknown): void {
-    this.core.reportListenerError(error);
+    this.#core.reportListenerError(error);
   }
 
   /**
@@ -161,8 +193,8 @@ export class Host {
       return hostDestroyed;
     }
     const kept = frozenCopyOf(manifest);
-    const registered = this.core.holdDispatch(() => {
-      const answer = this.core.registerManifest(kept);
+    const registered = this.#hooks.holdDispatch(() => {
+      const answer = this.#core.registerManifest(kept);
       if (answer.status === Status.Ok && answer.value !== undefined) {
         const hosted = { plugin: answer.value, manifest: kept, entry };
         this.#plugins.add(answer.value, { hosted, activated: false, settleOutcome: undefined, release: undefined, context: undefined });
@@ -177,6 +209,23 @@ export class Host {
       throw failure;
     }
     return { plugin: undefined, refusal: failure };
+  }
+
+  /**
+   * The core's ledger as it stands now: one row per plugin registered and not forgotten, each as the core keeps it,
+   * a quarantined plugin's reason included.
+   *
+   * @throws Error when the core answers a status other than OK, out of memory among them.
+   */
+  ledger(): LedgerSnapshot | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
+    const ledger = this.#core.ledger();
+    if (ledger.value === undefined) {
+      throw failureOf("weivel_ledger", ledger);
+    }
+    return ledger.value;
   }
 
   /** The plugin the host registered under `plugin`, or undefined once it is forgotten or for a handle never known. */
@@ -202,7 +251,7 @@ export class Host {
   }
 
   #registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions): () => void {
-    const unregister = this.contexts.registerHostService(type, service, options);
+    const unregister = this.#contexts.registerHostService(type, service, options);
     this.#countHostService(type.id, 1);
     let registered = true;
     return () => {
@@ -268,7 +317,7 @@ export class Host {
         throw new Error(`The C library ${declaration.importName} declares ${id} twice.`);
       }
       declared.add(id);
-      if (this.contexts.registers(id)) {
+      if (this.#contexts.registers(id)) {
         throw new Error(`${id} is already registered, so the C library ${declaration.importName} may not register it under the host.`);
       }
     }
@@ -287,7 +336,7 @@ export class Host {
     if (this.#destroyed) {
       return hostDestroyed;
     }
-    const planned = this.core.planActivation(plugins, this.#options.edgeSource, [...this.#hostServiceCounts.keys()]);
+    const planned = this.#core.planActivation(plugins, this.#options.edgeSource, [...this.#hostServiceCounts.keys()]);
     if (planned.value === undefined) {
       throw failureOf("weivel_plan_activation", planned);
     }
@@ -391,10 +440,10 @@ export class Host {
    */
   #open(record: PluginRecord): PluginContext {
     const built = record.context === undefined;
-    const context = record.context ?? this.contexts.create(record.hosted.plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
+    const context = record.context ?? this.#contexts.create(record.hosted.plugin, record.hosted.manifest, this.#pluginLog(record.hosted.manifest));
     record.context = context;
     try {
-      succeeded("weivel_open_plugin", this.core.holdDispatch(() => this.#openInCore(record)));
+      succeeded("weivel_open_plugin", this.#hooks.holdDispatch(() => this.#openInCore(record)));
     } catch (error) {
       this.#keepIfHeldOpen(record, built);
       throw error;
@@ -403,7 +452,7 @@ export class Host {
   }
 
   #openInCore(record: PluginRecord): CallResult<undefined> {
-    const opened = this.core.openPlugin(record.hosted.plugin, record.hosted.plugin);
+    const opened = this.#core.openPlugin(record.hosted.plugin, record.hosted.plugin);
     if (opened.status === Status.Ok) {
       this.#dropFromOpened(record);
       this.#opened.push(record);
@@ -413,9 +462,9 @@ export class Host {
 
   #keepIfHeldOpen(record: PluginRecord, built: boolean): void {
     const plugin = record.hosted.plugin;
-    if (this.core.ledgerEntry(plugin).value?.status !== PluginStatus.Active) {
+    if (this.#core.ledgerEntry(plugin).value?.status !== PluginStatus.Active) {
       if (built) {
-        this.contexts.forget(plugin);
+        this.#contexts.forget(plugin);
         record.context = undefined;
       }
     } else if (!this.#opened.includes(record)) {
@@ -442,14 +491,14 @@ export class Host {
 
   /** @implNote The quarantine is made before any event of the verification is dispatched. */
   #verify(record: PluginRecord): ActivationOutcome {
-    return this.core.holdDispatch(() => {
-      const verified = this.core.verifyActivation(record.hosted.plugin);
+    return this.#hooks.holdDispatch(() => {
+      const verified = this.#core.verifyActivation(record.hosted.plugin);
       return verified.status === Status.Ok ? this.#outcome(record, "active", undefined) : this.#quarantine(record, undefined);
     });
   }
 
   #verifyUnopened(plugin: bigint, record: PluginRecord | undefined): ActivationOutcome {
-    const verified = this.core.verifyActivation(plugin);
+    const verified = this.#core.verifyActivation(plugin);
     const importName = record?.hosted.manifest.importName;
     if (verified.status === Status.Ok) {
       return { plugin, importName, state: "active", refusal: undefined };
@@ -464,12 +513,12 @@ export class Host {
    */
   #quarantine(record: PluginRecord, reason: QuarantineReason | undefined): ActivationOutcome {
     const plugin = record.hosted.plugin;
-    const quarantined = this.core.quarantinePlugin(plugin, reason === undefined ? undefined : reasonForC(reason));
+    const quarantined = this.#core.quarantinePlugin(plugin, reason === undefined ? undefined : reasonForC(reason));
     if (quarantined.status !== Status.Ok) {
       this.#sink(failureOf("weivel_quarantine_plugin", quarantined));
     }
-    this.contexts.whenEventsHandled(() => this.contexts.stopped(plugin));
-    return this.#outcome(record, "quarantined", this.core.ledgerEntry(plugin).value?.refusal);
+    this.#contexts.whenEventsHandled(() => this.#contexts.stopped(plugin));
+    return this.#outcome(record, "quarantined", this.#core.ledgerEntry(plugin).value?.refusal);
   }
 
   #outcome(record: PluginRecord, state: ActivationState, refusal: Refusal | undefined): ActivationOutcome {
@@ -537,12 +586,12 @@ export class Host {
 
   #releaseInCore(record: PluginRecord): Promise<void> {
     const plugin = record.hosted.plugin;
-    const released = this.core.releasePlugin(plugin);
+    const released = this.#core.releasePlugin(plugin);
     if (released.status !== Status.Ok) {
       this.#sink(failureOf("weivel_release_plugin", released));
     }
     return new Promise((resolve) =>
-      this.contexts.whenEventsHandled(() => {
+      this.#contexts.whenEventsHandled(() => {
         try {
           this.#forget(plugin);
         } finally {
@@ -554,12 +603,12 @@ export class Host {
 
   /** Ends a released plugin's entries, calling nothing in the core for them, then forgets it. */
   #forget(plugin: bigint): void {
-    this.contexts.stopped(plugin);
-    const forgotten = this.core.forgetPlugin(plugin);
+    this.#contexts.stopped(plugin);
+    const forgotten = this.#core.forgetPlugin(plugin);
     if (forgotten.status !== Status.Ok) {
       this.#sink(failureOf("weivel_forget_plugin", forgotten));
     }
-    this.contexts.forget(plugin);
+    this.#contexts.forget(plugin);
     this.#plugins.drop(plugin);
   }
 
@@ -581,7 +630,7 @@ export class Host {
   destroy(): Promise<void> {
     if (this.#destruction === undefined) {
       this.#destroyed = true;
-      this.#destruction = new Promise((resolve) => this.contexts.whenEventsHandled(() => resolve(this.#shutDown())));
+      this.#destruction = new Promise((resolve) => this.#contexts.whenEventsHandled(() => resolve(this.#shutDown())));
     }
     return this.#destruction;
   }
@@ -592,13 +641,13 @@ export class Host {
         await this.#release(record).catch((error: unknown) => this.#sink(error));
       }
       await this.#releasesSettled();
-      await new Promise<void>((resolve) => this.contexts.whenEventsHandled(resolve));
+      await new Promise<void>((resolve) => this.#contexts.whenEventsHandled(resolve));
     } finally {
       try {
         this.#unloadEveryLibrary();
         this.#timer.stop();
       } finally {
-        this.core.destroy();
+        this.#core.destroy();
       }
     }
   }

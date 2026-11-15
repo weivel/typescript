@@ -237,9 +237,8 @@ class LifecycleRun {
     if (this.world.host.destroyed) {
       return [];
     }
-    return this.world.host.core
-      .ledger()
-      .value!.rows.filter((row) => row.status === status)
+    return alive(this.world.host.ledger())
+      .rows.filter((row) => row.status === status)
       .map((row) => row.importName ?? "")
       .sort();
   }

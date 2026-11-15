@@ -4,6 +4,7 @@ import { readLayerVector, witnessLayerVector, type LayerVector, type LayerWitnes
 import type { Host } from "../../src/host/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
 import { layerVectorDirectory } from "./kit.ts";
+import { hostInternals } from "../../src/host/host.ts";
 
 async function witness(id: string, inspect?: (host: Host) => void): Promise<{ vector: LayerVector; witness: LayerWitness }> {
   const vector = readLayerVector(layerVectorDirectory, id);
@@ -27,8 +28,8 @@ describe("consume/a-refused-verify-quarantines-the-plugin", () => {
   it("quarantines the refused plugin in the step of its check, its watch stopping there, and reports no refusal", async () => {
     let trackedByQuarantined: number[] = [];
     const { vector, witness: seen } = await witness("consume/a-refused-verify-quarantines-the-plugin", (host) => {
-      const rows = host.core.ledger().value!.rows.filter((row) => row.status === PluginStatus.Quarantined);
-      trackedByQuarantined = rows.map((row) => host.contexts.tracked(row.plugin));
+      const rows = hostInternals(host).core.ledger().value!.rows.filter((row) => row.status === PluginStatus.Quarantined);
+      trackedByQuarantined = rows.map((row) => hostInternals(host).contexts.tracked(row.plugin));
     });
 
     expect(Object.keys(seen.observed)).toEqual(["heard", "reported", "refusal", "quarantined", "quarantineReason"]);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Status } from "../../src/core/index.ts";
 import { HandleTable, HoldingTable } from "../../src/handles/index.ts";
 import { createRecordedCore, openPlugin } from "../real-core.ts";
+import { wrapperHooks } from "../../src/core/core.ts";
 
 const provider = { importName: "alpha", services: { provides: [{ id: "alpha:greeting" }] } };
 const consumer = { importName: "beta", services: { consumes: [{ id: "alpha:greeting" }] } };
@@ -9,7 +10,7 @@ const consumer = { importName: "beta", services: { consumes: [{ id: "alpha:greet
 function holdingCore() {
   const recorded = createRecordedCore();
   const holdings = new HoldingTable<object>();
-  recorded.core.setDispatcher((event) => holdings.apply(event));
+  wrapperHooks(recorded.core).setDispatcher((event) => holdings.apply(event));
   const alpha = openPlugin(recorded.core, provider);
   const beta = openPlugin(recorded.core, consumer);
   return { ...recorded, holdings, alpha, beta };

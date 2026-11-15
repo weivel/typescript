@@ -61,7 +61,7 @@ describe("a text with an embedded NUL", () => {
 
     expect(() => world.host.register({ importName: "al\u0000pha", api: 1 }, inert)).toThrow(EmbeddedNulError);
     expect(() => world.host.registerHostService({ id: "echo\u0000x" }, {})).toThrow(EmbeddedNulError);
-    expect(world.host.core.ledger().value!.rows).toEqual([]);
+    expect(alive(world.host.ledger()).rows).toEqual([]);
     expect(errors).toEqual([]);
   });
 

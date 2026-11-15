@@ -229,6 +229,37 @@ function allocateZeroed(name: CoreStructName): object {
 }
 
 /**
+ * The wrapper's own hooks, which this package's modules reach and its exports never hand anyone, so nothing but the
+ * layer drains the core or moves its timer.
+ */
+export interface WrapperHooks {
+  setDispatcher(dispatcher: EventDispatcher | undefined): void;
+  /**
+   * Sets the clock the wrapper reads before each call, so a deadline that has fallen due is handed to the core before
+   * the call is made; undefined, the wrapper makes no such check.
+   *
+   * @implNote The timer firing is not enough on its own: the clock can pass the deadline before the language's
+   * scheduler takes its turn, and a registration made then would serve a want the core should already have timed out.
+   */
+  setClock(clock: ClockReading | undefined): void;
+  /** Sets the one reader told of every deadline announcement at drain time; undefined removes it. */
+  setDeadlineReader(reader: DeadlineReader | undefined): void;
+  /**
+   * Runs `step`, holding back the dispatch of every event drained meanwhile until it returns, so what `step` records
+   * of a call's answer is in place before any event that call queued is dispatched. Inside a dispatch they wait
+   * behind it already.
+   */
+  holdDispatch<Value>(step: () => Value): Value;
+}
+
+let hooksOf: (core: Core) => WrapperHooks;
+
+/** The hooks of `core`'s wrapper; exported from this file only, never from the core module. */
+export function wrapperHooks(core: Core): WrapperHooks {
+  return hooksOf(core);
+}
+
+/**
  * One core, every call to which goes through one function that makes the call and then drains the event queue.
  *
  * @remarks Events are copied and released as they are drained, then dispatched first in, first out once the whole
@@ -237,6 +268,15 @@ function allocateZeroed(name: CoreStructName): object {
  * event in the core's order.
  */
 export class Core {
+  static {
+    hooksOf = (core) => ({
+      setDispatcher: (dispatcher) => void (core.#dispatcher = dispatcher),
+      setClock: (clock) => void (core.#clock = clock),
+      setDeadlineReader: (reader) => void (core.#deadlineReader = reader),
+      holdDispatch: (step) => core.#holdDispatch(step),
+    });
+  }
+
   readonly #functions: CoreFunctions;
   readonly #event: object;
   #core: object | null;
@@ -282,10 +322,6 @@ export class Core {
     }
   }
 
-  setDispatcher(dispatcher: EventDispatcher | undefined): void {
-    this.#dispatcher = dispatcher;
-  }
-
   /** How many events this core's wrapper has drained so far; each event's sequence is its place in that count. */
   get drainedCount(): number {
     return this.#drainedCount;
@@ -296,12 +332,7 @@ export class Core {
     return this.#sequences.get(event);
   }
 
-  /**
-   * Runs `step`, holding back the dispatch of every event drained meanwhile until it returns, so what `step` records
-   * of a call's answer is in place before any event that call queued is dispatched. Inside a dispatch they wait
-   * behind it already.
-   */
-  holdDispatch<Value>(step: () => Value): Value {
+  #holdDispatch<Value>(step: () => Value): Value {
     if (this.#settling) {
       return step();
     }
@@ -320,11 +351,6 @@ export class Core {
     return () => this.#drainListeners.delete(listener);
   }
 
-  /** Sets the one reader told of every deadline announcement at drain time; undefined removes it. */
-  setDeadlineReader(reader: DeadlineReader | undefined): void {
-    this.#deadlineReader = reader;
-  }
-
   /**
    * Runs `step` once every event drained so far has been dispatched: at once outside a dispatch, and inside one as a
    * step queued behind the events already waiting, since the dispatcher is never re-entered. What it throws goes to
@@ -337,17 +363,6 @@ export class Core {
     } else {
       this.#runStep(deferred);
     }
-  }
-
-  /**
-   * Sets the clock the wrapper reads before each call, so a deadline that has fallen due is handed to the core before
-   * the call is made; undefined, the wrapper makes no such check.
-   *
-   * @implNote The timer firing is not enough on its own: the clock can pass the deadline before the language's
-   * scheduler takes its turn, and a registration made then would serve a want the core should already have timed out.
-   */
-  setClock(clock: ClockReading | undefined): void {
-    this.#clock = clock;
   }
 
   get destroyed(): boolean {

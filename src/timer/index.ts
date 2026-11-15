@@ -1,4 +1,4 @@
-import type { Core } from "../core/index.js";
+import { wrapperHooks, type Core, type WrapperHooks } from "../core/core.js";
 
 /** The caller's monotonic time in whole milliseconds, the scale every time handed to the core is on. */
 export interface Clock {
@@ -74,6 +74,7 @@ interface Armed {
  */
 export class CoreTimer {
   readonly #core: Core;
+  readonly #hooks: WrapperHooks;
   readonly #clock: Clock;
   readonly #scheduler: Scheduler;
   readonly #onMove: TimerMoveListener | undefined;
@@ -84,8 +85,9 @@ export class CoreTimer {
     this.#clock = options.clock ?? systemClock;
     this.#scheduler = options.scheduler ?? createSystemScheduler(this.#clock);
     this.#onMove = options.onMove;
-    core.setDeadlineReader((deadline) => this.#move(deadline));
-    core.setClock(() => this.#clock.now());
+    this.#hooks = wrapperHooks(core);
+    this.#hooks.setDeadlineReader((deadline) => this.#move(deadline));
+    this.#hooks.setClock(() => this.#clock.now());
   }
 
   /** The deadline the timer is armed for, or undefined when the core waits on no time. */
@@ -94,8 +96,8 @@ export class CoreTimer {
   }
 
   stop(): void {
-    this.#core.setDeadlineReader(undefined);
-    this.#core.setClock(undefined);
+    this.#hooks.setDeadlineReader(undefined);
+    this.#hooks.setClock(undefined);
     this.#cancel();
   }
 

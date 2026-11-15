@@ -5,6 +5,7 @@ import { DetachedError, RefusalError, type PluginContext } from "../../src/conte
 import { hostDestroyed, type ActivationOutcome, type Plugin } from "../../src/host/index.ts";
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
 import { alive, createHostWorld, echoLibraryPath, ManualScheduler, settle, type HostWorld } from "./world.ts";
+import { hostInternals } from "../../src/host/host.ts";
 
 interface Sunk {
   readonly errors: unknown[];
@@ -28,8 +29,8 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 
 /** Calls `hear` with every event the host's contexts receive, before they do. */
 function overhear(world: HostWorld, hear: (event: CoreEvent) => void): void {
-  const receive = world.host.contexts.receive;
-  Object.assign(world.host.contexts, {
+  const receive = hostInternals(world.host).contexts.receive;
+  Object.assign(hostInternals(world.host).contexts, {
     receive: (event: CoreEvent) => {
       hear(event);
       receive(event);
@@ -64,7 +65,7 @@ describe("a verification the core refuses", () => {
     let verifying = false;
     overhear(world, (event) => {
       if (verifying && event.kind === "refusal") {
-        statusesHeard.push(world.host.core.ledgerEntry(plugin).value?.status);
+        statusesHeard.push(hostInternals(world.host).core.ledgerEntry(plugin).value?.status);
       }
     });
     const started = alive(world.host.activate([plugin]));
@@ -104,11 +105,11 @@ describe("a plugin the host holds open", () => {
     const plugin = registered(world, "alpha", { activate() {} }, { services: { provides: [{ id: "alpha:thing" }] } });
     const context = alive(world.host.open(plugin));
     context.services.register(context.service("alpha:thing"), {});
-    const tracked = world.host.contexts.tracked(plugin);
+    const tracked = hostInternals(world.host).contexts.tracked(plugin);
 
     expect(() => world.host.open(plugin)).toThrow(RefusalError);
 
-    expect(world.host.contexts.tracked(plugin)).toBe(tracked);
+    expect(hostInternals(world.host).contexts.tracked(plugin)).toBe(tracked);
     expect(hearsItsEvents(context)).toBe(true);
     await world.host.release(plugin);
     expect(() => context.services.ids()).toThrow(DetachedError);
@@ -132,7 +133,7 @@ describe("a plugin the host holds open", () => {
     );
     const first = alive(world.host.activate([plugin]));
     contexts[0]!.services.register(contexts[0]!.service("alpha:thing"), {});
-    const tracked = world.host.contexts.tracked(plugin);
+    const tracked = hostInternals(world.host).contexts.tracked(plugin);
 
     const [whileInFlight] = await alive(world.host.activate([plugin])).outcomes;
     pending.resolve();
@@ -141,7 +142,7 @@ describe("a plugin the host holds open", () => {
 
     expect([whileInFlight!.state, whileActive!.state]).toEqual(["refused", "refused"]);
     expect(contexts).toHaveLength(1);
-    expect(world.host.contexts.tracked(plugin)).toBe(tracked);
+    expect(hostInternals(world.host).contexts.tracked(plugin)).toBe(tracked);
     expect(hearsItsEvents(contexts[0]!)).toBe(true);
     await world.host.release(plugin);
     expect(() => contexts[0]!.services.ids()).toThrow(DetachedError);
@@ -177,7 +178,7 @@ describe("a release", () => {
 
     await expect(world.host.release(plugin)).resolves.toBe(false);
 
-    expect(world.host.core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
+    expect(hostInternals(world.host).core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
     expect(world.host.plugin(plugin)).toBeDefined();
     const [outcome] = await alive(world.host.activate([plugin])).outcomes;
     expect(outcome!.state).toBe("active");
@@ -195,7 +196,7 @@ describe("a verification the caller asks for", () => {
 
     expect(answer.state).toBe("refused");
     expect(answer.refusal).toBeDefined();
-    expect(world.host.core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
+    expect(hostInternals(world.host).core.ledgerEntry(plugin).value?.status).toBe(PluginStatus.Registered);
   });
 
   it("of a handle the host never registered is answered as the core answers it, never thrown", () => {
@@ -226,7 +227,7 @@ describe("destroy", () => {
 
     await expect(world.host.destroy()).resolves.toBeUndefined();
 
-    expect(world.host.core.destroyed).toBe(true);
+    expect(hostInternals(world.host).core.destroyed).toBe(true);
     expect(errors).toContain(cancelFailure);
   });
 
@@ -300,7 +301,7 @@ describe("destroy", () => {
     await released;
 
     expect(destroyedBeforeTheDeactivate).toBe(false);
-    expect(world.host.core.destroyed).toBe(true);
+    expect(hostInternals(world.host).core.destroyed).toBe(true);
     expect(world.errors).toEqual([]);
   });
 });
@@ -368,7 +369,7 @@ describe("loading a C library", () => {
 
     expect(() => world.host.loadLibrary(echoDeclaration(["echo", ""]), echoLibraryPath)).toThrow();
 
-    expect(world.host.core.getService(HOST, "echo").value).toBeUndefined();
+    expect(hostInternals(world.host).core.getService(HOST, "echo").value).toBeUndefined();
     expect(counts.unloads).toBe(1);
     expect(() => world.host.registerHostService({ id: "echo" }, {})).not.toThrow();
   });
@@ -377,7 +378,7 @@ describe("loading a C library", () => {
     const world = sinkingWorld();
 
     expect(() => world.host.loadLibrary(echoDeclaration(["echo", "echo"]), echoLibraryPath)).toThrow(/echo/);
-    expect(world.host.core.getService(0xffff_ffff_ffff_ffffn, "echo").value).toBeUndefined();
+    expect(hostInternals(world.host).core.getService(0xffff_ffff_ffff_ffffn, "echo").value).toBeUndefined();
     expect(world.errors).toEqual([]);
   });
 
