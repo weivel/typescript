@@ -89,7 +89,7 @@ function revoke(state: ContextState, event: RevokedEvent): void {
   }
   let release = nothingToRelease;
   if (held.awaitsReleases) {
-    state.revokedHoldings.hold(event.plugin, event.implementation, true);
+    state.keepRevokedHolding(event.plugin, event.implementation);
     release = () => releaseHolding(state, event.plugin, event.implementation);
   }
   state.emit(event.plugin, { kind: "revoked", reach: held.reach, id: held.id, implementation: held.implementation, release });

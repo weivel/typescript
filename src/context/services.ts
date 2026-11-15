@@ -68,7 +68,7 @@ export function registerService(state: ContextState, owner: bigint, id: string, 
  * the layer drops its record of it; that refusal says nothing went wrong, so only another failure is reported.
  */
 export function releaseHolding(state: ContextState, holder: bigint, registration: bigint): void {
-  if (!state.revokedHoldings.drop(holder, registration)) {
+  if (!state.takeRevokedHolding(holder, registration)) {
     return;
   }
   const released = state.call(() => state.core.releaseHolding(holder, registration));

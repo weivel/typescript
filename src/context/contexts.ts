@@ -130,7 +130,7 @@ export class PluginContexts {
       this.#state.markEnded(plugin, handle);
       this.#state.dropWatch(handle);
     }
-    this.#state.revokedHoldings.dropPlugin(plugin);
+    this.#state.dropRevokedHoldingsOf(plugin);
     this.#state.dropEndedWhenIdle();
   }
 
@@ -159,7 +159,7 @@ export class PluginContexts {
       return;
     }
     forgotten.attachment.detached = true;
-    this.#state.revokedHoldings.dropPlugin(plugin);
+    this.#state.dropRevokedHoldingsOf(plugin);
     this.#state.dropAwaitingReleasesOf(plugin);
     for (const handle of forgotten.handles) {
       this.#state.services.drop(handle);

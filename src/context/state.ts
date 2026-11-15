@@ -76,8 +76,8 @@ export class ContextState {
   readonly wants = new HandleTable<PendingWant>();
   readonly watches = new HandleTable<Watching>();
   readonly awaitingReleases = new HandleTable<AwaitingReleases>();
-  /** Each revoked holding the core keeps until its holder releases it, by holder and registration. */
-  readonly revokedHoldings = new HoldingTable<true>();
+  /** Each revoked holding the core keeps until its holder releases it: the registrations, by holder. */
+  readonly #revokedHoldings = new Map<bigint, Set<bigint>>();
   readonly plugins = new Map<bigint, PluginState>();
   readonly #fallbackLog: Logger;
   readonly #deferred: DeferredEvents;
@@ -185,6 +185,31 @@ export class ContextState {
       implementation: offered.object,
       awaitsReleases: offered.awaitsReleases === true,
     });
+  }
+
+  /** Keeps a revoked holding the core keeps too, until its holder releases it. */
+  keepRevokedHolding(holder: bigint, registration: bigint): void {
+    let registrations = this.#revokedHoldings.get(holder);
+    if (registrations === undefined) {
+      registrations = new Set();
+      this.#revokedHoldings.set(holder, registrations);
+    }
+    registrations.add(registration);
+  }
+
+  /** Takes a kept revoked holding away, answering whether there was one to take. */
+  takeRevokedHolding(holder: bigint, registration: bigint): boolean {
+    const registrations = this.#revokedHoldings.get(holder);
+    const taken = registrations?.delete(registration) ?? false;
+    if (registrations?.size === 0) {
+      this.#revokedHoldings.delete(holder);
+    }
+    return taken;
+  }
+
+  /** Drops every revoked holding of a holder the core ended them with, released, quarantined or forgotten. */
+  dropRevokedHoldingsOf(holder: bigint): void {
+    this.#revokedHoldings.delete(holder);
   }
 
   /** Drops every registration `owner` made awaiting releases, so it hears none of their releases. */
