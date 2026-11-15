@@ -31,16 +31,38 @@ type Step =
   | { readonly holder: string; readonly releaseHolding: string }
   | { readonly releaseHolder: string }
   | { readonly quarantine: string }
+  | { readonly owner: string; readonly registerAwaitingReleases: string }
+  | { readonly forgetHolder: string }
   | { readonly readUnloads: true };
 
+interface GivenOwner {
+  readonly id: string;
+  readonly provides: readonly string[];
+}
+
 interface LibraryGiven {
-  readonly declaration: GivenDeclaration;
+  readonly declaration?: GivenDeclaration;
+  readonly owners?: readonly GivenOwner[];
   readonly holders: readonly string[];
   readonly steps: readonly Step[];
 }
 
 const kinds: Readonly<Record<string, number>> = { bytes: FunctionKind.Bytes, definition: FunctionKind.Definition };
-const stepKeys = ["load", "get", "echo", "call", "drop", "countUnloads", "unload", "releaseHolding", "releaseHolder", "quarantine", "readUnloads"] as const;
+const stepKeys = [
+  "load",
+  "get",
+  "echo",
+  "call",
+  "drop",
+  "countUnloads",
+  "unload",
+  "releaseHolding",
+  "releaseHolder",
+  "quarantine",
+  "registerAwaitingReleases",
+  "forgetHolder",
+  "readUnloads",
+] as const;
 const stepFields: Readonly<Record<(typeof stepKeys)[number], readonly string[]>> = {
   load: ["load"],
   get: ["holder", "get"],
@@ -52,8 +74,13 @@ const stepFields: Readonly<Record<(typeof stepKeys)[number], readonly string[]>>
   releaseHolding: ["holder", "releaseHolding"],
   releaseHolder: ["releaseHolder"],
   quarantine: ["quarantine"],
+  registerAwaitingReleases: ["owner", "registerAwaitingReleases"],
+  forgetHolder: ["forgetHolder"],
   readUnloads: ["readUnloads"],
 };
+
+/** A host service the driver registers only to set a dispatch going, which a released holder's forget then waits behind. */
+const dispatchId = "layer-driver:dispatch";
 
 /** A capability every holder declares and never provides, so the host's verification of it is refused. */
 const neverProvided = "never-provided";
@@ -73,7 +100,7 @@ const countUnloadsOperation = koffi.proto("void", ["void *", "void *"]);
 const unloadCounters: object[] = [];
 
 function checkGiven(vector: LayerVector): LibraryGiven {
-  refuseUnknownKeys(`The vector ${vector.id}'s given`, vector.given, ["declaration", "holders", "steps"]);
+  refuseUnknownKeys(`The vector ${vector.id}'s given`, vector.given, ["declaration", "owners", "holders", "steps"]);
   const given = vector.given as unknown as LibraryGiven;
   given.steps.forEach((step, index) => {
     const where = `The vector ${vector.id}'s step ${index}`;
@@ -87,7 +114,10 @@ function checkGiven(vector: LayerVector): LibraryGiven {
 }
 
 /** The declaration as the suite builds it, each kind read by the standard's constant and no function given context facts. */
-function declarationOf(given: GivenDeclaration): LibraryDeclaration {
+function declarationOf(given: GivenDeclaration | undefined): LibraryDeclaration {
+  if (given === undefined) {
+    return { importName: "", version: "", release: null, services: [] };
+  }
   return {
     importName: given.importName,
     version: given.version,
@@ -118,6 +148,7 @@ class LibraryRun {
   readonly echoed: string[] = [];
   readonly revoked: [string, string][] = [];
   readonly unloads: number[] = [];
+  readonly holdingsReleased: [string, string][] = [];
   loaded = false;
   callersMistake = false;
   readonly #declaration: LibraryDeclaration;
@@ -132,6 +163,8 @@ class LibraryRun {
   readonly #kept = new Map<string, Uint8Array>();
   #library: LoadedLibrary | undefined;
   #counter: object | undefined;
+  /** How many lines the log and the error sink held when the first step began; only later ones are reported. */
+  #reportedFrom: { logs: number; sunk: number } | undefined;
 
   constructor(
     readonly world: DriverWorld,
@@ -140,7 +173,17 @@ class LibraryRun {
     readonly readsAddresses: boolean,
   ) {
     this.#declaration = declarationOf(given.declaration);
-    world.register(given.holders.map((holder) => this.#holder(holder)));
+    const owners = given.owners ?? [];
+    world.register([...owners.map((owner) => this.#owner(owner)), ...given.holders.map((holder) => this.#holder(holder))]);
+    for (const owner of owners) {
+      const context = world.open(owner.id);
+      context.events.listen((event) => {
+        if (event.kind === "holdings-released") {
+          this.holdingsReleased.push([owner.id, event.id]);
+        }
+      });
+      this.#contexts.set(owner.id, context);
+    }
     for (const holder of given.holders) {
       const context = world.open(holder);
       context.events.listen((event) => {
@@ -153,8 +196,25 @@ class LibraryRun {
     }
   }
 
+  #owner(owner: GivenOwner): BuiltPlugin {
+    return {
+      manifest: {
+        importName: owner.id,
+        api: 1,
+        entry: `${owner.id}.ts`,
+        services: { provides: owner.provides.map((id) => ({ id })), consumes: [{ id: dispatchId }] },
+        capabilities: { provides: [neverProvided], consumes: [] },
+      },
+      entry: inertEntry,
+    };
+  }
+
   #holder(holder: string): BuiltPlugin {
-    const ids = this.given.declaration.services.map((service) => ({ id: service.id }));
+    const ids = [
+      ...this.#declaration.services.map((service) => service.id),
+      ...(this.given.owners ?? []).flatMap((owner) => owner.provides),
+      dispatchId,
+    ].map((id) => ({ id }));
     return {
       manifest: {
         importName: holder,
@@ -167,12 +227,72 @@ class LibraryRun {
     };
   }
 
-  async run(step: Step): Promise<void> {
-    await this.#perform(step);
-    await settled();
+  /**
+   * Runs every step in order, each once the layer has nothing left to run from the one before.
+   *
+   * @implNote This host's release ends with the forget, so the only place its caller sees a released plugin not yet
+   * forgotten is a release made inside a dispatch, whose forget waits behind the events that release queued. A
+   * `releaseHolder` whose plugin a later `forgetHolder` names is therefore made inside a dispatch, the steps between
+   * them made there too, and the `forgetHolder` is that release's own forget, run once the dispatch ends.
+   */
+  async runAll(steps: readonly Step[]): Promise<void> {
+    this.#reportedFrom = { logs: this.world.logs.length, sunk: this.world.sunk.length };
+    for (let index = 0; index < steps.length; index += 1) {
+      const step = steps[index]!;
+      const forgetAt = "releaseHolder" in step ? steps.findIndex((later, at) => at > index && "forgetHolder" in later && later.forgetHolder === step.releaseHolder) : -1;
+      if ("releaseHolder" in step && forgetAt !== -1) {
+        await this.#releaseInsideDispatch(step.releaseHolder, steps.slice(index + 1, forgetAt));
+        index = forgetAt;
+      } else if ("forgetHolder" in step) {
+        throw new Error(`The vector forgets ${step.forgetHolder}, which no earlier step released.`);
+      } else {
+        await this.#perform(step);
+      }
+      await settled();
+    }
+  }
+
+  async #releaseInsideDispatch(plugin: string, between: readonly Step[]): Promise<void> {
+    const context = this.#contextOf(plugin);
+    let release: Promise<unknown> | undefined;
+    let failure: unknown;
+    context.services.watch(context.service(dispatchId), (_service, change) => {
+      if (change !== "register" || release !== undefined) {
+        return;
+      }
+      release = this.world.host.release(this.world.plugin(plugin));
+      try {
+        between.forEach((step) => this.#performAtOnce(step));
+      } catch (error) {
+        failure = error;
+      }
+    });
+    const unregister = alive(this.world.host.registerHostService({ id: dispatchId }, {}));
+    await release;
+    unregister();
+    if (failure !== undefined) {
+      throw failure;
+    }
   }
 
   async #perform(step: Step): Promise<void> {
+    if ("load" in step || "get" in step || "echo" in step || "call" in step || "drop" in step || "countUnloads" in step || "readUnloads" in step) {
+      this.#performAtOnce(step);
+    } else {
+      await this.#performHostStep(step);
+    }
+  }
+
+  /** @throws Error for a step that cannot finish in the call that makes it. */
+  #performAtOnce(step: Step): void {
+    if ("readUnloads" in step) {
+      this.#readUnloads();
+      return;
+    }
+    this.#performOnLibrary(step);
+  }
+
+  #performOnLibrary(step: Step): void {
     if ("load" in step) {
       this.#load();
     } else if ("get" in step) {
@@ -187,8 +307,15 @@ class LibraryRun {
     } else if ("countUnloads" in step) {
       this.#countUnloads(this.#definitionOf(step.holder));
     } else {
-      await this.#performHostStep(step);
+      throw new Error(`The step ${JSON.stringify(step)} cannot be made inside a dispatch.`);
     }
+  }
+
+  #readUnloads(): void {
+    if (this.#counter === undefined) {
+      throw new Error("The vector reads the unload counter before any holder handed it to the binary.");
+    }
+    this.unloads.push(Number(koffi.decode(this.#counter, "uint64_t") as bigint | number));
   }
 
   async #performHostStep(step: Step): Promise<void> {
@@ -204,11 +331,9 @@ class LibraryRun {
       await this.world.host.release(this.world.plugin(step.releaseHolder));
     } else if ("quarantine" in step) {
       this.#quarantine(step.quarantine);
-    } else if ("readUnloads" in step) {
-      if (this.#counter === undefined) {
-        throw new Error("The vector reads the unload counter before any holder handed it to the binary.");
-      }
-      this.unloads.push(Number(koffi.decode(this.#counter, "uint64_t") as bigint | number));
+    } else if ("registerAwaitingReleases" in step) {
+      const context = this.#contextOf(step.owner);
+      context.services.register(context.service(step.registerAwaitingReleases), { provider: step.owner }, { awaitReleases: true });
     }
   }
 
@@ -332,9 +457,10 @@ class LibraryRun {
       echoed: () => [...this.echoed],
       revoked: () => [...this.revoked].sort(([holderA, idA], [holderB, idB]) => holderA.localeCompare(holderB) || idA.localeCompare(idB)),
       unloads: () => [...this.unloads],
+      holdingsReleased: () => [...this.holdingsReleased],
       reported: () => [
-        ...this.world.logs.map((entry) => `${entry.source} ${entry.level} ${entry.message}`),
-        ...this.world.sunk.map((error) => (error instanceof Error ? error.message : String(error))),
+        ...this.world.logs.slice(this.#reportedFrom?.logs ?? 0).map((entry) => `${entry.source} ${entry.level} ${entry.message}`),
+        ...this.world.sunk.slice(this.#reportedFrom?.sunk ?? 0).map((error) => (error instanceof Error ? error.message : String(error))),
       ],
     };
   }
@@ -352,8 +478,6 @@ export async function driveLibrary(vector: LayerVector, world: DriverWorld, echo
   }
   const given = checkGiven(vector);
   const run = new LibraryRun(world, echoLibraryPath, given, "sameObject" in vector.then);
-  for (const step of given.steps) {
-    await run.run(step);
-  }
+  await run.runAll(given.steps);
   return run.observers();
 }

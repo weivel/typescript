@@ -226,3 +226,30 @@ describe("library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holdin
     expect(vector.then.unloads).toEqual({ equals: [0, 0, 1] });
   });
 });
+
+describe("library/an-owner-hears-the-release-its-own-release-queued", () => {
+  it("hands the owner the release event its own release queued, and reports nothing", async () => {
+    const { vector, witness: seen } = await witness("library/an-owner-hears-the-release-its-own-release-queued");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-release-event-after-its-owner-was-quarantined-reaches-no-one", () => {
+  it("drops a release event queued after the owner's quarantine without a word", async () => {
+    const { vector, witness: seen } = await witness("library/a-release-event-after-its-owner-was-quarantined-reaches-no-one");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("library/a-forgotten-holder-ends-its-late-holding", () => {
+  it("lets a released holder's late get through, and its forget ends that holding so the unload closes the binary", async () => {
+    const { vector, witness: seen } = await witness("library/a-forgotten-holder-ends-its-late-holding");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
