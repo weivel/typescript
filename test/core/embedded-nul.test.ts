@@ -78,7 +78,8 @@ describe("a text with an embedded NUL", () => {
     const [outcome] = await planned(world.host.activate([plugin])).outcomes;
 
     expect(outcome!.state).toBe("quarantined");
-    expect(outcome!.refusal?.detail).toBe("its activate threw: cut\\0short");
+    expect(outcome!.refusal).toBeUndefined();
+    expect(alive(world.host.ledger()).rows[0]!.refusal.detail).toBe("its activate threw: cut\\0short");
   });
 
   it("is refused by the standard where it would cross as a C text", () => {

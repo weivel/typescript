@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EdgeSource, LogLevel, PluginStatus, RefusalCode } from "../../src/core/index.ts";
+import { EdgeSource, LogLevel, PluginStatus, RefusalCode, type Refusal } from "../../src/core/index.ts";
 import { RefusalError, type PluginContext } from "../../src/context/index.ts";
 import { StandardRefusalCode } from "../../src/standard/index.ts";
 import {
@@ -44,6 +44,11 @@ function handleOf(handles: Map<string, bigint>, name: string): bigint {
     throw new Error(`${name} was not registered`);
   }
   return handle;
+}
+
+/** The reason the ledger row of `plugin` shows, which a quarantine for a reason of the host's keeps there alone. */
+function rowRefusal(world: HostWorld, plugin: bigint): Refusal | undefined {
+  return alive(world.host.ledger()).rows.find((row) => row.plugin === plugin)?.refusal;
 }
 
 function quarantinedNames(world: HostWorld): (string | null)[] {
@@ -216,7 +221,7 @@ describe("activation", () => {
     expect(row.status).toBe(PluginStatus.Quarantined);
     expect(row.refusal.detail).toBe("its activate threw: no disk");
     expect(row.refusal.hasFix).toBe(true);
-    expect(report.outcomes[0]!.refusal).toEqual(row.refusal);
+    expect(report.outcomes[0]!.refusal).toBeUndefined();
     expect(world.hostLog.entries).toContainEqual({
       level: "info",
       message: 'quarantined the plugin "angry": its activate threw: no disk',
@@ -242,12 +247,14 @@ describe("activation", () => {
       ["broken", "quarantined"],
       ["unnamed", "quarantined"],
     ]);
-    const details = report.outcomes.map((outcome) => outcome.refusal?.detail);
+    expect(report.outcomes.every((outcome) => outcome.refusal === undefined)).toBe(true);
+    const reasons = report.outcomes.map((outcome) => rowRefusal(world, outcome.plugin));
+    const details = reasons.map((reason) => reason?.detail);
     expect(details[0]).toBe(`its entry ${directory}/absent.js is not a regular file reached through no link`);
     expect(details[1]).toBe(`its entry ${directory}/bare.js has no export "default" with an activate function`);
     expect(details[2]?.startsWith(`its entry ${directory}/broken.js could not be loaded: `)).toBe(true);
     expect(details[3]).toBe("its manifest names no entry");
-    expect(report.outcomes.every((outcome) => outcome.refusal?.hasFix === true)).toBe(true);
+    expect(reasons.every((reason) => reason?.hasFix === true)).toBe(true);
   });
 
   it("never imports an entry reached through a link, quarantining the plugin instead", async () => {
@@ -260,10 +267,10 @@ describe("activation", () => {
 
     const report = await activated(world.host, [handleOf(handles, "linked")]);
 
-    expect(report.outcomes[0]).toMatchObject({
-      state: "quarantined",
-      refusal: { detail: `its entry ${directory}/lib/linked.js is not a regular file reached through no link` },
-    });
+    expect(report.outcomes[0]).toMatchObject({ state: "quarantined", refusal: undefined });
+    expect(rowRefusal(world, handleOf(handles, "linked"))?.detail).toBe(
+      `its entry ${directory}/lib/linked.js is not a regular file reached through no link`,
+    );
     expect(probe().activated).toEqual([]);
   });
 

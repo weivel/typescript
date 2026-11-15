@@ -160,7 +160,7 @@ describe("what an outcome carries", () => {
     expect(alive(world.host.ledger()).rows.find((row) => row.plugin === plugin)?.status).toBe(PluginStatus.Quarantined);
   });
 
-  it("is the host's reason for a plugin quarantined because its activate failed", async () => {
+  it("is no refusal for a plugin quarantined because its activate failed, the reason kept in its ledger row", async () => {
     const world = createHostWorld();
     const plugin = registered(world, "thrower", {
       activate: () => {
@@ -171,8 +171,10 @@ describe("what an outcome carries", () => {
     const [outcome] = await planned(world.host.activate([plugin])).outcomes;
 
     expect(outcome!.state).toBe("quarantined");
-    expect(outcome!.refusal?.code).toBe(RefusalCode.None);
-    expect(outcome!.refusal?.detail).toBe("its activate threw: no luck");
-    expect(outcome!.refusal?.hasFix).toBe(true);
+    expect(outcome!.refusal).toBeUndefined();
+    const row = alive(world.host.ledger()).rows.find((entry) => entry.plugin === plugin)!;
+    expect(row.refusal.code).toBe(RefusalCode.None);
+    expect(row.refusal.detail).toBe("its activate threw: no luck");
+    expect(row.refusal.hasFix).toBe(true);
   });
 });
