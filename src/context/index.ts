@@ -5,6 +5,7 @@ export type {
   CapabilityType,
   CapacityProvider,
   DegradedPluginEvent,
+  HoldingsReleasedPluginEvent,
   ImplementationChange,
   ImplementationListener,
   Logger,

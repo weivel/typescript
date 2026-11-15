@@ -93,6 +93,16 @@ export interface DeadlineEvent extends Completeness {
   readonly at: number | undefined;
 }
 
+/**
+ * Every holding of `registration`, which `owner` made awaiting releases, has ended since it was unregistered. Both
+ * handles are stale: each is half of a key only, never a handle to call with.
+ */
+export interface HoldingsReleasedEvent extends Completeness {
+  readonly kind: "holdings-released";
+  readonly owner: bigint;
+  readonly registration: bigint;
+}
+
 /** One drained event as a plain value: nothing in it points into the core. */
 export type CoreEvent =
   | LogEvent
@@ -103,7 +113,8 @@ export type CoreEvent =
   | ReachRefusedEvent
   | CapacityWantedEvent
   | CapabilityEvent
-  | DeadlineEvent;
+  | DeadlineEvent
+  | HoldingsReleasedEvent;
 
 type DecodedFields = Record<string, unknown>;
 
@@ -197,6 +208,11 @@ function readDeadline(event: object, payloadOffset: number, copying: Copying): D
   return { kind: "deadline", at: deadline.set === 1 ? Number(deadline.at) : undefined };
 }
 
+function readHoldingsReleased(event: object, payloadOffset: number, copying: Copying): HoldingsReleasedEvent {
+  const released = copying.decode(event, payloadOffset, "weivel_holdings_released_event");
+  return { kind: "holdings-released", owner: toBigInt(released.owner), registration: toBigInt(released.registration) };
+}
+
 const payloadReaders = new Map<number, PayloadReader>([
   [EventKind.Log, readLog],
   [EventKind.Refusal, readRefused],
@@ -207,6 +223,7 @@ const payloadReaders = new Map<number, PayloadReader>([
   [EventKind.CapacityWanted, readCapacityWanted],
   [EventKind.Capability, readCapability],
   [EventKind.Deadline, readDeadline],
+  [EventKind.HoldingsReleased, readHoldingsReleased],
 ]);
 
 export function eventKindAt(event: object): number {

@@ -83,12 +83,22 @@ export class PluginContexts {
   }
 
   /**
-   * Registers a service the host itself supplies, under WEIVEL_HOST; the answer unregisters it.
+   * Registers a service the host itself supplies, under WEIVEL_HOST; the answer unregisters it. With `whenReleased`
+   * it is registered awaiting releases, and `whenReleased` is called once every holding of it has ended since it was
+   * unregistered.
    *
    * @throws RefusalError when the core refuses it.
    */
-  registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}): () => void {
-    return registerService(this.#state, HOST, type.id, service, options.capacity);
+  registerHostService<Service>(
+    type: ServiceType<Service>,
+    service: Service,
+    options: RegisterOptions = {},
+    whenReleased?: () => void,
+  ): () => void {
+    return registerService(this.#state, HOST, type.id, service, {
+      capacity: options.capacity,
+      ...(whenReleased === undefined ? {} : { whenReleased }),
+    });
   }
 
   /** Whether a registration under `id` that the core has not ended is live, a plugin's or the host's. */
@@ -120,7 +130,18 @@ export class PluginContexts {
       this.#state.markEnded(plugin, handle);
       this.#state.dropWatch(handle);
     }
+    this.#state.revokedHoldings.dropPlugin(plugin);
     this.#state.dropEndedWhenIdle();
+  }
+
+  /**
+   * Called as the host begins to release a plugin in the core: from then on it hears of no release of a holding of
+   * what it registered awaiting releases.
+   */
+  releasing(plugin: bigint): void {
+    if (plugin !== HOST) {
+      this.#state.dropAwaitingReleasesOf(plugin);
+    }
   }
 
   /** How many live handles of the plugin the contexts track: what `forget` would drop. */
@@ -138,6 +159,8 @@ export class PluginContexts {
       return;
     }
     forgotten.attachment.detached = true;
+    this.#state.revokedHoldings.dropPlugin(plugin);
+    this.#state.dropAwaitingReleasesOf(plugin);
     for (const handle of forgotten.handles) {
       this.#state.services.drop(handle);
       this.#state.implementations.drop(handle);

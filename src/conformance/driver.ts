@@ -1,5 +1,6 @@
 import { EdgeSource, type CoreOptions } from "../core/index.js";
 import { driveConsume } from "./consume.js";
+import { driveLibrary } from "./library.js";
 import { driveLifecycle, lifecycleEdgeSource } from "./lifecycle.js";
 import { observe, type Observer } from "./expectations.js";
 import type { LayerVector } from "./vectors.js";
@@ -20,13 +21,18 @@ export interface LayerWitness {
 interface OpDriver {
   readonly coreOptions: (vector: LayerVector) => CoreOptions;
   readonly edgeSource: (vector: LayerVector) => EdgeSource;
-  readonly drive: (vector: LayerVector, world: DriverWorld) => Promise<Record<string, Observer>>;
+  readonly drive: (vector: LayerVector, world: DriverWorld, options: DriverOptions) => Promise<Record<string, Observer>>;
 }
 
 const opDrivers: Readonly<Record<string, OpDriver>> = {
   consume: { coreOptions: () => ({}), edgeSource: () => EdgeSource.Capabilities, drive: driveConsume },
   want: { coreOptions: wantCoreOptions, edgeSource: () => EdgeSource.Capabilities, drive: driveWant },
   lifecycle: { coreOptions: () => ({}), edgeSource: lifecycleEdgeSource, drive: driveLifecycle },
+  library: {
+    coreOptions: () => ({}),
+    edgeSource: () => EdgeSource.Capabilities,
+    drive: (vector, world, options) => driveLibrary(vector, world, options.echoLibraryPath),
+  },
 };
 
 /**
@@ -42,7 +48,7 @@ export async function witnessLayerVector(vector: LayerVector, options: DriverOpt
   }
   const world = new DriverWorld(options, opDriver.coreOptions(vector), opDriver.edgeSource(vector));
   try {
-    const observers = await opDriver.drive(vector, world);
+    const observers = await opDriver.drive(vector, world, options);
     return { id: vector.id, observed: observe(vector.id, vector.then, observers), logs: [...world.logs], sunk: [...world.sunk] };
   } finally {
     await world.close(options);

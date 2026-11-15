@@ -55,6 +55,7 @@ const weivel_capability_event = structOf({
   change: "uint32_t",
 });
 const weivel_deadline_event = structOf({ at: "int64_t", set: "uint32_t" });
+const weivel_holdings_released_event = structOf({ owner: handle, registration: handle });
 
 /** WEIVEL_EVENT_PAYLOAD_WORDS. */
 const EVENT_PAYLOAD_WORDS = 16;
@@ -70,6 +71,7 @@ const weivel_event_payload = koffi.union({
   capability: weivel_capability_event,
   refused: weivel_refusal_event,
   deadline: weivel_deadline_event,
+  released: weivel_holdings_released_event,
   reserved: koffi.array("uint64_t", EVENT_PAYLOAD_WORDS),
 });
 const weivel_event = structOf({ ...sizeField, kind: "uint32_t", storage: "void *", data: weivel_event_payload });
@@ -211,6 +213,7 @@ export const coreStructs = {
   weivel_capacity_event,
   weivel_capability_event,
   weivel_deadline_event,
+  weivel_holdings_released_event,
   weivel_event,
   weivel_strings,
   weivel_service_offer,
@@ -292,6 +295,8 @@ const coreSignatures = {
   weivel_quarantine_plugin: [status, [corePointer, handle, pointerTo("weivel_quarantine_reason"), pendingEvents]],
   weivel_forget_plugin: [status, [corePointer, handle, pendingEvents]],
   weivel_register_service: [status, [corePointer, handle, text, handleOut, pendingEvents]],
+  weivel_register_service_awaiting_releases: [status, [corePointer, handle, text, handleOut, pendingEvents]],
+  weivel_release_holding: [status, [corePointer, handle, handle, pendingEvents]],
   weivel_unregister: [status, [corePointer, handle, pendingEvents]],
   weivel_handle_state: [status, [corePointer, handle, koffi.out(koffi.pointer("uint32_t")), pendingEvents]],
   weivel_get_service: [status, [corePointer, handle, text, handleOut, pendingEvents]],

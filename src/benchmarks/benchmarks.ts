@@ -3,7 +3,7 @@ import { createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLi
 import { wrapperHooks } from "../core/core.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
 import { Host, hostInternals } from "../host/host.js";
-import { bindBareBytesFunction } from "../host/libraries.js";
+import { bindBareBytesFunction, type LibraryDefinition } from "../host/libraries.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
 import { CoreTimer } from "../timer/index.js";
@@ -46,6 +46,7 @@ export const defaultSamplings = {
   sameLanguageCall: { warmupCalls: 2_000_000, callsPerBatch: 10_000, batches: 301 },
   controlCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
   libraryCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
+  definitionCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
 } as const satisfies Record<string, Sampling>;
 
 function samplingOf(defaults: Sampling, options: BenchmarkOptions): Sampling {
@@ -66,7 +67,11 @@ function openPlugin(core: Core, contexts: PluginContexts, manifest: Manifest): O
 }
 
 const providerManifest: Manifest = { importName: "provider", services: { provides: [{ id: arithmeticId }] } };
-const consumerManifest: Manifest = { importName: "consumer", services: { consumes: [{ id: arithmeticId }, { id: echoId }] } };
+const echoDefinitionId = "echo-definition";
+const consumerManifest: Manifest = {
+  importName: "consumer",
+  services: { consumes: [{ id: arithmeticId }, { id: echoId }, { id: echoDefinitionId }] },
+};
 
 /**
  * The library as it was given, but for weivel_core_create, which also hands the core it created to `created`: the
@@ -269,6 +274,80 @@ export async function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Pr
     return ffiPair(
       { bareCall: bareEcho(bareLibrary, input), weivelCall: () => echo.echo(input) },
       samplingOf(defaultSamplings.libraryCall, options),
+      options.decorate,
+    );
+  } finally {
+    bareLibrary.unload();
+    await host.destroy();
+  }
+}
+
+const echoDefinitionDeclaration: LibraryDeclaration = {
+  importName: "echo",
+  version: "0.2.0",
+  release: null,
+  services: [{ id: echoDefinitionId, functions: [{ name: "definition", symbol: "echo_service_definition", kind: FunctionKind.Definition, context: 0 }] }],
+};
+
+/** The head of the echo library's `echo_definition`: its size, context and the two operations the call makes. */
+const echoDefinitionHead = koffi.struct({ size: "uint32_t", context: "void *", echo: "void *", release: "void *" });
+const echoOperation = koffi.proto("int32_t", ["void *", "const void *", "size_t", "_Out_ void **", "_Out_ size_t *"]);
+const releaseOperation = koffi.proto("void", ["void *", "void *"]);
+
+/**
+ * The definition's `echo` called at `definition`, its answer released through the definition's own `release`.
+ *
+ * @implNote Both operations are read out of the struct once, here, before the timed loop, for every path alike: one
+ * load more per call on one side would be a cost and not noise.
+ */
+function definitionEcho(definition: object, input: Uint8Array): MeasuredPath {
+  const head = koffi.decode(definition, echoDefinitionHead) as { context: unknown; echo: unknown; release: unknown };
+  const output: (object | null)[] = [null];
+  const outputLength: number[] = [0];
+  return () => {
+    const status = koffi.call(head.echo, echoOperation, head.context, input, input.length, output, outputLength) as number;
+    if (output[0] !== null) {
+      koffi.call(head.release, releaseOperation, head.context, output[0]);
+    }
+    if (status !== 0 || Number(outputLength[0]) !== input.length) {
+      throw new Error(`The definition's echo answered status ${String(status)} with ${String(outputLength[0])} bytes.`);
+    }
+    return status;
+  };
+}
+
+/**
+ * Times the echo definition's `echo` called through the definition a consumer resolved against the same operation
+ * called through the pointer `echo_service_definition` answered, 16 bytes in and the same 16 back.
+ *
+ * @remarks The two are the same pointer, so the ratio is 1 by construction and bounds only the measurement's noise; it
+ * is judged as the same-language pair is. The proof that the host adds no wrapper, count or copy is the identity check
+ * before it: the address the consumer resolved is the address the symbol answered, or the benchmark throws.
+ */
+export async function benchmarkDefinitionCall(options: LibraryBenchmarkOptions): Promise<SameLanguageCallSummaries> {
+  const host = Host.create({
+    edgeSource: EdgeSource.Capabilities,
+    ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
+    log: silentLogger,
+  });
+  const bareLibrary = koffi.load(options.echoLibraryPath);
+  try {
+    host.loadLibrary(echoDefinitionDeclaration, options.echoLibraryPath);
+    const { core, contexts } = hostInternals(host);
+    const consumer = openPlugin(core, contexts, consumerManifest).context;
+    const resolved = consumer.services.get(consumer.service<LibraryDefinition>(echoDefinitionId));
+    const answered = (bareLibrary.func("echo_service_definition", "void *", []) as () => object)();
+    if (resolved === undefined || koffi.address(resolved.pointer) !== koffi.address(answered)) {
+      throw new Error("The definition the consumer resolved is not the pointer echo_service_definition answered.");
+    }
+    const input = new Uint8Array(16).fill(7);
+    return measureInterleaved(
+      {
+        direct: definitionEcho(answered, input),
+        directAgain: definitionEcho(answered, input),
+        throughWeivel: definitionEcho(resolved.pointer, input),
+      },
+      samplingOf(defaultSamplings.definitionCall, options),
       options.decorate,
     );
   } finally {

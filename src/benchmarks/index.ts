@@ -1,5 +1,6 @@
 export {
   benchmarkControlCall,
+  benchmarkDefinitionCall,
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   defaultSamplings,

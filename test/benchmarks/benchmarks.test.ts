@@ -4,6 +4,7 @@ import koffi from "koffi";
 import { describe, expect, it } from "vitest";
 import {
   benchmarkControlCall,
+  benchmarkDefinitionCall,
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   callsPerPath,
@@ -219,6 +220,37 @@ describe("a C library call through the host's bytes binding", () => {
     expect(paths.calls.get("bareCall")).toBe(callsPerPath(briefSampling));
     expect(crossings.get("echo_echo")).toBe(callsOfBothPaths);
     expect(crossings.get("echo_release")).toBe(callsOfBothPaths);
+  });
+});
+
+describe("a C library definition called through the definition a consumer resolved", () => {
+  it("costs what the same operation called through the symbol's own pointer costs, within the run's noise", { timeout }, async () => {
+    const pair = await benchmarkDefinitionCall({ ...libraries, echoLibraryPath });
+    report("library-call-definition-direct", pair.direct);
+    report("library-call-definition-direct-again", pair.directAgain);
+    report("library-call-definition", pair.throughWeivel);
+    const noise = pairRatio(pair.directAgain, pair.direct);
+    reportRatio("library-call-definition-noise", noise);
+    const ratio = pairRatio(pair.throughWeivel, pair.direct);
+    reportRatio("library-call-definition-over-direct", ratio);
+
+    const bounds = noiseBoundsOf(budget);
+    expect(bounds, `the budget gives no noise line for ${process.platform}, so the gate fails rather than passing unbounded`).toBeDefined();
+    expect(tooNoisyToJudge(bounds!, noise), `the run was too noisy to judge: its two identical direct paths differed by ${noise.toFixed(4)}`).toBe(false);
+    expect(withinRatio(ratio, sameLanguageBound(bounds!, noise))).toBe(true);
+  });
+
+  it("is told apart from the direct call once it is slowed", { timeout }, async () => {
+    const pair = await benchmarkDefinitionCall({
+      ...libraries,
+      echoLibraryPath,
+      sampling: briefSampling,
+      decorate: slowing("throughWeivel", 2_000),
+    });
+
+    const bound = sameLanguageBound(noiseBoundsOf(budget)!, pairRatio(pair.directAgain, pair.direct));
+
+    expect(withinRatio(pairRatio(pair.throughWeivel, pair.direct), bound)).toBe(false);
   });
 });
 

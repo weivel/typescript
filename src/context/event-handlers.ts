@@ -4,6 +4,7 @@ import {
   ReachKind,
   type CapabilityEvent,
   type CoreEvent,
+  type HoldingsReleasedEvent,
   type ReachRefusedEvent,
   type RevokedEvent,
   type WantSettledEvent,
@@ -11,6 +12,7 @@ import {
 } from "../core/index.js";
 import { answerCapacity } from "./capacity.js";
 import { RefusalError } from "./refusal.js";
+import { releaseHolding } from "./services.js";
 import type { ContextState } from "./state.js";
 
 /**
@@ -73,12 +75,34 @@ function hearCapability(state: ContextState, event: CapabilityEvent): void {
   }
 }
 
+function nothingToRelease(): void {}
+
+/**
+ * Drops the holding a revocation names and tells its holder, handing it the release of a holding the core keeps past
+ * the revocation.
+ */
 function revoke(state: ContextState, event: RevokedEvent): void {
   const held = state.holdings.lookup(event.plugin, event.implementation);
   state.holdings.apply(event);
-  if (held !== undefined) {
-    state.emit(event.plugin, { kind: "revoked", reach: held.reach, id: held.id, implementation: held.implementation });
+  if (held === undefined) {
+    return;
   }
+  let release = nothingToRelease;
+  if (held.awaitsReleases) {
+    state.revokedHoldings.hold(event.plugin, event.implementation, true);
+    release = () => releaseHolding(state, event.plugin, event.implementation);
+  }
+  state.emit(event.plugin, { kind: "revoked", reach: held.reach, id: held.id, implementation: held.implementation, release });
+}
+
+/** Tells a registration's owner every holding of it has ended; an owner released or forgotten since was dropped. */
+function handOnHoldingsReleased(state: ContextState, event: HoldingsReleasedEvent): void {
+  const awaiting = state.awaitingReleases.lookup(event.registration);
+  if (awaiting === undefined) {
+    return;
+  }
+  state.awaitingReleases.drop(event.registration);
+  state.notify(awaiting.released, event);
 }
 
 function reportReachRefused(state: ContextState, event: ReachRefusedEvent): void {
@@ -112,6 +136,9 @@ export function handleEvent(state: ContextState, event: CoreEvent): void {
       return;
     case "capacity-wanted":
       answerCapacity(state, event);
+      return;
+    case "holdings-released":
+      handOnHoldingsReleased(state, event);
       return;
     default:
       return;

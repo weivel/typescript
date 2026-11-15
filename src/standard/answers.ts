@@ -84,7 +84,8 @@ export interface LibraryService {
 export interface LibraryDeclaration {
   readonly importName: string;
   readonly version: string;
-  readonly release: string;
+  /** The symbol that frees what the bytes functions answer; null when every service is a definition. */
+  readonly release: string | null;
   readonly services: readonly LibraryService[];
 }
 
@@ -190,7 +191,7 @@ export function readLibrary(fields: DecodedFields): LibraryDeclaration {
   return {
     importName: fields.import_name as string,
     version: fields.version as string,
-    release: fields.release as string,
+    release: fields.release as string | null,
     services: readFixedElements(
       fields.services as NativePointer,
       Number(fields.service_count),

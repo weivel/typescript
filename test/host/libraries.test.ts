@@ -129,12 +129,12 @@ describe("a C library loaded as host services", () => {
     expect(() => library.unload()).not.toThrow();
   });
 
-  it("refuses a declaration built with a kind other than bytes, binding and registering nothing", () => {
+  it("refuses a declaration built with a kind other than bytes or definition, binding and registering nothing", () => {
     const world = createHostWorld();
     const read = declaration();
     const retired = { ...read, services: [{ id: "echo", functions: [{ name: "echo", symbol: "echo_echo", kind: 1, context: 0 }] }] };
 
-    expect(() => alive(world.host.loadLibrary(retired, echoLibraryPath))).toThrow(/function echo is of kind 1; this layer binds the bytes kind alone/);
+    expect(() => alive(world.host.loadLibrary(retired, echoLibraryPath))).toThrow(/function echo is of kind 1; this layer binds the bytes and definition kinds alone/);
     expect(read.services[0]!.functions[0]!.kind).toBe(FunctionKind.Bytes);
     expect(hostReaches(world, "echo")).toBe(false);
   });

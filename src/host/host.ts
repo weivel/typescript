@@ -30,7 +30,7 @@ import { CoreTimer } from "../timer/index.js";
 import { activationFailureOf, type ActivationFailure } from "./activation-failure.js";
 import { writeCoreLog } from "./core-log.js";
 import { frozenCopyOf } from "./frozen-copy.js";
-import { bindLibrary } from "./libraries.js";
+import { bindLibrary, type BoundLibrary } from "./libraries.js";
 import {
   hostDestroyed,
   type ActivationOutcome,
@@ -57,11 +57,27 @@ interface PluginRecord {
   context: PluginContext | undefined;
 }
 
-function refuseUnboundKinds(declaration: LibraryDeclaration): void {
+const boundKinds: readonly number[] = [FunctionKind.Bytes, FunctionKind.Definition];
+
+/**
+ * Refuses, as the caller's mistake, a declaration the standard's reader would refuse: a kind of neither bytes nor
+ * definition, a definition beside another function or with context facts, or bytes functions with no release.
+ */
+function refuseMisdeclared(declaration: LibraryDeclaration): void {
   for (const service of declaration.services) {
-    const unbound = service.functions.find((declared) => declared.kind !== FunctionKind.Bytes);
+    const unbound = service.functions.find((declared) => !boundKinds.includes(declared.kind));
     if (unbound !== undefined) {
-      throw new Error(`${declaration.importName}'s function ${unbound.name} is of kind ${unbound.kind}; this layer binds the bytes kind alone.`);
+      throw new Error(`${declaration.importName}'s function ${unbound.name} is of kind ${unbound.kind}; this layer binds the bytes and definition kinds alone.`);
+    }
+    const definition = service.functions.find((declared) => declared.kind === FunctionKind.Definition);
+    if (definition !== undefined && service.functions.length > 1) {
+      throw new Error(`${declaration.importName}'s service ${service.id} declares the definition ${definition.name} beside another function.`);
+    }
+    if (definition !== undefined && definition.context !== 0) {
+      throw new Error(`${declaration.importName}'s definition ${definition.name} reads context facts, which a definition carries in its own struct.`);
+    }
+    if (definition === undefined && service.functions.length > 0 && declaration.release === null) {
+      throw new Error(`${declaration.importName} declares bytes functions and no release.`);
     }
   }
 }
@@ -129,6 +145,8 @@ export class Host {
   /** Every plugin the host opened and has not released, in the order it opened them. */
   readonly #opened: PluginRecord[] = [];
   readonly #libraryUnloads = new Set<() => void>();
+  /** Every C library binary still open, closed once the core is destroyed whatever still holds it. */
+  readonly #openBinaries = new Set<BoundLibrary>();
   /** The import name of the live C library that declares each id. */
   readonly #libraryIds = new Map<string, string>();
   /** Every release under way, so a destroy waits for each, one begun before it included. */
@@ -260,8 +278,8 @@ export class Host {
     return this.#registerHostService(type, service, options);
   }
 
-  #registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions): () => void {
-    const unregister = this.#contexts.registerHostService(type, service, options);
+  #registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions, whenReleased?: () => void): () => void {
+    const unregister = this.#contexts.registerHostService(type, service, options, whenReleased);
     this.#countHostService(type.id, 1);
     let registered = true;
     return () => {
@@ -283,25 +301,35 @@ export class Host {
   }
 
   /**
-   * Binds each function of a C library's declaration, read by the standard or built by the caller, and registers each
-   * declared service under WEIVEL_HOST.
+   * Binds each bytes function of a C library's declaration, read by the standard or built by the caller, calls each
+   * definition's symbol once, and registers each declared service under WEIVEL_HOST: a service of bytes functions as
+   * an object with one function per declared function, and a definition as a LibraryDefinition carrying the very
+   * address its symbol answered, registered awaiting releases.
    *
-   * @throws Error when a function is of a kind other than bytes, an id is declared twice or is already registered,
-   * by another live library, a plugin or the host itself, the library file is missing, or it lacks a symbol its
-   * declaration names: each the caller's mistake, reported to no sink. RefusalError when the core refuses one of its
-   * registrations, the load then undone as an unload.
+   * Unloading unregisters every service at once and refuses every later bytes call; the binary is closed once every
+   * definition service has had every holding of it released, or once the host is destroyed.
+   *
+   * @throws Error when a declaration the caller built names a kind other than bytes or definition, sets a definition
+   * beside another function or gives one context facts, or names bytes functions and no release; an id is declared
+   * twice or is already registered, by another live library, a plugin or the host itself; the library file is
+   * missing or lacks a symbol its declaration names; or a definition answers NULL or a struct smaller than
+   * `2 * sizeof(void *)`: each the caller's mistake, reported to no sink, the binary closed again. RefusalError when
+   * the core refuses one of its registrations, the load then undone as an unload.
    */
   loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
     if (this.#destroyed) {
       return hostDestroyed;
     }
-    refuseUnboundKinds(declaration);
+    refuseMisdeclared(declaration);
     this.#refuseHeldIds(declaration);
-    const bound = bindLibrary(libraryPath, declaration);
+    const bound = bindLibrary(libraryPath, declaration, () => this.#openBinaries.delete(bound));
+    this.#openBinaries.add(bound);
     const unregisters: (() => void)[] = [];
-    const ids = [...bound.services.keys()];
+    const ids = [...bound.services.keys(), ...bound.definitions.keys()];
     const unload = (): void => {
-      this.#libraryUnloads.delete(unload);
+      if (!this.#libraryUnloads.delete(unload)) {
+        return;
+      }
       ids.forEach((id) => this.#libraryIds.delete(id));
       unregisters.splice(0).forEach((unregister) => unregister());
       bound.unload();
@@ -309,14 +337,27 @@ export class Host {
     this.#libraryUnloads.add(unload);
     ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
     try {
-      for (const [id, service] of bound.services) {
-        unregisters.push(this.#registerHostService({ id }, service, {}));
-      }
+      this.#registerLibraryServices(bound, unregisters);
     } catch (error) {
       unload();
       throw error;
     }
-    return { declaration, services: bound.services, unload };
+    return { declaration, services: bound.services, definitions: bound.definitions, unload };
+  }
+
+  #registerLibraryServices(bound: BoundLibrary, unregisters: (() => void)[]): void {
+    for (const [id, service] of bound.services) {
+      unregisters.push(this.#registerHostService({ id }, service, {}));
+    }
+    for (const [id, definition] of bound.definitions) {
+      bound.awaitRelease(id);
+      try {
+        unregisters.push(this.#registerHostService({ id }, definition, {}, () => bound.released(id)));
+      } catch (error) {
+        bound.released(id);
+        throw error;
+      }
+    }
   }
 
   /** @implNote A registration under WEIVEL_HOST replaces one, so a library may take no id something already holds. */
@@ -629,6 +670,7 @@ export class Host {
 
   #releaseInCore(record: PluginRecord): Promise<void> {
     const plugin = record.hosted.plugin;
+    this.#contexts.releasing(plugin);
     const released = this.#core.releasePlugin(plugin);
     if (released.status !== Status.Ok) {
       this.#sink(failureOf("weivel_release_plugin", released));
@@ -691,6 +733,7 @@ export class Host {
         this.#timer.stop();
       } finally {
         this.#core.destroy();
+        [...this.#openBinaries].forEach((binary) => binary.close());
       }
     }
   }
