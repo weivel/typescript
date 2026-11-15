@@ -107,3 +107,30 @@ describe("lifecycle/destroy-releases-a-plugin-whose-activate-is-in-flight", () =
     expect(seen.observed).toEqual(vector.then);
   });
 });
+
+describe("lifecycle/events-of-an-activate-wait-for-every-activate-of-the-plan", () => {
+  it("dispatches the registration an activate made only once every activate of the plan has been called", async () => {
+    const { vector, witness: seen } = await witness("lifecycle/events-of-an-activate-wait-for-every-activate-of-the-plan");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("lifecycle/an-activate-that-settles-at-once-is-verified-before-the-next-starts", () => {
+  it("verifies the provider before the consumer starts, so the consumer lists its implementation", async () => {
+    const { vector, witness: seen } = await witness("lifecycle/an-activate-that-settles-at-once-is-verified-before-the-next-starts");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
+describe("lifecycle/an-activate-refused-at-once-is-quarantined-before-the-next-starts", () => {
+  it("quarantines the refused provider before the consumer starts, so the consumer misses its service", async () => {
+    const { vector, witness: seen } = await witness("lifecycle/an-activate-refused-at-once-is-quarantined-before-the-next-starts");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});

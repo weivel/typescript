@@ -6,12 +6,19 @@ import { kitCodeName } from "./refusals.js";
 import type { LayerVector } from "./vectors.js";
 import { alive, settled, type BuiltPlugin, type DriverWorld } from "./world.js";
 
-type Action = { readonly register: string } | { readonly want: string; readonly await?: boolean } | { readonly get: string };
+type Action =
+  | { readonly register: string }
+  | { readonly want: string; readonly await?: boolean }
+  | { readonly get: string }
+  | { readonly watch: string }
+  | { readonly provide: string }
+  | { readonly all: string };
 
 interface GivenPlugin {
   readonly id: string;
   readonly provides: readonly string[];
   readonly consumes: readonly string[];
+  readonly capabilities?: { readonly provides: readonly string[]; readonly consumes: readonly string[] };
   readonly activate: readonly Action[];
   readonly deactivate?: readonly Action[];
 }
@@ -30,7 +37,7 @@ interface LifecycleGiven {
 }
 
 const edgeSources: Readonly<Record<string, EdgeSource>> = { capabilities: EdgeSource.Capabilities, services: EdgeSource.Services };
-const actionKeys = ["register", "want", "get"] as const;
+const actionKeys = ["register", "want", "get", "watch", "provide", "all"] as const;
 const stepKeys = ["activate", "release", "destroy", "verify", "get"] as const;
 
 function checkAction(where: string, action: Action): void {
@@ -43,7 +50,10 @@ function checkAction(where: string, action: Action): void {
 
 function checkPlugin(vectorId: string, plugin: GivenPlugin): void {
   const where = `The vector ${vectorId}'s plugin ${plugin.id}`;
-  refuseUnknownKeys(where, plugin, ["id", "provides", "consumes", "activate", "deactivate"]);
+  refuseUnknownKeys(where, plugin, ["id", "provides", "consumes", "capabilities", "activate", "deactivate"]);
+  if (plugin.capabilities !== undefined) {
+    refuseUnknownKeys(`${where}'s capabilities`, plugin.capabilities, ["provides", "consumes"]);
+  }
   plugin.activate.forEach((action, index) => checkAction(`${where}'s activate action ${index}`, action));
   plugin.deactivate?.forEach((action, index) => checkAction(`${where}'s deactivate action ${index}`, action));
 }
@@ -73,12 +83,15 @@ export function lifecycleEdgeSource(vector: LayerVector): EdgeSource {
   return edgeSources[checkGiven(vector).edgeSource]!;
 }
 
-/** A given plugin's manifest: its service ids exactly as written, and an entry named when it provides one. */
+/** A given plugin's manifest: its service and capability ids exactly as written, and an entry named when it provides a service. */
 function manifestOf(plugin: GivenPlugin): Manifest {
   return {
     importName: plugin.id,
     api: 1,
     services: { provides: plugin.provides.map((id) => ({ id })), consumes: plugin.consumes.map((id) => ({ id })) },
+    ...(plugin.capabilities === undefined
+      ? {}
+      : { capabilities: { provides: [...plugin.capabilities.provides], consumes: [...plugin.capabilities.consumes] } }),
     ...(plugin.provides.length > 0 ? { entry: `${plugin.id}.ts` } : {}),
   };
 }
@@ -135,11 +148,29 @@ class LifecycleRun {
         if (action.await !== false) {
           return ended.then(() => this.#runActions(name, context, actions, next + 1));
         }
-      } else {
+      } else if ("get" in action) {
         this.#get(name, context, action.get);
+      } else {
+        this.#runCapabilityAction(name, context, action);
       }
     }
     return undefined;
+  }
+
+  #runCapabilityAction(name: string, context: PluginContext, action: Extract<Action, { watch: string } | { provide: string } | { all: string }>): void {
+    if ("watch" in action) {
+      context.services.watch(context.service(action.watch), (_service, change) => {
+        if (change === "register") {
+          this.trace.push(`heard ${name} ${action.watch}`);
+        }
+      });
+    } else if ("provide" in action) {
+      context.provide(context.capability<Registered>(action.provide), { provider: name });
+      this.trace.push(`provided ${name} ${action.provide}`);
+    } else {
+      const listed = context.capabilities.all(context.capability<Registered>(action.all));
+      this.trace.push([`listed ${name} ${action.all}`, ...listed.map((implementation) => implementation.provider)].join(" "));
+    }
   }
 
   #want(name: string, context: PluginContext, id: string): Promise<void> {
