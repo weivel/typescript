@@ -23,12 +23,12 @@ function uniqueUrlOf(entryPath: string): string {
 }
 
 /**
- * Imports the entry the standard resolved for a plugin and answers its default export. An entry the standard did not
- * find present, a regular file reached through no link, is never imported.
+ * Imports the entry the standard resolved for a plugin and answers its export named `exportName`. An entry the
+ * standard did not find present, a regular file reached through no link, is never imported.
  *
  * @throws ActivationFailure saying why the entry cannot be activated.
  */
-async function importPlugin(entryPath: string | null, entryPresent: boolean): Promise<Plugin> {
+async function importPlugin(entryPath: string | null, entryPresent: boolean, exportName: string): Promise<Plugin> {
   if (entryPath === null) {
     throw new ActivationFailure("its manifest names no entry", 'name the plugin\'s entry module in its manifest\'s "entry"');
   }
@@ -38,30 +38,32 @@ async function importPlugin(entryPath: string | null, entryPresent: boolean): Pr
       "lay the entry out as a regular file inside the plugin's directory, with no link on its path",
     );
   }
-  let entry: { default?: unknown };
+  let entry: Record<string, unknown>;
   try {
-    entry = (await import(uniqueUrlOf(entryPath))) as { default?: unknown };
+    entry = (await import(uniqueUrlOf(entryPath))) as Record<string, unknown>;
   } catch (error) {
     throw new ActivationFailure(`its entry ${entryPath} could not be loaded: ${messageOf(error)}`, "make the entry a module that loads");
   }
-  if (!isPlugin(entry.default)) {
+  const exported = Object.hasOwn(entry, exportName) ? entry[exportName] : undefined;
+  if (!isPlugin(exported)) {
     throw new ActivationFailure(
-      `its entry ${entryPath} has no default export with an activate function`,
-      "export default an object whose activate(context) activates the plugin",
+      `its entry ${entryPath} has no export ${JSON.stringify(exportName)} with an activate function`,
+      `export ${JSON.stringify(exportName)} as an object whose activate(context) activates the plugin`,
     );
   }
-  return entry.default;
+  return exported;
 }
 
 /**
- * The entry of a plugin laid out on disk: its activate imports the module the standard resolved and calls that
- * module's activate; its deactivate calls the module's, once one was imported.
+ * The entry of a plugin laid out on disk: its activate imports the module the standard resolved and calls the
+ * activate of the export its caller names; its deactivate calls that export's, once one was imported. No export name
+ * is assumed, `default` included.
  */
-export function entryOnDisk(entryPath: string | null, entryPresent: boolean): Plugin {
+export function entryOnDisk(entryPath: string | null, entryPresent: boolean, exportName: string): Plugin {
   let imported: Plugin | undefined;
   return {
     async activate(context) {
-      imported = await importPlugin(entryPath, entryPresent);
+      imported = await importPlugin(entryPath, entryPresent, exportName);
       await imported.activate(context);
     },
     deactivate() {
@@ -78,8 +80,11 @@ export interface PluginRegistration {
 
 /**
  * The manifest and entry a discovered plugin is registered with: the standard's manifest carrying the identity file's
- * id when there is one, and the entry on disk.
+ * id when there is one, and the entry on disk, loaded by the export its caller names.
  */
-export function registrationOf(discovered: DiscoveredPlugin): PluginRegistration {
-  return { manifest: identifiedManifest(discovered), entry: entryOnDisk(discovered.entryPath, discovered.entryPresent) };
+export function registrationOf(discovered: DiscoveredPlugin, exportName: string): PluginRegistration {
+  return {
+    manifest: identifiedManifest(discovered),
+    entry: entryOnDisk(discovered.entryPath, discovered.entryPresent, exportName),
+  };
 }

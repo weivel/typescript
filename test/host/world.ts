@@ -183,7 +183,7 @@ export function registerDirectory(world: HostWorld, directory: string): Director
   const registered = new Map<string, bigint>();
   const refused: { manifestPath: string; refusal: Refusal }[] = [];
   for (const found of discovery.value?.plugins ?? []) {
-    const { manifest, entry } = registrationOf(found);
+    const { manifest, entry } = registrationOf(found, "default");
     const answer = alive(world.host.register(manifest, entry));
     if (answer.plugin === undefined) {
       refused.push({ manifestPath: found.manifestPath, refusal: answer.refusal });

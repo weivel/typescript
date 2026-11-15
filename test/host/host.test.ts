@@ -243,7 +243,7 @@ describe("activation", () => {
     ]);
     const details = report.outcomes.map((outcome) => outcome.refusal?.detail);
     expect(details[0]).toBe(`its entry ${directory}/absent.js is not a regular file reached through no link`);
-    expect(details[1]).toBe(`its entry ${directory}/bare.js has no default export with an activate function`);
+    expect(details[1]).toBe(`its entry ${directory}/bare.js has no export "default" with an activate function`);
     expect(details[2]?.startsWith(`its entry ${directory}/broken.js could not be loaded: `)).toBe(true);
     expect(details[3]).toBe("its manifest names no entry");
     expect(report.outcomes.every((outcome) => outcome.refusal?.hasFix === true)).toBe(true);
