@@ -36,6 +36,7 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   options hears each move of its timer, the deadline it arms or `undefined` when it disarms. The host hands its caller
   nothing of the wrapper: the core, the contexts and the wrapper's dispatch, clock and deadline hooks are reached only
   by this package's own modules, never through its exports.
+- A host given no `scheduler` arms `setTimeout`, through `createSystemScheduler`.
 - A want answers a promise with a `withdraw()`: it withdraws a want the core still holds waiting, which then never
   settles, and answers `true`; for a want that has settled already, its settlement still delivered, or one withdrawn
   already or never made, it answers `false` and withdraws nothing.
