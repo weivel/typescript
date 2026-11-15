@@ -122,7 +122,7 @@ describe("the layer driver", () => {
   it("fails a lifecycle action and a step it does not drive", async () => {
     const vector = kitVector(lifecycleId);
     const given = vector.given as { plugins: Record<string, unknown>[]; steps: unknown[] };
-    const plugins = [{ ...given.plugins[0]!, activate: [{ provide: "screens" }] }, given.plugins[1]!];
+    const plugins = [{ ...given.plugins[0]!, activate: [{ withdraw: "screens" }] }, given.plugins[1]!];
 
     await expect(witnessLayerVector({ ...vector, given: { ...given, plugins } }, options)).rejects.toThrow(/names 0 actions/);
     await expect(witnessLayerVector({ ...vector, given: { ...given, steps: [{ quarantine: "calendar" }] } }, options)).rejects.toThrow(
