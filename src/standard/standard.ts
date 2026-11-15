@@ -4,6 +4,7 @@ import koffi from "koffi";
 import { Status } from "../core/constants.js";
 import { sharedLibraryFileName } from "../core/library-file.js";
 import { allocateSized, readStrings, type DecodedList } from "../core/memory.js";
+import { textForC } from "../core/text.js";
 import { encodeStrings, type Manifest } from "../core/values.js";
 import {
   decodeStandardStruct,
@@ -118,13 +119,14 @@ export class Standard {
   /** Validates a JSON manifest and, only when it is valid, reads it, as weivel_standard_load_manifest does. */
   loadManifest(json: string, options?: ValidationOptions): ManifestAnswer {
     const document = utf8(json);
+    const encodedOptions = encodeValidationOptions(options);
     const loaded: unknown[] = [null];
     return this.#withStruct("weivel_standard_validation", "weivel_standard_validation_release", (validation) => {
       try {
         const status = this.#functions.weivel_standard_load_manifest(
           document,
           document.length,
-          encodeValidationOptions(options),
+          encodedOptions,
           loaded,
           validation,
         ) as Status;
@@ -142,8 +144,10 @@ export class Standard {
 
   /** Scans one directory for plugins laid out by the standard, as weivel_standard_discover does. */
   discover(directory: string, options?: ValidationOptions): StandardAnswer<Discovery> {
+    const encodedDirectory = textForC(directory);
+    const encodedOptions = encodeValidationOptions(options);
     return this.#withStruct("weivel_standard_discovery", "weivel_standard_discovery_release", (discovery) => {
-      const status = this.#functions.weivel_standard_discover(directory, encodeValidationOptions(options), discovery) as Status;
+      const status = this.#functions.weivel_standard_discover(encodedDirectory, encodedOptions, discovery) as Status;
       const fields = decodeStandardStruct(discovery, "weivel_standard_discovery");
       const found = status === Status.Ok ? readDiscovery(fields, (manifest) => this.#manifestView(manifest)) : undefined;
       return answer(status, found, readStandardRefusal(fields.refusal as Record<string, unknown>));
@@ -184,11 +188,14 @@ export class Standard {
   }
 
   loadMirrors(path: string): StandardAnswer<string[]> {
-    return this.#withMirrorList((list, refusal) => this.#functions.weivel_standard_load_mirrors(path, list, refusal) as Status);
+    const encodedPath = textForC(path);
+    return this.#withMirrorList((list, refusal) => this.#functions.weivel_standard_load_mirrors(encodedPath, list, refusal) as Status);
   }
 
   /** A mirror template with its placeholder replaced by `hashHex`, as weivel_standard_mirror_expand answers it. */
   expandMirror(template: string, hashHex: string): StandardAnswer<string> {
+    textForC(template);
+    textForC(hashHex);
     const expanded: unknown[] = [null];
     return this.#withRefusal((refusal) => {
       try {
@@ -214,11 +221,12 @@ export class Standard {
   }
 
   isSha256Hex(text: string): boolean {
-    return this.#functions.weivel_standard_is_sha256_hex(text) === 1;
+    return this.#functions.weivel_standard_is_sha256_hex(textForC(text)) === 1;
   }
 
   /** Checks a download against the SHA-256 that was asked for; the standard never fetches. */
   verifyDownload(bytes: Uint8Array, expectedHex: string): StandardAnswer<undefined> {
+    textForC(expectedHex);
     return this.#withRefusal((refusal) => ({
       status: this.#functions.weivel_standard_verify_download(bytes, bytes.length, expectedHex, refusal) as Status,
       value: undefined,

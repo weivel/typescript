@@ -52,6 +52,16 @@ function refuseUnboundKinds(declaration: LibraryDeclaration): void {
   }
 }
 
+/**
+ * A host-made reason with each NUL written out.
+ *
+ * @implNote The reason quotes what a plugin's activate threw, which may hold a NUL a C text cannot carry whole; the
+ * host writes the text, so it keeps it whole rather than letting the quarantine be refused.
+ */
+function reasonForC(reason: QuarantineReason): QuarantineReason {
+  return { ...reason, detail: reason.detail.replaceAll("\u0000", "\\0"), fix: reason.fix.replaceAll("\u0000", "\\0") };
+}
+
 function succeeded(call: string, result: { status: Status; events: readonly CoreEvent[] }): void {
   if (result.status !== Status.Ok) {
     throw failureOf(call, { ...result, value: undefined });
@@ -143,7 +153,8 @@ export class Host {
    * Registers a plugin from its manifest and the entry its caller hands in, answering its handle or the core's refusal.
    * The host registers, keeps and answers a frozen copy of the manifest, so the caller may change its own afterwards.
    *
-   * @throws Error when the core answers a status with no refusal for it, out of memory among them.
+   * @throws Error when the core answers a status with no refusal for it, out of memory among them; EmbeddedNulError,
+   * before the core is called, for a text of the manifest that holds a NUL.
    */
   register(manifest: Manifest, entry: Plugin): RegisterAnswer | HostDestroyed {
     if (this.#destroyed) {
@@ -177,7 +188,7 @@ export class Host {
    * Registers a service the host itself supplies under WEIVEL_HOST; the answer unregisters it.
    *
    * @throws Error for an id a live C library declares, since a registration under the host replaces one; RefusalError
-   * when the core refuses it.
+   * when the core refuses it; EmbeddedNulError for an id that holds a NUL.
    */
   registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions = {}): (() => void) | HostDestroyed {
     if (this.#destroyed) {
@@ -453,7 +464,7 @@ export class Host {
    */
   #quarantine(record: PluginRecord, reason: QuarantineReason | undefined): ActivationOutcome {
     const plugin = record.hosted.plugin;
-    const quarantined = this.core.quarantinePlugin(plugin, reason);
+    const quarantined = this.core.quarantinePlugin(plugin, reason === undefined ? undefined : reasonForC(reason));
     if (quarantined.status !== Status.Ok) {
       this.#sink(failureOf("weivel_quarantine_plugin", quarantined));
     }

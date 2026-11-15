@@ -24,6 +24,11 @@ activates the export named `exportName`. The caller names that export; the layer
 - A want answers a promise with a `withdraw()`: it withdraws a want the core still holds waiting, which then never
   settles, and answers `true`; for a want that has settled already, its settlement still delivered, or one withdrawn
   already or never made, it answers `false` and withdraws nothing.
+- A text the caller hands that crosses into C as a `const char *` (an id, every text of a manifest, a reason, an
+  option, a path or a symbol) and holds a NUL is refused before the core or the standard is called: it throws, or for
+  `want` rejects, an `EmbeddedNulError`, reported to no sink. A text the standard takes by its length, such as an
+  identity or a JSON document, crosses whole and is not refused. The host's own reason for a plugin whose activate
+  threw writes each NUL of what it quotes as `\0`.
 - A `Scheduler` is handed the time a wait ends at, on the clock's scale, not a delay, so the timer reads the clock
   only when its callback runs and when it schedules on a scheduler that declares a `maximumWaitMilliseconds`. The
   default scheduler, `createSystemScheduler(clock)`, can wait any time: it chains `setTimeout`s past its longest delay,

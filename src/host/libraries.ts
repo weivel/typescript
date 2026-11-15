@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import koffi from "koffi";
+import { textForC } from "../core/text.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
 import type { LibraryFunction, LibraryService } from "./model.js";
 
@@ -122,7 +123,15 @@ export interface BoundLibrary {
  *
  * @throws Error when the file is missing or does not export a symbol the declaration names.
  */
+/** @throws EmbeddedNulError for a path or symbol the C loader would read cut short. */
+function refuseTextsCutShort(path: string, declaration: LibraryDeclaration): void {
+  textForC(path);
+  textForC(declaration.release);
+  declaration.services.forEach((service) => service.functions.forEach((declared) => textForC(declared.symbol)));
+}
+
 export function bindLibrary(path: string, declaration: LibraryDeclaration): BoundLibrary {
+  refuseTextsCutShort(path, declaration);
   if (!existsSync(path)) {
     throw new Error(`The C library ${declaration.importName} is not at ${path}.`);
   }

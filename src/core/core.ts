@@ -20,6 +20,7 @@ import { DeferredStep } from "./deferred-step.js";
 import { copyEvent, copyIncompleteEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
 import { allocateSized, toBigInt } from "./memory.js";
+import { textForC } from "./text.js";
 import {
   encodeCapacity,
   encodeCoreOptions,
@@ -376,18 +377,20 @@ export class Core {
   }
 
   supports(manifest: Manifest): CallResult<Support> {
+    const encoded = encodeManifest(manifest);
     return this.#invokeWithAnswer(
       "weivel_supports",
       "weivel_support",
-      (core, answer, pending) => this.#functions.weivel_supports(core, encodeManifest(manifest), answer, pending),
+      (core, answer, pending) => this.#functions.weivel_supports(core, encoded, answer, pending),
       readSupport,
       (answer) => this.#functions.weivel_support_release(answer),
     );
   }
 
   registerManifest(manifest: Manifest): CallResult<bigint> {
+    const encoded = encodeManifest(manifest);
     return this.#invokeForHandle("weivel_register_manifest", (core, handle, pending) =>
-      this.#functions.weivel_register_manifest(core, encodeManifest(manifest), handle, pending),
+      this.#functions.weivel_register_manifest(core, encoded, handle, pending),
     );
   }
 
@@ -427,6 +430,7 @@ export class Core {
   }
 
   registerService(owner: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_register_service", (core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
   }
 
@@ -444,10 +448,12 @@ export class Core {
   }
 
   getService(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_get_service", (core, handle, pending) => this.#functions.weivel_get_service(core, plugin, id, handle, pending));
   }
 
   wantService(plugin: bigint, id: string, options?: WantOptions): CallResult<bigint> {
+    textForC(id);
     const encoded = options === undefined ? null : encodeWantOptions(options);
     return this.#invokeForHandle("weivel_want_service", (core, handle, pending) =>
       this.#functions.weivel_want_service(core, plugin, id, encoded, handle, pending),
@@ -460,6 +466,7 @@ export class Core {
   }
 
   watchService(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_watch_service", (core, handle, pending) => this.#functions.weivel_watch_service(core, plugin, id, handle, pending));
   }
 
@@ -474,6 +481,7 @@ export class Core {
   }
 
   provideCapability(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_provide_capability", (core, handle, pending) =>
       this.#functions.weivel_provide_capability(core, plugin, id, handle, pending),
     );
@@ -484,6 +492,7 @@ export class Core {
   }
 
   allCapabilities(plugin: bigint, id: string): CallResult<CapabilityImplementation[]> {
+    textForC(id);
     return this.#invokeWithAnswer(
       "weivel_all_capabilities",
       "weivel_capability_list",
@@ -494,6 +503,7 @@ export class Core {
   }
 
   watchCapability(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_watch_capability", (core, handle, pending) =>
       this.#functions.weivel_watch_capability(core, plugin, id, handle, pending),
     );
