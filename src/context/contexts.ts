@@ -117,9 +117,11 @@ export class PluginContexts {
   }
 
   /**
-   * Ends the entries of a plugin the core has released or quarantined: every registration, implementation and watch
-   * the core ended with it. Their disposers then ask the core nothing, and their objects stay answerable only to
-   * the events the core queued before.
+   * Ends the entries of a plugin the core has released or quarantined, once the events its release or quarantine
+   * call queued have been handled: every registration, implementation and watch the core ended with it, every revoked
+   * holding the core ended with it, and every registration it made awaiting releases, so a release event queued
+   * after those events reaches no one. Their disposers then ask the core nothing, and their objects stay answerable
+   * only to the events the core queued before.
    */
   stopped(plugin: bigint): void {
     const state = this.#state.plugins.get(plugin);
@@ -131,17 +133,8 @@ export class PluginContexts {
       this.#state.dropWatch(handle);
     }
     this.#state.dropRevokedHoldingsOf(plugin);
+    this.#state.dropAwaitingReleasesOf(plugin);
     this.#state.dropEndedWhenIdle();
-  }
-
-  /**
-   * Called as the host begins to release a plugin in the core: from then on it hears of no release of a holding of
-   * what it registered awaiting releases.
-   */
-  releasing(plugin: bigint): void {
-    if (plugin !== HOST) {
-      this.#state.dropAwaitingReleasesOf(plugin);
-    }
   }
 
   /** How many live handles of the plugin the contexts track: what `forget` would drop. */

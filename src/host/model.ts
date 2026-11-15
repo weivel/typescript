@@ -102,7 +102,13 @@ export interface LoadedLibrary {
   readonly declaration: LibraryDeclaration;
   /** Each service of bytes functions, by id, as registered under the host: a method per declared function. */
   readonly services: ReadonlyMap<string, LibraryService>;
-  /** Each definition service, by id, as registered under the host. */
+  /**
+   * Each definition service, by id, as registered under the host.
+   *
+   * @remarks This hands the caller the raw address of each struct, and the caller holds no registration of it, so its
+   * use keeps nothing open: the address dies with the binary, which closes once every holder has released it after
+   * the unload, or once the host is destroyed.
+   */
   readonly definitions: ReadonlyMap<string, LibraryDefinition>;
   /**
    * Unregisters every service at once and refuses every later bytes call; the binary closes once every holding of

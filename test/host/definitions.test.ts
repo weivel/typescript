@@ -124,8 +124,9 @@ describe("a definition service", () => {
     expect(kept).toEqual(new Uint8Array([4, 2]));
   });
 
-  it("counts a holding a watch made, kept until the watcher releases it", () => {
-    const world = createHostWorld();
+  it("counts a holding a watch made, kept until the watcher releases it, a second release asking the core nothing", () => {
+    const sunk: unknown[] = [];
+    const world = createHostWorld({}, { onListenerError: (error) => void sunk.push(error) });
     const { context, events } = holder(world, "agenda", ["echo"]);
     const heard: unknown[] = [];
     context.services.watch(context.service<LibraryDefinition>("echo"), (definition) => void heard.push(definition));
@@ -138,6 +139,7 @@ describe("a definition service", () => {
     revocationOf(events, "echo").release();
 
     expect(unloads()).toBe(1);
+    expect(sunk).toEqual([]);
   });
 
   it("closes the binary when the host is destroyed, though a holder never released its holding", async () => {
@@ -183,16 +185,37 @@ describe("a plugin's registration awaiting releases", () => {
     expect(owner.events).toEqual([{ kind: "holdings-released", id: "owner:feed", service }]);
   });
 
-  it("tells an owner released since nothing", async () => {
+  it("hands an owner the release event its own release queued, when nothing held the registration then", async () => {
     const world = createHostWorld();
-    const registered = alive(world.host.register({ importName: "owner", api: 1, entry: "owner.ts", services: { provides: [{ id: "owner:feed" }] } }, { activate() {} }));
+    const owner = holder(world, "owner", [], ["owner:feed"]);
+    const service = {};
+    owner.context.services.register(owner.context.service("owner:feed"), service, { awaitReleases: true });
+
+    await world.host.release(alive(world.host.ledger()).rows.find((row) => row.importName === "owner")!.plugin);
+
+    expect(owner.events).toEqual([{ kind: "holdings-released", id: "owner:feed", service }]);
+  });
+
+  it("hands an owner quarantined since nothing of a release queued after its quarantine, and reports nothing", () => {
+    const sunk: unknown[] = [];
+    const world = createHostWorld({}, { onListenerError: (error) => void sunk.push(error) });
+    const registered = alive(
+      world.host.register(
+        { importName: "owner", api: 1, entry: "owner.ts", services: { provides: [{ id: "owner:feed" }] }, capabilities: { provides: ["never-provided"], consumes: [] } },
+        { activate() {} },
+      ),
+    );
     const context = alive(world.host.open(registered.plugin!));
     const events: PluginEvent[] = [];
     context.events.listen((event) => void events.push(event));
+    const consumer = holder(world, "consumer", ["owner:feed"]);
     context.services.register(context.service("owner:feed"), {}, { awaitReleases: true });
+    consumer.context.services.get(consumer.context.service("owner:feed"));
 
-    await world.host.release(registered.plugin!);
+    expect(alive(world.host.verify(registered.plugin!)).state).toBe("quarantined");
+    revocationOf(consumer.events, "owner:feed").release();
 
     expect(events.filter((event) => event.kind === "holdings-released")).toEqual([]);
+    expect(sunk).toEqual([]);
   });
 });
