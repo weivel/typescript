@@ -21,6 +21,9 @@ activates the export named `exportName`. The caller names that export; the layer
 
 ## How TypeScript reads the contract
 
+- A want answers a promise with a `withdraw()`: it withdraws a want the core still holds waiting, which then never
+  settles, and answers `true`; for a want that has settled already, its settlement still delivered, or one withdrawn
+  already or never made, it answers `false` and withdraws nothing.
 - A `Scheduler` is handed the time a wait ends at, on the clock's scale, not a delay, so the timer reads the clock
   only when its callback runs and when it schedules on a scheduler that declares a `maximumWaitMilliseconds`. The
   default scheduler, `createSystemScheduler(clock)`, can wait any time: it chains `setTimeout`s past its longest delay,

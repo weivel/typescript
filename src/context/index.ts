@@ -19,5 +19,6 @@ export type {
   ServiceListener,
   Services,
   ServiceType,
+  Want,
   WantOptions,
 } from "./model.js";
