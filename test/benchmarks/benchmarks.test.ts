@@ -141,7 +141,7 @@ describe("a same-language service call through weivel", () => {
     const bounds = noiseBoundsOf(budget);
     expect(bounds, `the budget gives no noise line for ${process.platform}, so the gate fails rather than passing unbounded`).toBeDefined();
     expect(tooNoisyToJudge(bounds!, noise), `the run was too noisy to judge: its two identical direct paths differed by ${noise.toFixed(4)}`).toBe(false);
-    expect(withinRatio(ratio, sameLanguageBound(budget, bounds!, noise))).toBe(true);
+    expect(withinRatio(ratio, sameLanguageBound(bounds!, noise))).toBe(true);
   });
 
   it("is told apart from the direct call once it is slowed", { timeout }, () => {
@@ -151,7 +151,7 @@ describe("a same-language service call through weivel", () => {
       decorate: slowing("throughWeivel", 200),
     });
 
-    const bound = sameLanguageBound(budget, noiseBoundsOf(budget)!, pairRatio(pair.directAgain, pair.direct));
+    const bound = sameLanguageBound(noiseBoundsOf(budget)!, pairRatio(pair.directAgain, pair.direct));
 
     expect(withinRatio(pairRatio(pair.throughWeivel, pair.direct), bound)).toBe(false);
   });
@@ -227,12 +227,12 @@ describe("the measuring", () => {
     expect([0, 1, 2, 3].map((round) => roundOrder(["a", "b", "c"], round).join(""))).toEqual(["abc", "bca", "cab", "abc"]);
   });
 
-  const bounds: NoiseBounds = { quiet: 0.01, worst: 0.2 };
+  const bounds: NoiseBounds = { quiet: 0.01, worst: 0.2, margin: 3 };
 
   it("widens the same-language bound to a noisy run's own noise, and never below the quiet noise", () => {
-    expect(sameLanguageBound(budget, bounds, 1)).toBeCloseTo(1 + budget.noiseMargin * bounds.quiet, 6);
-    expect(sameLanguageBound(budget, bounds, 1 / 1.5)).toBeCloseTo(1 + budget.noiseMargin * 0.5, 6);
-    expect(sameLanguageBound(budget, bounds, 1.5)).toBeCloseTo(1 + budget.noiseMargin * 0.5, 6);
+    expect(sameLanguageBound(bounds, 1)).toBeCloseTo(1 + bounds.margin * bounds.quiet, 6);
+    expect(sameLanguageBound(bounds, 1 / 1.5)).toBeCloseTo(1 + bounds.margin * 0.5, 6);
+    expect(sameLanguageBound(bounds, 1.5)).toBeCloseTo(1 + bounds.margin * 0.5, 6);
   });
 
   it("refuses to judge a same-language run noisier than any the kit measured", () => {
@@ -268,16 +268,28 @@ describe("the bounds", () => {
       expect(noiseBoundsOf(budget, nodePlatform)).toEqual({
         quiet: kitLines.get(`quiet-noise ${kitPlatform}`),
         worst: kitLines.get(`worst-noise ${kitPlatform}`),
+        margin: kitLines.get(`noise-margin ${kitPlatform}`),
       });
     }
     expect(noiseBoundsOf(budget, "freebsd")).toBeUndefined();
-    expect(budget.noiseMargin).toBe(kitLines.get("noise-margin"));
+  });
+
+  it("judge a same-language pair by the noise margin of the platform they run on", () => {
+    const text = readFileSync(kitBudgetPath, "utf8").replace(/^noise-margin windows .*$/m, "noise-margin windows 4");
+    const varied = readLanguageBudget(text);
+    const windows = noiseBoundsOf(varied, "win32")!;
+
+    expect(windows.margin).toBe(4);
+    expect(noiseBoundsOf(varied, "linux")!.margin).toBe(kitLines.get("noise-margin linux"));
+    expect(sameLanguageBound(windows, 1)).toBeCloseTo(1 + 4 * windows.quiet, 6);
+    expect(noiseBoundsOf(readLanguageBudget(text.replace(/^noise-margin macos .*$/m, "")), "darwin")).toBeUndefined();
   });
 
   it("refuse a budget missing a margin, carrying a line the format does not define, or a number that is not positive", () => {
     const text = readFileSync(kitBudgetPath, "utf8");
 
-    expect(() => readLanguageBudget(text.replace(/^noise-margin .*$/m, ""))).toThrow(/names no noiseMargin/);
+    expect(() => readLanguageBudget(text.replace(/^ratio-margin .*$/m, ""))).toThrow(/names no ratioMargin/);
+    expect(() => readLanguageBudget(`${text.replace(/^noise-margin .*$/gm, "")}\nnoise-margin 2.5\n`)).toThrow(/neither a gate/);
     expect(() => readLanguageBudget(`${text}\ndispatch-call linux 3\n`)).toThrow(/neither a gate/);
     expect(() => readLanguageBudget(text.replace(/^ratio-margin .*$/m, "ratio-margin 0"))).toThrow(/not a positive number/);
   });
