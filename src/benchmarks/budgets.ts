@@ -7,27 +7,35 @@ export type RatioGate = "controlCall" | "libraryCall";
 /**
  * The bounds the kit sets for this language, read from its `benchmarks/typescript.txt`: each ratio gate's highest
  * measured ratio per kit platform, the margin over it, and per kit platform the noise a same-language pair is judged
- * against.
+ * against and the margin over that noise.
  */
 export interface LanguageBudget {
   readonly highestMeasuredRatio: Readonly<Record<RatioGate, Readonly<Record<string, number>>>>;
   readonly ratioMargin: number;
   readonly quietNoise: Readonly<Record<string, number>>;
   readonly worstNoise: Readonly<Record<string, number>>;
-  readonly noiseMargin: number;
+  readonly noiseMargin: Readonly<Record<string, number>>;
 }
 
-/** One platform's noise bounds: how far apart two identical paths are on a quiet run, and the most a run may be. */
+/**
+ * One platform's noise bounds: how far apart two identical paths are on a quiet run, the most a run may be, and how
+ * many times its noise a same-language pair may lie from 1.
+ */
 export interface NoiseBounds {
   readonly quiet: number;
   readonly worst: number;
+  readonly margin: number;
 }
 
-type NoiseName = "quietNoise" | "worstNoise";
+type NoiseName = "quietNoise" | "worstNoise" | "noiseMargin";
 
 const gatesByKitName: Readonly<Record<string, RatioGate>> = { "control-call": "controlCall", "library-call": "libraryCall" };
-const noiseByKitName: Readonly<Record<string, NoiseName>> = { "quiet-noise": "quietNoise", "worst-noise": "worstNoise" };
-const scalarsByKitName = { "ratio-margin": "ratioMargin", "noise-margin": "noiseMargin" } as const;
+const noiseByKitName: Readonly<Record<string, NoiseName>> = {
+  "quiet-noise": "quietNoise",
+  "worst-noise": "worstNoise",
+  "noise-margin": "noiseMargin",
+};
+const scalarsByKitName = { "ratio-margin": "ratioMargin" } as const;
 type ScalarName = (typeof scalarsByKitName)[keyof typeof scalarsByKitName];
 const kitPlatforms: readonly string[] = ["linux", "windows", "macos"];
 const kitPlatformsByNodePlatform: Readonly<Record<string, string>> = { linux: "linux", win32: "windows", darwin: "macos" };
@@ -93,7 +101,11 @@ function scalarOf(read: BudgetLines, name: ScalarName): number {
  * @throws Error for a line the format does not define, a number that is not positive, or a missing margin.
  */
 export function readLanguageBudget(text: string): LanguageBudget {
-  const read: BudgetLines = { highest: { controlCall: {}, libraryCall: {} }, noise: { quietNoise: {}, worstNoise: {} }, scalars: {} };
+  const read: BudgetLines = {
+    highest: { controlCall: {}, libraryCall: {} },
+    noise: { quietNoise: {}, worstNoise: {}, noiseMargin: {} },
+    scalars: {},
+  };
   for (const line of text.split(/\r?\n/).map((candidate) => candidate.trim()).filter((candidate) => candidate.length > 0)) {
     readLine(line, read);
   }
@@ -102,7 +114,7 @@ export function readLanguageBudget(text: string): LanguageBudget {
     ratioMargin: scalarOf(read, "ratioMargin"),
     quietNoise: read.noise.quietNoise,
     worstNoise: read.noise.worstNoise,
-    noiseMargin: scalarOf(read, "noiseMargin"),
+    noiseMargin: read.noise.noiseMargin,
   };
 }
 
@@ -127,12 +139,19 @@ export function deviation(ratio: number): number {
   return Math.max(ratio, 1 / ratio) - 1;
 }
 
-/** The noise bounds on a Node platform, or undefined for a platform the kit gives no noise line, which the gate fails. */
+/**
+ * The noise bounds on a Node platform, or undefined for a platform the kit gives no noise or noise-margin line, which
+ * the gate fails.
+ */
 export function noiseBoundsOf(budget: LanguageBudget, nodePlatform: string = process.platform): NoiseBounds | undefined {
   const kitPlatform = kitPlatformOf(nodePlatform);
-  const quiet = kitPlatform === undefined ? undefined : budget.quietNoise[kitPlatform];
-  const worst = kitPlatform === undefined ? undefined : budget.worstNoise[kitPlatform];
-  return quiet === undefined || worst === undefined ? undefined : { quiet, worst };
+  if (kitPlatform === undefined) {
+    return undefined;
+  }
+  const quiet = budget.quietNoise[kitPlatform];
+  const worst = budget.worstNoise[kitPlatform];
+  const margin = budget.noiseMargin[kitPlatform];
+  return quiet === undefined || worst === undefined || margin === undefined ? undefined : { quiet, worst, margin };
 }
 
 /** Whether a run whose two identical direct paths differed by `noiseRatio` was noisier than any the kit measured. */
@@ -142,10 +161,11 @@ export function tooNoisyToJudge(bounds: NoiseBounds, noiseRatio: number): boolea
 
 /**
  * How far from 1 the ratio of a same-language pair may be in a run whose two identical direct paths differed by
- * `noiseRatio`: the margin times that run's own noise, or times the platform's quiet noise when the run was quieter.
+ * `noiseRatio`: the platform's margin times that run's own noise, or times the platform's quiet noise when the run was
+ * quieter.
  */
-export function sameLanguageBound(budget: LanguageBudget, bounds: NoiseBounds, noiseRatio: number): number {
-  return 1 + budget.noiseMargin * Math.max(bounds.quiet, deviation(noiseRatio));
+export function sameLanguageBound(bounds: NoiseBounds, noiseRatio: number): number {
+  return 1 + bounds.margin * Math.max(bounds.quiet, deviation(noiseRatio));
 }
 
 /** Whether `ratio` lies within `bound` of 1 either way: two paths equal within the noise the bound allows. */
