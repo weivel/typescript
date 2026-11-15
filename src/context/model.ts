@@ -103,6 +103,10 @@ export interface RevokedPluginEvent {
    * Says this plugin no longer uses what was revoked, once it has let go of everything the object handed it. For a
    * registration made awaiting releases it ends the holding the core keeps, and the last such end tells the owner;
    * otherwise, and after the first call, it does nothing.
+   *
+   * @remarks The event object grants it: whoever this plugin hands the event or the function to ends the plugin's
+   * holding by calling it. A call through the object after it, a C library's definition above all, is this plugin's
+   * defect and undefined, as any use of memory after its free is: nothing keeps the binary open for it any more.
    */
   release(): void;
 }

@@ -87,15 +87,24 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   from and koffi's pointer to the very struct its symbol answered, never a copy. Translating the library's header
   into koffi types is the consumer's. A definition that answers NULL, or a struct whose `size` is below
   `2 * sizeof(void *)`, makes `loadLibrary` throw, as the caller's mistake, before anything is registered.
+  `LoadedLibrary.definitions` hands its caller the same raw addresses, and that caller holds no registration of
+  them, so its use keeps nothing open: each address dies with the binary.
 - A holder lets go of a revoked definition by calling the `release()` of the `revoked` event it was handed, once it
   has released everything the definition gave it; for any other revocation `release()` does nothing. A holding a
-  watch made counts the same. The binary is closed once every definition service of the library has had every
+  watch made counts the same. The event object grants the release: whoever the plugin hands it to can end the
+  plugin's holding. A call through the definition after the release is the holder's defect and undefined, as any use
+  of memory after its free is. The binary is closed once every definition service of the library has had every
   holding released since the unload, a holder the host released, quarantined or forgot counting as released, or
-  when the host is destroyed. A bytes answer is copied and released before its call answers, so no held bytes keep
+  once the host's destroy has destroyed the core, after which every address a definition answered is invalid. A bytes answer is copied and released before its call answers, so no held bytes keep
   the binary open.
 - A plugin registers with `{ awaitReleases: true }` to keep each holding of its service past its revocation, and
   hears a `holdings-released` event, carrying the id and the object it registered, once every holding has ended.
-  A plugin released since hears nothing.
+  An owner hears the event its own release or quarantine call queued, as when nothing held the registration then;
+  one queued after those events, or after it was forgotten, reaches no one.
+- The definition row of the `library-call` benchmark samples in shorter rounds than the same-language pair: 100000
+  warm-up calls, then 201 rounds of 200 calls per path, against the pair's 2000000 warm-up calls and 301 rounds of
+  10000. Each path is handed the struct's address itself and reads its operations out of it once, before the timed
+  loop.
 - A library function that answers a status other than 0 throws a `LibraryCallError` carrying the status and the body
   as bytes, and the body's `text` only where it is UTF-8.
 - The core's and the standard's library paths default to the package's own `native/`, which the package's build

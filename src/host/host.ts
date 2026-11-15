@@ -670,7 +670,6 @@ export class Host {
 
   #releaseInCore(record: PluginRecord): Promise<void> {
     const plugin = record.hosted.plugin;
-    this.#contexts.releasing(plugin);
     const released = this.#core.releasePlugin(plugin);
     if (released.status !== Status.Ok) {
       this.#sink(failureOf("weivel_release_plugin", released));

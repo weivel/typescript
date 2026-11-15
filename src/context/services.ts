@@ -1,4 +1,4 @@
-import { Choice, HandleCondition, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
+import { Choice, HandleCondition, PluginStatus, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
 import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, Want, WantOptions } from "./model.js";
 import { DetachedError, failureOf } from "./refusal.js";
 import { ensureAttached, type Attachment, type ContextState } from "./state.js";
@@ -60,21 +60,28 @@ export function registerService(state: ContextState, owner: bigint, id: string, 
   return () => unregisterService(state, owner, registration);
 }
 
+/** Whether the core still runs `plugin`: a plugin it released, quarantined or forgot no longer holds anything. */
+function isRunning(state: ContextState, plugin: bigint): boolean {
+  return state.core.ledgerEntry(plugin).value?.status === PluginStatus.Active;
+}
+
 /**
  * Ends `holder`'s revoked holding of a registration made awaiting releases, once; a holding the core already ended
  * with its holder is not asked for again.
  *
  * @implNote The core refuses a holding it ended when it released or quarantined the holder, which can happen before
- * the layer drops its record of it; that refusal says nothing went wrong, so only another failure is reported.
+ * the layer drops its record of it, in a listener of the events that release or quarantine queued. Only that refusal,
+ * of a holder the core no longer runs, says nothing went wrong; any other is a defect of the layer, and reported.
  */
 export function releaseHolding(state: ContextState, holder: bigint, registration: bigint): void {
   if (!state.takeRevokedHolding(holder, registration)) {
     return;
   }
   const released = state.call(() => state.core.releaseHolding(holder, registration));
-  if (released.status !== Status.Ok && released.status !== Status.Refused) {
-    state.core.reportListenerError(failureOf("weivel_release_holding", released));
+  if (released.status === Status.Ok || (released.status === Status.Refused && !isRunning(state, holder))) {
+    return;
   }
+  state.core.reportListenerError(failureOf("weivel_release_holding", released));
 }
 
 function unregisterService(state: ContextState, owner: bigint, registration: bigint): void {
