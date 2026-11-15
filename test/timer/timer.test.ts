@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Bound, Choice, createCore, HOST, loadCoreLibrary, RefusalCode, type Core, type CoreEvent } from "../../src/core/index.ts";
 import { CoreTimer, systemClock, type Clock, type Scheduler } from "../../src/timer/index.ts";
 import { coreLibraryPath, createRecordedCore, openPlugin } from "../real-core.ts";
+import { wrapperHooks } from "../../src/core/core.ts";
 
 class FakeClock implements Clock {
   current = 1000;
@@ -233,7 +234,7 @@ describe("re-arming", () => {
     const alpha = provider(core);
     const want = timedWant(core, waitingConsumer(core), clock, 250);
     const armedAtDispatch: (number | undefined)[] = [];
-    core.setDispatcher((event) => {
+    wrapperHooks(core).setDispatcher((event) => {
       dispatched.push(event);
       if (event.kind === "want-settled") {
         armedAtDispatch.push(timer.armedDeadline);
@@ -254,7 +255,7 @@ describe("re-arming", () => {
     const timer = new CoreTimer(core, { clock, scheduler });
     const beta = waitingConsumer(core);
     let asked = false;
-    core.setDispatcher(() => {
+    wrapperHooks(core).setDispatcher(() => {
       if (!asked) {
         asked = true;
         timedWant(core, beta, clock, 300);

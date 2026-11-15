@@ -17,6 +17,7 @@ import {
 } from "../../src/core/index.ts";
 import { CoreTimer, type Scheduler } from "../../src/timer/index.ts";
 import { coreLibraryPath, createRecordedCore, openPlugin } from "../real-core.ts";
+import { wrapperHooks } from "../../src/core/core.ts";
 
 const library = loadCoreLibrary(coreLibraryPath);
 const rawCores: object[] = [];
@@ -49,7 +50,7 @@ function createWrappedCore(overrides: Partial<CoreFunctions>) {
   const core = new Core({ ...library.functions, ...overrides }, createRawCore(), (error, event) =>
     sunk.push({ error, event }),
   );
-  core.setDispatcher((event) => dispatched.push(event));
+  wrapperHooks(core).setDispatcher((event) => dispatched.push(event));
   coresToDestroy.push(core);
   return { core, sunk, dispatched };
 }
@@ -131,7 +132,7 @@ describe("a dispatcher that throws", () => {
     core.getService(gamma, "alpha:greeting");
     const seen: CoreEvent[] = [];
     const failure = new Error("listener failed");
-    core.setDispatcher((event) => {
+    wrapperHooks(core).setDispatcher((event) => {
       seen.push(event);
       if (seen.length === 1) {
         throw failure;
@@ -171,7 +172,7 @@ describe("an error sink that throws", () => {
       },
     });
     const beta = openPlugin(core, { importName: "beta" });
-    core.setDispatcher(() => {
+    wrapperHooks(core).setDispatcher(() => {
       throw new Error("listener failed");
     });
     const standardError = vi.spyOn(console, "error").mockImplementation(() => undefined);

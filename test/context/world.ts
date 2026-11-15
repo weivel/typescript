@@ -1,6 +1,7 @@
 import type { CoreEvent, CoreOptions, Manifest } from "../../src/core/index.ts";
 import { PluginContexts, type Logger, type PluginContext } from "../../src/context/index.ts";
 import { createRecordedCore, openPlugin } from "../real-core.ts";
+import { wrapperHooks } from "../../src/core/core.ts";
 
 export interface LogEntry {
   readonly level: "debug" | "info" | "warn" | "error";
@@ -47,7 +48,7 @@ export function createWorld(options: CoreOptions = {}) {
   const clock = new ManualClock();
   const hostLog = recordingLogger();
   const contexts = new PluginContexts(core, { clock, log: hostLog.logger });
-  core.setDispatcher((event) => {
+  wrapperHooks(core).setDispatcher((event) => {
     dispatched.push(event);
     contexts.receive(event);
   });

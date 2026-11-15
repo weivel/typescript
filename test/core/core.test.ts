@@ -20,6 +20,7 @@ import {
   type CoreEvent,
 } from "../../src/core/index.ts";
 import { coreLibraryPath, createRecordedCore, openPlugin } from "../real-core.ts";
+import { wrapperHooks } from "../../src/core/core.ts";
 
 const provider = { importName: "alpha", services: { provides: [{ id: "alpha:greeting" }] } };
 const consumer = (importName: string) => ({ importName, services: { consumes: [{ id: "alpha:greeting" }] } });
@@ -84,7 +85,7 @@ describe("every bound call", () => {
   it("dispatches the events of a call the dispatcher makes after the event being dispatched", () => {
     const order: string[] = [];
     const { core } = createRecordedCore();
-    core.setDispatcher((event) => {
+    wrapperHooks(core).setDispatcher((event) => {
       order.push(event.kind);
       if (order.length === 1) {
         const nested = core.registerService(HOST, "");
@@ -106,7 +107,7 @@ describe("every bound call", () => {
     core.getService(beta, "alpha:greeting");
     core.getService(gamma, "alpha:greeting");
     const order: string[] = [];
-    core.setDispatcher((event) => {
+    wrapperHooks(core).setDispatcher((event) => {
       order.push(event.kind === "revoked" ? `revoked ${event.plugin === beta ? "beta" : "gamma"}` : event.kind);
       if (order.length === 1) {
         core.registerService(HOST, "");

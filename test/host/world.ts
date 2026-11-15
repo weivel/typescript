@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
 import { EdgeSource, sharedLibraryFileName, type CoreOptions, type Refusal } from "../../src/core/index.ts";
 import type { PluginContext } from "../../src/context/index.ts";
-import { Host, isHostDestroyed, type ActivationOutcome, type HostDestroyed, type HostOptions } from "../../src/host/index.ts";
+import { Host, isHostDestroyed, type ActivationOutcome, type ActivationStart, type HostDestroyed, type HostOptions } from "../../src/host/index.ts";
 import type { ActivationPlan } from "../../src/core/index.ts";
 import { registrationOf, type DiscoveryFailure, type StandardRefusal } from "../../src/standard/index.ts";
 import type { Scheduler } from "../../src/timer/index.ts";
@@ -183,7 +183,7 @@ export function registerDirectory(world: HostWorld, directory: string): Director
   const registered = new Map<string, bigint>();
   const refused: { manifestPath: string; refusal: Refusal }[] = [];
   for (const found of discovery.value?.plugins ?? []) {
-    const { manifest, entry } = registrationOf(found);
+    const { manifest, entry } = registrationOf(found, "default");
     const answer = alive(world.host.register(manifest, entry));
     if (answer.plugin === undefined) {
       refused.push({ manifestPath: found.manifestPath, refusal: answer.refusal });
@@ -204,11 +204,22 @@ export function alive<Answer>(answer: Answer | HostDestroyed): Answer {
 
 /** Activates `plugins` and waits until every activate has settled: the plan, and every plugin's outcome. */
 export async function activated(host: Host, plugins: readonly bigint[]): Promise<{ plan: ActivationPlan; outcomes: readonly ActivationOutcome[] }> {
-  const started = alive(host.activate(plugins));
+  const started = planned(host.activate(plugins));
   return { plan: started.plan, outcomes: await started.outcomes };
 }
 
 /** Lets every settled promise's callbacks run. */
 export function settle(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+type StartedPlan = Extract<ActivationStart, { readonly refusal: undefined }>;
+
+/** The plan a host the test has not destroyed started, failing the test when the core refused the plan. */
+export function planned(answer: ActivationStart | HostDestroyed): StartedPlan {
+  const started = alive(answer);
+  if (started.refusal !== undefined) {
+    throw new Error(`the core refused the plan: ${started.refusal.detail ?? started.refusal.code}`);
+  }
+  return started;
 }

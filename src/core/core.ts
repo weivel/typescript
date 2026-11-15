@@ -20,6 +20,7 @@ import { DeferredStep } from "./deferred-step.js";
 import { copyEvent, copyIncompleteEvent, type CoreEvent, type DeadlineEvent } from "./events.js";
 import { sharedLibraryFileName } from "./library-file.js";
 import { allocateSized, toBigInt } from "./memory.js";
+import { textForC } from "./text.js";
 import {
   encodeCapacity,
   encodeCoreOptions,
@@ -228,6 +229,37 @@ function allocateZeroed(name: CoreStructName): object {
 }
 
 /**
+ * The wrapper's own hooks, which this package's modules reach and its exports never hand anyone, so nothing but the
+ * layer drains the core or moves its timer.
+ */
+export interface WrapperHooks {
+  setDispatcher(dispatcher: EventDispatcher | undefined): void;
+  /**
+   * Sets the clock the wrapper reads before each call, so a deadline that has fallen due is handed to the core before
+   * the call is made; undefined, the wrapper makes no such check.
+   *
+   * @implNote The timer firing is not enough on its own: the clock can pass the deadline before the language's
+   * scheduler takes its turn, and a registration made then would serve a want the core should already have timed out.
+   */
+  setClock(clock: ClockReading | undefined): void;
+  /** Sets the one reader told of every deadline announcement at drain time; undefined removes it. */
+  setDeadlineReader(reader: DeadlineReader | undefined): void;
+  /**
+   * Runs `step`, holding back the dispatch of every event drained meanwhile until it returns, so what `step` records
+   * of a call's answer is in place before any event that call queued is dispatched. Inside a dispatch they wait
+   * behind it already.
+   */
+  holdDispatch<Value>(step: () => Value): Value;
+}
+
+let hooksOf: (core: Core) => WrapperHooks;
+
+/** The hooks of `core`'s wrapper; exported from this file only, never from the core module. */
+export function wrapperHooks(core: Core): WrapperHooks {
+  return hooksOf(core);
+}
+
+/**
  * One core, every call to which goes through one function that makes the call and then drains the event queue.
  *
  * @remarks Events are copied and released as they are drained, then dispatched first in, first out once the whole
@@ -236,6 +268,15 @@ function allocateZeroed(name: CoreStructName): object {
  * event in the core's order.
  */
 export class Core {
+  static {
+    hooksOf = (core) => ({
+      setDispatcher: (dispatcher) => void (core.#dispatcher = dispatcher),
+      setClock: (clock) => void (core.#clock = clock),
+      setDeadlineReader: (reader) => void (core.#deadlineReader = reader),
+      holdDispatch: (step) => core.#holdDispatch(step),
+    });
+  }
+
   readonly #functions: CoreFunctions;
   readonly #event: object;
   #core: object | null;
@@ -281,10 +322,6 @@ export class Core {
     }
   }
 
-  setDispatcher(dispatcher: EventDispatcher | undefined): void {
-    this.#dispatcher = dispatcher;
-  }
-
   /** How many events this core's wrapper has drained so far; each event's sequence is its place in that count. */
   get drainedCount(): number {
     return this.#drainedCount;
@@ -295,12 +332,7 @@ export class Core {
     return this.#sequences.get(event);
   }
 
-  /**
-   * Runs `step`, holding back the dispatch of every event drained meanwhile until it returns, so what `step` records
-   * of a call's answer is in place before any event that call queued is dispatched. Inside a dispatch they wait
-   * behind it already.
-   */
-  holdDispatch<Value>(step: () => Value): Value {
+  #holdDispatch<Value>(step: () => Value): Value {
     if (this.#settling) {
       return step();
     }
@@ -319,11 +351,6 @@ export class Core {
     return () => this.#drainListeners.delete(listener);
   }
 
-  /** Sets the one reader told of every deadline announcement at drain time; undefined removes it. */
-  setDeadlineReader(reader: DeadlineReader | undefined): void {
-    this.#deadlineReader = reader;
-  }
-
   /**
    * Runs `step` once every event drained so far has been dispatched: at once outside a dispatch, and inside one as a
    * step queued behind the events already waiting, since the dispatcher is never re-entered. What it throws goes to
@@ -336,17 +363,6 @@ export class Core {
     } else {
       this.#runStep(deferred);
     }
-  }
-
-  /**
-   * Sets the clock the wrapper reads before each call, so a deadline that has fallen due is handed to the core before
-   * the call is made; undefined, the wrapper makes no such check.
-   *
-   * @implNote The timer firing is not enough on its own: the clock can pass the deadline before the language's
-   * scheduler takes its turn, and a registration made then would serve a want the core should already have timed out.
-   */
-  setClock(clock: ClockReading | undefined): void {
-    this.#clock = clock;
   }
 
   get destroyed(): boolean {
@@ -376,18 +392,20 @@ export class Core {
   }
 
   supports(manifest: Manifest): CallResult<Support> {
+    const encoded = encodeManifest(manifest);
     return this.#invokeWithAnswer(
       "weivel_supports",
       "weivel_support",
-      (core, answer, pending) => this.#functions.weivel_supports(core, encodeManifest(manifest), answer, pending),
+      (core, answer, pending) => this.#functions.weivel_supports(core, encoded, answer, pending),
       readSupport,
       (answer) => this.#functions.weivel_support_release(answer),
     );
   }
 
   registerManifest(manifest: Manifest): CallResult<bigint> {
+    const encoded = encodeManifest(manifest);
     return this.#invokeForHandle("weivel_register_manifest", (core, handle, pending) =>
-      this.#functions.weivel_register_manifest(core, encodeManifest(manifest), handle, pending),
+      this.#functions.weivel_register_manifest(core, encoded, handle, pending),
     );
   }
 
@@ -427,6 +445,7 @@ export class Core {
   }
 
   registerService(owner: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_register_service", (core, handle, pending) => this.#functions.weivel_register_service(core, owner, id, handle, pending));
   }
 
@@ -444,10 +463,12 @@ export class Core {
   }
 
   getService(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_get_service", (core, handle, pending) => this.#functions.weivel_get_service(core, plugin, id, handle, pending));
   }
 
   wantService(plugin: bigint, id: string, options?: WantOptions): CallResult<bigint> {
+    textForC(id);
     const encoded = options === undefined ? null : encodeWantOptions(options);
     return this.#invokeForHandle("weivel_want_service", (core, handle, pending) =>
       this.#functions.weivel_want_service(core, plugin, id, encoded, handle, pending),
@@ -460,6 +481,7 @@ export class Core {
   }
 
   watchService(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_watch_service", (core, handle, pending) => this.#functions.weivel_watch_service(core, plugin, id, handle, pending));
   }
 
@@ -474,6 +496,7 @@ export class Core {
   }
 
   provideCapability(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_provide_capability", (core, handle, pending) =>
       this.#functions.weivel_provide_capability(core, plugin, id, handle, pending),
     );
@@ -484,6 +507,7 @@ export class Core {
   }
 
   allCapabilities(plugin: bigint, id: string): CallResult<CapabilityImplementation[]> {
+    textForC(id);
     return this.#invokeWithAnswer(
       "weivel_all_capabilities",
       "weivel_capability_list",
@@ -494,6 +518,7 @@ export class Core {
   }
 
   watchCapability(plugin: bigint, id: string): CallResult<bigint> {
+    textForC(id);
     return this.#invokeForHandle("weivel_watch_capability", (core, handle, pending) =>
       this.#functions.weivel_watch_capability(core, plugin, id, handle, pending),
     );

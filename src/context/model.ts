@@ -49,6 +49,18 @@ export type ServiceListener<Service> = (service: Service | undefined, change: Se
 /** Hears a watched capability: the implementation that joined or left. */
 export type ImplementationListener<Implementation> = (implementation: Implementation, change: ImplementationChange) => void;
 
+/** A want's settlement, which the plugin may withdraw while it has not settled. */
+export interface Want<Service> extends Promise<Service> {
+  /**
+   * Withdraws the want while it still waits, so the core never settles it and this promise never settles. Answers
+   * false, withdrawing nothing, for a want that has settled already, its settlement still delivered, and for one
+   * withdrawn already or never made.
+   *
+   * @throws DetachedError once the core has forgotten the plugin.
+   */
+  withdraw(): boolean;
+}
+
 /** How a plugin reaches another plugin's service, and offers its own. */
 export interface Services {
   /** The provider's own object registered under the id now, or undefined when nothing the core answers is. */
@@ -62,7 +74,7 @@ export interface Services {
    */
   register<Service>(type: ServiceType<Service>, service: Service, options?: RegisterOptions): () => void;
   /** Settles once, when the core settles the want: with the provider's object, or rejected with a RefusalError. */
-  want<Service>(type: ServiceType<Service>, options?: WantOptions): Promise<Service>;
+  want<Service>(type: ServiceType<Service>, options?: WantOptions): Want<Service>;
   /** Hears every later registration and removal the core reports for the id, until the answered function is called. */
   watch<Service>(type: ServiceType<Service>, listener: ServiceListener<Service>): () => void;
 }

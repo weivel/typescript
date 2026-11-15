@@ -15,11 +15,36 @@ and `benchmarks`. Each is a subpath of the package, `@weivel/typescript/<module>
 
 In TypeScript a plugin's entry is an object with an `activate(context)` and an optional `deactivate()`, either
 of which may answer a promise. The host takes it beside the manifest value, as `host.register(manifest, entry)`,
-and never needs the standard. The `standard` module feeds it from disk: `registrationOf` turns a plugin the
-standard discovered into its manifest and an entry whose `activate` imports the module's default export.
+and never needs the standard. The `standard` module feeds it from disk: `registrationOf(discovered, exportName)`
+turns a plugin the standard discovered into its manifest and an entry whose `activate` imports the module and
+activates the export named `exportName`. The caller names that export; the layer assumes none, `default` included.
+
+An activate settles at once when it returns something other than a promise, or throws. A promise is read when it
+settles, since its state cannot be read sooner, so an `async` activate is verified after the plan has started.
 
 ## How TypeScript reads the contract
 
+- `host.activate` starts the plan as one step of a dispatch: as the dispatcher when no dispatch runs, so what the
+  activates' own calls queue is dispatched once every activate of the plan has been called, and as a call made inside
+  the dispatch that runs otherwise. An activate that settled at once is verified, and quarantined if the core refuses,
+  before the next plugin starts. A plan the core refuses is answered as `{ refusal }`, with no plan and no outcomes,
+  never thrown.
+- An outcome's `refusal` is the one that decided it: the core's refusal of the open for `refused`, the core's refusal
+  of the verification for a `quarantined` plugin that refusal quarantined, and the host's reason for one whose
+  activate failed.
+- `host.ledger()` answers the core's ledger, every plugin's row as the core keeps it, and `onTimerMove` in the host's
+  options hears each move of its timer, the deadline it arms or `undefined` when it disarms. The host hands its caller
+  nothing of the wrapper: the core, the contexts and the wrapper's dispatch, clock and deadline hooks are reached only
+  by this package's own modules, never through its exports.
+- A host given no `scheduler` arms `setTimeout`, through `createSystemScheduler`.
+- A want answers a promise with a `withdraw()`: it withdraws a want the core still holds waiting, which then never
+  settles, and answers `true`; for a want that has settled already, its settlement still delivered, or one withdrawn
+  already or never made, it answers `false` and withdraws nothing.
+- A text the caller hands that crosses into C as a `const char *` (an id, every text of a manifest, a reason, an
+  option, a path or a symbol) and holds a NUL is refused before the core or the standard is called: it throws, or for
+  `want` rejects, an `EmbeddedNulError`, reported to no sink. A text the standard takes by its length, such as an
+  identity or a JSON document, crosses whole and is not refused. The host's own reason for a plugin whose activate
+  threw writes each NUL of what it quotes as `\0`.
 - A `Scheduler` is handed the time a wait ends at, on the clock's scale, not a delay, so the timer reads the clock
   only when its callback runs and when it schedules on a scheduler that declares a `maximumWaitMilliseconds`. The
   default scheduler, `createSystemScheduler(clock)`, can wait any time: it chains `setTimeout`s past its longest delay,

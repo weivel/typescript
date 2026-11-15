@@ -3,7 +3,7 @@ import { RefusalError, type PluginContext } from "../context/index.js";
 import { refuseUnknownKeys, type Observer } from "./expectations.js";
 import { kitRefusal } from "./refusals.js";
 import type { LayerVector } from "./vectors.js";
-import { inertEntry, type BuiltPlugin, type DriverWorld } from "./world.js";
+import { alive, inertEntry, type BuiltPlugin, type DriverWorld } from "./world.js";
 
 interface GivenPlugin {
   readonly id: string;
@@ -120,7 +120,7 @@ class ConsumeRun {
   }
 
   quarantinedRows() {
-    return this.world.host.core.ledger().value!.rows.filter((row) => row.status === PluginStatus.Quarantined);
+    return alive(this.world.host.ledger()).rows.filter((row) => row.status === PluginStatus.Quarantined);
   }
 
   observers(): Record<string, Observer> {

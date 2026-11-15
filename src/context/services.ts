@@ -1,5 +1,5 @@
 import { Choice, HandleCondition, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
-import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, WantOptions } from "./model.js";
+import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, Want, WantOptions } from "./model.js";
 import { DetachedError, failureOf } from "./refusal.js";
 import { ensureAttached, type Attachment, type ContextState } from "./state.js";
 
@@ -126,8 +126,10 @@ function ids(state: ContextState, plugin: bigint): string[] {
   return listed.value;
 }
 
-function want(state: ContextState, plugin: bigint, id: string, options: WantOptions): Promise<unknown> {
-  return new Promise((resolve, reject) => {
+function want(state: ContextState, attachment: Attachment, id: string, options: WantOptions): Want<unknown> {
+  const plugin = attachment.plugin;
+  let made: bigint | undefined;
+  const settlement = new Promise((resolve, reject) => {
     const result = state.call(() => {
       const wanted = state.core.wantService(plugin, id, encodeWant(options, needsTheTime(options) ? state.clock.now() : 0));
       const wantHandle = answered(wanted);
@@ -137,9 +139,35 @@ function want(state: ContextState, plugin: bigint, id: string, options: WantOpti
       }
       return wanted;
     });
-    if (answered(result) === undefined) {
+    made = answered(result);
+    if (made === undefined) {
       reject(failureOf("weivel_want_service", result));
     }
+  });
+  return withdrawable(settlement, () => withdraw(state, attachment, made));
+}
+
+function withdrawable<Service>(settlement: Promise<Service>, withdrawal: () => boolean): Want<Service> {
+  return Object.assign(settlement, { withdraw: withdrawal });
+}
+
+/**
+ * Withdraws a want the core still holds waiting.
+ *
+ * @implNote A want the core settled is not withdrawn even before its settlement is dispatched: the core would refuse
+ * the stale handle with a refusal of its own, and the settlement still arrives.
+ */
+function withdraw(state: ContextState, attachment: Attachment, want: bigint | undefined): boolean {
+  ensureAttached(attachment);
+  if (want === undefined || !state.wants.has(want)) {
+    return false;
+  }
+  return state.call(() => {
+    if (state.core.handleState(want).value !== HandleCondition.Waiting || state.core.unregister(want).status !== Status.Ok) {
+      return false;
+    }
+    state.dropWant(want);
+    return true;
   });
 }
 
@@ -160,7 +188,11 @@ export function createServices(state: ContextState, attachment: Attachment): Ser
       return registerService(state, plugin, type.id, service, options.capacity);
     },
     want: <Service>(type: ServiceType<Service>, options: WantOptions = {}) =>
-      attachment.detached ? Promise.reject(new DetachedError(plugin)) : (want(state, plugin, type.id, options) as Promise<Service>),
+      (attachment.detached
+        ? withdrawable(Promise.reject(new DetachedError(plugin)), () => {
+            throw new DetachedError(plugin);
+          })
+        : want(state, attachment, type.id, options)) as Want<Service>,
     watch: <Service>(type: ServiceType<Service>, listener: ServiceListener<Service>) => {
       ensureAttached(attachment);
       return startWatching(

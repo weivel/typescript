@@ -3,6 +3,7 @@ import { Bound, HOST, ReachKind, RefusalCode, Status, type CoreEvent, type Manif
 import { DetachedError, RefusalError, type PluginEvent } from "../../src/context/index.ts";
 import { openPlugin } from "../real-core.ts";
 import { createWorld, recordingLogger, settle } from "./world.ts";
+import { wrapperHooks } from "../../src/core/core.ts";
 
 interface Greeting {
   greet(name: string): string;
@@ -518,7 +519,7 @@ describe("an event drained before a context was made", () => {
     const world = createWorld();
     const heard: PluginEvent[] = [];
     let opened = false;
-    world.core.setDispatcher((event) => {
+    wrapperHooks(world.core).setDispatcher((event) => {
       if (!opened) {
         opened = true;
         const plugin = openPlugin(world.core, consumer("beta"));

@@ -1,5 +1,6 @@
 import type { Bound, Choice, RefusalCode } from "./constants.js";
 import { sizeOf } from "./declarations.js";
+import { optionalTextForC, textForC } from "./text.js";
 
 /** A refusal as the core answered it, every text copied out of the core's storage. */
 export interface Refusal {
@@ -93,22 +94,22 @@ function encodeList<Value, Item>(values: readonly Value[] | undefined, encode: (
 }
 
 export function encodeStrings(values: readonly string[] | undefined): EncodedList<string> {
-  return encodeList(values, (value) => value);
+  return encodeList(values, textForC);
 }
 
 function encodeNumbers(values: readonly NamedNumber[] | undefined) {
-  return encodeList(values, (number) => ({ size: sizeOf("weivel_number"), name: number.name, value: number.value }));
+  return encodeList(values, (number) => ({ size: sizeOf("weivel_number"), name: textForC(number.name), value: number.value }));
 }
 
 function encodeOffer(offer: ServiceOffer) {
-  return { size: sizeOf("weivel_service_offer"), id: offer.id, attributes: encodeNumbers(offer.attributes) };
+  return { size: sizeOf("weivel_service_offer"), id: textForC(offer.id), attributes: encodeNumbers(offer.attributes) };
 }
 
 function encodeWant(want: ServiceWant) {
   return {
     size: sizeOf("weivel_service_want"),
-    id: want.id,
-    provider: want.provider ?? null,
+    id: textForC(want.id),
+    provider: optionalTextForC(want.provider),
     optional: want.optional ?? 0,
     degradable: want.degradable ?? 0,
     constraints: encodeNumbers(want.constraints),
@@ -118,9 +119,9 @@ function encodeWant(want: ServiceWant) {
 export function encodeManifest(manifest: Manifest) {
   return {
     size: sizeOf("weivel_manifest"),
-    import_name: manifest.importName,
+    import_name: textForC(manifest.importName),
     api: manifest.api ?? 0,
-    entry: manifest.entry ?? null,
+    entry: optionalTextForC(manifest.entry),
     targets: encodeStrings(manifest.targets),
     capabilities: {
       provides: encodeStrings(manifest.capabilities?.provides),
@@ -131,15 +132,15 @@ export function encodeManifest(manifest: Manifest) {
       consumes: encodeList(manifest.services?.consumes, encodeWant),
     },
     permissions: encodeStrings(manifest.permissions),
-    identity: manifest.identity ?? null,
+    identity: optionalTextForC(manifest.identity),
   };
 }
 
 function encodeConstraintEntry(entry: ConstraintEntry) {
   return {
     size: sizeOf("weivel_constraint_entry"),
-    constraint_name: entry.constraintName,
-    attribute_name: entry.attributeName,
+    constraint_name: textForC(entry.constraintName),
+    attribute_name: textForC(entry.attributeName),
     bound: entry.bound,
   };
 }
@@ -173,7 +174,7 @@ export function encodePluginOptions(payload: bigint) {
 }
 
 export function encodeQuarantineReason(reason: QuarantineReason) {
-  return { size: sizeOf("weivel_quarantine_reason"), code: reason.code ?? 0, detail: reason.detail, fix: reason.fix };
+  return { size: sizeOf("weivel_quarantine_reason"), code: reason.code ?? 0, detail: textForC(reason.detail), fix: textForC(reason.fix) };
 }
 
 export function encodeCapacity(answer: CapacityAnswer) {

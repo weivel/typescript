@@ -4,6 +4,7 @@ import { LibraryCallError, LibraryUnloadedError, type LibraryService } from "../
 import { FunctionKind, type LibraryDeclaration } from "../../src/standard/index.ts";
 import { realStandard } from "../real-standard.ts";
 import { activated, alive, createHostWorld, echoLibraryPath, plugin, pluginDirectory, registerDirectory, type HostWorld } from "./world.ts";
+import { hostInternals } from "../../src/host/host.ts";
 
 const echoFunctions = [
   { name: "echo", symbol: "echo_echo", kind: "bytes" },
@@ -26,7 +27,7 @@ function loadedEcho(world: HostWorld): LibraryService {
 }
 
 function hostReaches(world: HostWorld, id: string): boolean {
-  return world.host.core.getService(HOST, id).status === Status.Ok;
+  return hostInternals(world.host).core.getService(HOST, id).status === Status.Ok;
 }
 
 describe("a C library loaded as host services", () => {
