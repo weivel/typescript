@@ -56,8 +56,8 @@ function requireSibling(sibling: string): string {
   const siblingDirectory = join(siblingsDirectory, sibling);
   if (!existsSync(join(siblingDirectory, "CMakeLists.txt"))) {
     throw new Error(
-      `siblings/${sibling} is missing. CI checks it out from .weivel/repo.json; locally, link or clone ` +
-        `the ${sibling} checkout there at the commit .weivel/repo.json pins.`,
+      `siblings/${sibling} is missing. CI checks it out from repo.json; locally, link or clone ` +
+        `the ${sibling} checkout there at the commit repo.json pins.`,
     );
   }
   return siblingDirectory;
