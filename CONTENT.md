@@ -112,7 +112,7 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 
 ## Siblings and native libraries
 
-`.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks
+`repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks
 them out there; locally, link or clone each checkout into `siblings/`. `scripts/native.ts` builds
 the core and the standard as shared libraries with CMake and copies them into `native/`, which git
 ignores. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
