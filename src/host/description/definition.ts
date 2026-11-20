@@ -33,17 +33,28 @@ function contextOf(pointer: object, description: Description, layouts: Described
   return member === undefined ? null : (koffi.decode(pointer, member.offset, "void *") as object | null);
 }
 
-function functionAt(pointer: object, offset: number): object | null {
-  return koffi.decode(pointer, offset, "void *") as object | null;
+const pointerSize = koffi.sizeof("void *");
+
+/**
+ * The operation at `offset`, or null when the provider does not offer it: the struct it answered ends before it, as
+ * WEIVEL_STANDARD_OFFERS reads an operation past `size`, or holds NULL there.
+ */
+function functionAt(pointer: object, offset: number, answeredSize: number): object | null {
+  return offset + pointerSize > answeredSize ? null : (koffi.decode(pointer, offset, "void *") as object | null);
 }
 
-/** @throws DescriptionLayoutError for a definition whose struct is smaller than the description's first shape. */
-function refuseShortDefinition(definition: LibraryDefinition, description: Description, layouts: DescribedLayouts): void {
+/**
+ * The `size` the definition's struct answered.
+ *
+ * @throws DescriptionLayoutError for a definition whose struct is smaller than the description's first shape.
+ */
+function answeredSizeOf(definition: LibraryDefinition, description: Description, layouts: DescribedLayouts): number {
   const answered = koffi.decode(definition.pointer, "uint32_t") as number;
   const firstShape = layouts.type(description.definition).described.firstShape;
   if (answered < firstShape) {
     throw new DescriptionLayoutError(description.definition, `its library answered a struct of size ${answered}, below its first shape of ${firstShape}`);
   }
+  return answered;
 }
 
 /**
@@ -56,12 +67,12 @@ function refuseShortDefinition(definition: LibraryDefinition, description: Descr
 export function bindDefinition(bind: DefinitionToBind): BoundDefinition {
   const { definition, description, holdings } = bind;
   const layouts = new DescribedLayouts(description);
-  refuseShortDefinition(definition, description, layouts);
+  const answeredSize = answeredSizeOf(definition, description, layouts);
   const context = contextOf(definition.pointer, description, layouts);
   const releases = new Map(
     description.operations
       .filter((operation) => operation.returns === DescribedReturn.Nothing)
-      .map((operation) => [operation.name, new ReleaseCall(operation, functionAt(definition.pointer, operation.offset), context)] as const),
+      .map((operation) => [operation.name, new ReleaseCall(operation, functionAt(definition.pointer, operation.offset, answeredSize), context)] as const),
   );
   const structContext: StructContext = {
     layouts,
@@ -77,7 +88,14 @@ export function bindDefinition(bind: DefinitionToBind): BoundDefinition {
     if (operation.name === "then") {
       throw new DescriptionLayoutError(description.definition, "its operation then would make the bound object a thenable, which every await would call");
     }
-    const call = new OperationCall(description.definition, operation, layouts, functionAt(definition.pointer, operation.offset), context, releases);
+    const call = new OperationCall(
+      description.definition,
+      operation,
+      layouts,
+      functionAt(definition.pointer, operation.offset, answeredSize),
+      context,
+      releases,
+    );
     const symbol = `${description.definition}.${operation.name}`;
     Object.defineProperty(bound, operation.name, {
       enumerable: true,

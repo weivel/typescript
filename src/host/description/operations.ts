@@ -132,6 +132,12 @@ export class OperationCall {
     if (parameter.role !== DescribedRole.Input && pointsAtValue) {
       throw this.#refuse(`answers ${parameter.name} as a pointer to a value, which is answered as a tree`);
     }
+    this.layouts.refuseUnreachableElement(parameter.kind, parameter.element, parameter.type, `its operation ${this.name}'s ${parameter.name}`);
+    if (parameter.role === DescribedRole.Answer && parameter.kind === DescribedKind.Text && parameter.release !== null) {
+      throw this.#refuse(
+        `answers the text ${parameter.name} freed by ${parameter.release}, and which pointer a text's release is handed is not yet ruled, so this binding frees none`,
+      );
+    }
     if (parameter.role !== DescribedRole.Input && parameter.release !== null && !this.releases.has(parameter.release)) {
       throw this.#refuse(`frees ${parameter.name} by ${parameter.release}, which is no release of the definition`);
     }
@@ -159,14 +165,16 @@ export class OperationCall {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new TypeError(`${this.name} takes its inputs as one object, keyed by parameter name.`);
     }
+    if (this.functionPointer === null) {
+      throw new Error(
+        `${this.definition}'s provider does not offer ${this.name}: the struct its library answered ends before it, or holds NULL there.`,
+      );
+    }
     refuseUnknownNames(input, this.inputNames, `${this.name}'s input`);
     const arena = new CallArena();
     try {
       const writer = new StructWriter(context, arena);
       const prepared = this.#prepare(writer, input);
-      if (this.functionPointer === null) {
-        throw new Error(`${this.definition}'s ${this.name} is NULL in the struct its library answered.`);
-      }
       const status = koffi.call(this.functionPointer, this.#proto, ...prepared.parameters) as number;
       return this.#outcome(writer, status, prepared);
     } finally {
@@ -272,21 +280,12 @@ export class OperationCall {
     return writer.readPointed(parameter.kind, parameter.element, parameter.type, parameter.release, pointer, 0, handles) ?? null;
   }
 
-  /** A struct or tree answer is freed through what was handed in; a text answer through the text the provider wrote. */
+  /** A struct or tree answer is freed through what was handed in; a text answer naming a release is refused at the bind. */
   #releaseAnswer(slot: AnswerSlot): void {
     const { parameter, block } = slot;
-    if (parameter.release === null || parameter.kind === DescribedKind.Handle) {
-      return;
+    if (parameter.release !== null && parameter.kind !== DescribedKind.Handle) {
+      this.releases.get(parameter.release)!.free(block);
     }
-    const release = this.releases.get(parameter.release)!;
-    if (parameter.kind === DescribedKind.Text) {
-      const text = koffi.decode(block, 0, "void *") as object | null;
-      if (text !== null) {
-        release.free(text);
-      }
-      return;
-    }
-    release.free(block);
   }
 
   #failure(status: number, refusal: RefusalSlot | undefined): DescribedCallError {

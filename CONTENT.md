@@ -87,6 +87,8 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   `{ library, pointer }`: the import name it came from and koffi's pointer to the very struct its symbol answered,
   never a copy. A definition that answers NULL, or a struct whose `size` is below `2 * sizeof(void *)`, makes
   `loadLibrary` throw, as the caller's mistake, before anything is registered.
+  `LoadedLibrary.definitions` hands its caller the same raw addresses, and that caller holds no registration of
+  them, so its use keeps nothing open: each address dies with the binary.
 - A definition service that declares a `description` is registered as its `BoundDefinition`, built from the
   description alone (`src/host/description/`): no file of this package names a type of any library it binds. The
   host never loads the standard, so its caller hands it the standard's check as `descriptionCheck`
@@ -115,8 +117,8 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   NONE it resolves with `none`, a symbol of the host module. On any other status it rejects with a
   `DescribedCallError` carrying the `operation`, the `status`, and the refusal's `detail` and `fix` for REFUSED, both
   null otherwise. Every answer and the refusal are released in a `finally` through the release the description names
-  for them: a struct or a tree through the answer handed in, a text through the text the provider wrote; an answer
-  naming no release, as a text the provider keeps, is released by no one.
+  for them, a struct or a tree through the answer handed in; an answer naming no release, as a text the provider
+  keeps, is released by no one.
 - A handle answer becomes a frozen object whose only member is `release()`, handed back as an input of an operation
   taking that handle type. `release()` frees it once through the release its description names; a second call, or one
   after the unload, does nothing, and a released handle handed as an input is refused with a `TypeError`. The unload
@@ -125,8 +127,10 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   worker. A holding outlives the unload, so a bound method stays callable until the binary closes, and rejects with a
   `LibraryUnloadedError` from then on. An operation named `then` refuses the load, since it would make the bound
   object a thenable that every `await` calls.
-  `LoadedLibrary.definitions` hands its caller the same raw addresses, and that caller holds no registration of
-  them, so its use keeps nothing open: each address dies with the binary.
+- An operation whose pointer lies past the `size` its definition answered, or is NULL there, is not offered: its
+  method rejects with an `Error` saying the provider does not offer it. An element of a pointer or an array this
+  binding does not know, or a struct element the description does not describe, refuses the load. Until the kit rules
+  which pointer a text's release is handed, a text answer that names a release refuses the load.
 - A holder lets go of a revoked definition by calling the `release()` of the `revoked` event it was handed, once it
   has released everything the definition gave it; for any other revocation `release()` does nothing. A holding a
   watch made counts the same. The event object grants the release: whoever the plugin hands it to can end the
