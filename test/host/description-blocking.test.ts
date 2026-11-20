@@ -164,14 +164,14 @@ describe("an operation its description marks blocking", () => {
     expect(blocks.freed).toBe(blocks.allocated);
   });
 
-  it("refuses a call once the binary has closed, and closes the binary only once a running call has returned", async () => {
+  it("answers a call running when the binary closed, and refuses every call made after", async () => {
     const { world, library, walker } = loaded();
 
     const running = walker.wait!({ ticks: 5 });
     library.unload();
     await world.host.destroy();
 
-    await expect(running).rejects.toBeInstanceOf(LibraryUnloadedError);
+    expect(await running).toBe(5);
     await expect(walker.wait!({ ticks: 5 })).rejects.toBeInstanceOf(LibraryUnloadedError);
   });
 });

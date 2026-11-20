@@ -60,12 +60,17 @@ interface BindingEnvironment {
  * once all of that has ended.
  */
 class CarriedScope implements CallTracking {
-  readonly holdings = new HandleHoldings();
+  readonly holdings: HandleHoldings;
   live = true;
   #running = 0;
   #whenIdle: (() => void) | undefined;
 
-  constructor(readonly parent: CallTracking) {}
+  constructor(
+    readonly parent: CallTracking,
+    parentHoldings: HandleHoldings,
+  ) {
+    this.holdings = parentHoldings.child();
+  }
 
   begin(): void {
     this.#running += 1;
@@ -74,12 +79,15 @@ class CarriedScope implements CallTracking {
 
   end(): void {
     this.#running -= 1;
-    if (this.#running === 0 && this.#whenIdle !== undefined) {
-      const idle = this.#whenIdle;
-      this.#whenIdle = undefined;
-      idle();
+    try {
+      if (this.#running === 0 && this.#whenIdle !== undefined) {
+        const idle = this.#whenIdle;
+        this.#whenIdle = undefined;
+        idle();
+      }
+    } finally {
+      this.parent.end();
     }
-    this.parent.end();
   }
 
   /**
@@ -262,7 +270,7 @@ class DescribedBinding {
    * everything got through it, until `end`; the answer freezes it once it has been given its own `release()`.
    */
   bindCarried(pointer: object, parent: BindingEnvironment): CarriedDefinition {
-    const scope = new CarriedScope(parent.calls);
+    const scope = new CarriedScope(parent.calls, parent.holdings);
     const environment: BindingEnvironment = { ...parent, holdings: scope.holdings, calls: scope };
     const definition = this.#description.definition;
     const refusal = (symbol: string): Error | undefined => {

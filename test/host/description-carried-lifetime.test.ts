@@ -80,6 +80,8 @@ interface Lent {
   /** A copy of the walker's struct, which `lend` lends in place of the library's own when `lendingCopy` was asked. */
   readonly copy: object;
   readonly walker: Description;
+  /** The library's walker bound as a library's service is, on the lender's holdings, so both are one library's. */
+  readonly ownWalker: BoundDefinition;
 }
 
 function lent(lendingCopy = false): Lent {
@@ -108,8 +110,10 @@ function lent(lendingCopy = false): Lent {
   koffi.encode(block, 2 * pointerSize, "void *", lend);
   koffi.encode(block, 3 * pointerSize, "void *", releaseLoan);
   const releaseCursorOffset = walker.operations.find((operation) => operation.name === "release_cursor")!.offset;
+  const holdings = new HandleHoldings();
   return {
-    lender: bindDescribed({ definition: { library: "lender", pointer: block }, description: lenderDescription(walker), holdings: new HandleHoldings(), isOpen: () => true }),
+    lender: bindDescribed({ definition: { library: "lender", pointer: block }, description: lenderDescription(walker), holdings, isOpen: () => true }),
+    ownWalker: bindDescribed({ definition: { library: "lender", pointer: walkerPointer }, description: walker, holdings, isOpen: () => true }),
     mirror: bindDefinition(symbol("described_mirror_definition"), symbol("described_mirror_description")),
     events,
     releaseCursor: koffi.address(koffi.decode(walkerPointer, releaseCursorOffset, "void *") as object),
@@ -182,5 +186,45 @@ describe("a definition lent again at the address of one released", () => {
 
     await expect(second.walker.open!({ label: "walk", start: 1 })).rejects.toBeInstanceOf(OperationNotOfferedError);
     second.release();
+  });
+});
+
+describe("a handle got through a definition an answer carried", () => {
+  it("is taken by every definition of its library, the carried ones and the library's own alike, either way", async () => {
+    const { lender, ownWalker } = lent();
+    const first = (await lender.lend!()) as Loan;
+    const second = (await lender.lend!()) as Loan;
+    const fromCarried = (await first.walker.open!({ label: "carried", start: 4 })) as DescribedHandle;
+    const fromOwn = (await ownWalker.open!({ label: "own", start: 6 })) as DescribedHandle;
+
+    expect(await ownWalker.use!({ cursor: fromCarried })).toBe(4);
+    expect(await second.walker.use!({ cursor: fromCarried })).toBe(4);
+    expect(await first.walker.use!({ cursor: fromOwn })).toBe(6);
+    first.release();
+    second.release();
+    fromOwn.release();
+  });
+
+  it("is released with the answer that carried the definition it was got through, and refused as released afterwards", async () => {
+    const { lender, ownWalker } = lent();
+    const loan = (await lender.lend!()) as Loan;
+    const fromCarried = (await loan.walker.open!({ label: "carried", start: 4 })) as DescribedHandle;
+    const fromOwn = (await ownWalker.open!({ label: "own", start: 6 })) as DescribedHandle;
+
+    loan.release();
+
+    await expect(ownWalker.use!({ cursor: fromCarried })).rejects.toThrow(/was handed a handle that has been released/);
+    expect(await ownWalker.use!({ cursor: fromOwn })).toBe(6);
+    fromOwn.release();
+  });
+
+  it("is refused, as one this library did not answer, by another library's definitions", async () => {
+    const { lender } = lent();
+    const other = lent();
+    const loan = (await lender.lend!()) as Loan;
+    const cursor = (await loan.walker.open!({ label: "carried", start: 4 })) as DescribedHandle;
+
+    await expect(other.ownWalker.use!({ cursor })).rejects.toThrow(/takes a handle this library answered/);
+    loan.release();
   });
 });

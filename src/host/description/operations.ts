@@ -1,6 +1,5 @@
 import koffi from "koffi";
 import { Status } from "../../core/constants.js";
-import { LibraryUnloadedError } from "../libraries.js";
 import { CallArena } from "./arena.js";
 import { DescribedKind, DescribedRole } from "./layout.js";
 import type { DescribedLayouts, LaidOutType, ReachPlan } from "./layouts.js";
@@ -308,11 +307,8 @@ export class OperationCall {
           if (error !== null && error !== undefined) {
             this.#freeOwned(blocks);
             reject(error);
-          } else if (!target.isOpen()) {
-            this.#releaseUnread(blocks, target);
-            reject(new LibraryUnloadedError(target.symbol));
           } else {
-            resolve(this.#outcome(writer, status, blocks, target));
+            resolve(this.#outcome(writer, status, blocks, target, !target.isOpen()));
           }
         } catch (outcomeError) {
           reject(outcomeError);
@@ -366,14 +362,25 @@ export class OperationCall {
     return parameters;
   }
 
-  #outcome(writer: StructWriter, status: number, blocks: CallBlocks, target: OperationTarget): unknown {
+  /**
+   * @param releasedAtOnce whether the binary closed to calls while a worker call ran: the call still answers, and every
+   * handle and carried definition it answered is released at once, since the unload that would release them has run.
+   */
+  #outcome(writer: StructWriter, status: number, blocks: CallBlocks, target: OperationTarget, releasedAtOnce = false): unknown {
     const carried = new Carried();
     let kept = false;
     try {
       if (status === Status.Ok) {
         const answer = this.#answer(this.#answers.map((slot, index) => [slot.parameter.name, this.#readAnswer(writer, slot, blocks.answers[index]!, carried)] as const));
         kept = carried.definitions.length > 0;
-        return kept ? this.#keep(answer as object, carried, blocks, target) : answer;
+        const answered = kept ? this.#keep(answer as object, carried, blocks, target) : answer;
+        if (releasedAtOnce) {
+          carried.handles.forEach((handle) => handle.release());
+          if (kept) {
+            (answered as { release(): void }).release();
+          }
+        }
+        return answered;
       }
       if (status === Status.None) {
         return none;
@@ -419,13 +426,6 @@ export class OperationCall {
     Object.defineProperty(answer, "release", { value: () => held.release() });
     carried.definitions.forEach((definition) => Object.freeze(definition.bound));
     return answer;
-  }
-
-  /** Frees what a worker call answered after its binary was closed, reading none of it. */
-  #releaseUnread(blocks: CallBlocks, target: OperationTarget): void {
-    this.#releaseAnswers(blocks, target);
-    this.#releaseRefusal(blocks, target);
-    blocks.answers.forEach((block) => block.free());
   }
 
   #freeOwned(blocks: CallBlocks): void {
