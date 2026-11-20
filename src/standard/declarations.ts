@@ -133,6 +133,50 @@ const weivel_standard_value = structOf({
 const weivel_standard_entry = structOf({ key: pointer, key_length: count, value: weivel_standard_value });
 const weivel_standard_value_tree = structOf({ ...sizeField, root: weivel_standard_value, storage: pointer });
 const weivel_standard_paths = structOf({ ...sizeField, context: pointer, cache: pointer, config: pointer, plugin: pointer });
+const weivel_standard_log = structOf({ ...sizeField, context: pointer, write: pointer, release_refusal: pointer });
+const weivel_standard_scope = structOf({
+  ...sizeField,
+  config: pointer,
+  secrets: pointer,
+  paths: pointer,
+  log: pointer,
+  storage: pointer,
+});
+const weivel_standard_scopes = structOf({
+  ...sizeField,
+  context: pointer,
+  open: pointer,
+  release_scope: pointer,
+  release_refusal: pointer,
+});
+const weivel_standard_host_library = structOf({ binary: text, declaration: text });
+const weivel_standard_host_plugin = structOf({ directory: text, manifest: text, entry: text });
+const weivel_standard_host_plan = structOf({
+  ...sizeField,
+  mode: "uint32_t",
+  libraries: pointer,
+  library_count: count,
+  plugins: pointer,
+  plugin_count: count,
+  action_plugin: text,
+  action_name: text,
+  action_arguments: weivel_standard_value,
+  storage: pointer,
+});
+const weivel_standard_host_outcome = structOf({ manifest: text, state: "uint32_t", detail: text });
+const weivel_standard_host_next = structOf({ ...sizeField, has_next: "uint32_t", next: "int64_t", storage: pointer });
+const weivel_standard_host = structOf({
+  ...sizeField,
+  context: pointer,
+  start: pointer,
+  started: pointer,
+  tick: pointer,
+  finished: pointer,
+  stop: pointer,
+  release_plan: pointer,
+  release_next: pointer,
+  release_refusal: pointer,
+});
 
 /**
  * Every struct the standard's headers declare by name but `weivel/description.h`'s, laid out field for field as the
@@ -160,6 +204,15 @@ export const standardStructs = {
   weivel_standard_secret,
   weivel_standard_secrets,
   weivel_standard_paths,
+  weivel_standard_log,
+  weivel_standard_scope,
+  weivel_standard_scopes,
+  weivel_standard_host_library,
+  weivel_standard_host_plugin,
+  weivel_standard_host_plan,
+  weivel_standard_host_outcome,
+  weivel_standard_host_next,
+  weivel_standard_host,
   weivel_standard_value,
   weivel_standard_entry,
   weivel_standard_value_tree,
@@ -220,6 +273,15 @@ const standardSignatures = {
   weivel_standard_service_config: [text, []],
   weivel_standard_service_secrets: [text, []],
   weivel_standard_service_paths: [text, []],
+  weivel_standard_service_log: [text, []],
+  weivel_standard_service_scope: [text, []],
+  weivel_standard_service_host: [text, []],
+  weivel_standard_config_description: [pointer, []],
+  weivel_standard_secrets_description: [pointer, []],
+  weivel_standard_paths_description: [pointer, []],
+  weivel_standard_log_description: [pointer, []],
+  weivel_standard_scopes_description: [pointer, []],
+  weivel_standard_host_description: [pointer, []],
   weivel_standard_sha256: ["void", [bytes, count, "uint8_t *"]],
   weivel_standard_sha256_hex: ["void", [bytes, count, "char *"]],
   weivel_standard_is_sha256_hex: ["int", [text]],
