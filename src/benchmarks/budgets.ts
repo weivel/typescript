@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Summary } from "./measure.js";
 
-export type RatioGate = "controlCall" | "libraryCall";
+export type RatioGate = "controlCall" | "libraryCall" | "describedCall";
 
 /**
  * The bounds the kit sets for this language, read from its `benchmarks/typescript.txt`: each ratio gate's highest
@@ -29,7 +29,11 @@ export interface NoiseBounds {
 
 type NoiseName = "quietNoise" | "worstNoise" | "noiseMargin";
 
-const gatesByKitName: Readonly<Record<string, RatioGate>> = { "control-call": "controlCall", "library-call": "libraryCall" };
+const gatesByKitName: Readonly<Record<string, RatioGate>> = {
+  "control-call": "controlCall",
+  "library-call": "libraryCall",
+  "described-call": "describedCall",
+};
 const noiseByKitName: Readonly<Record<string, NoiseName>> = {
   "quiet-noise": "quietNoise",
   "worst-noise": "worstNoise",
@@ -102,7 +106,7 @@ function scalarOf(read: BudgetLines, name: ScalarName): number {
  */
 export function readLanguageBudget(text: string): LanguageBudget {
   const read: BudgetLines = {
-    highest: { controlCall: {}, libraryCall: {} },
+    highest: { controlCall: {}, libraryCall: {}, describedCall: {} },
     noise: { quietNoise: {}, worstNoise: {}, noiseMargin: {} },
     scalars: {},
   };
@@ -127,6 +131,14 @@ export function ratioBound(budget: LanguageBudget, gate: RatioGate, nodePlatform
   const kitPlatform = kitPlatformOf(nodePlatform);
   const highest = kitPlatform === undefined ? undefined : budget.highestMeasuredRatio[gate][kitPlatform];
   return highest === undefined ? undefined : highest * budget.ratioMargin;
+}
+
+/**
+ * Whether the kit bounds `gate` on any platform. A gate the kit bounds nowhere has not been measured in CI yet, so a run
+ * reports its samples unjudged; once the kit bounds it anywhere, a platform with no line fails it.
+ */
+export function isGateBounded(budget: LanguageBudget, gate: RatioGate): boolean {
+  return Object.keys(budget.highestMeasuredRatio[gate]).length > 0;
 }
 
 /** How many times slower `measured` ran than `reference`, by their medians. */

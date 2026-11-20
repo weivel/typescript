@@ -1,11 +1,14 @@
 export {
   benchmarkControlCall,
   benchmarkDefinitionCall,
+  benchmarkDescribedCall,
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   defaultSamplings,
   type Arithmetic,
   type BenchmarkOptions,
+  type DescribedBenchmarkOptions,
+  type DescribedCallSummaries,
   type FfiCallSummaries,
   type LibraryBenchmarkOptions,
   type SameLanguageCallSummaries,
@@ -13,6 +16,7 @@ export {
 export {
   defaultBudgetPath,
   deviation,
+  isGateBounded,
   kitPlatformOf,
   loadLanguageBudget,
   noiseBoundsOf,

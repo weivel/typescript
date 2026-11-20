@@ -147,6 +147,13 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   warm-up calls, then 201 rounds of 200 calls per path, against the pair's 2000000 warm-up calls and 301 rounds of
   10000. Each path is handed the struct's address itself and reads its operations out of it once, before the timed
   loop.
+- The `described-call` benchmark times the standard's `described` mirror's `reflect`, a sample holding a text and a
+  counted array of three texts, through the bound object a consumer resolved, over the same operation through a bare
+  koffi binding of the fixture's structs declared by hand in the benchmark, the one file that declares them. Both
+  release the answer and the refusal after every call; the hand path keeps one answer and one refusal block across
+  calls. It samples as the `library-call` rows do, with the echo library's bytes call in the same rounds for its time
+  beside theirs, and the bound method's promise is not awaited in the timed loop. Until the pinned kit bounds
+  `described-call` on some platform, a run prints its samples unjudged.
 - A library function that answers a status other than 0 throws a `LibraryCallError` carrying the status and the body
   as bytes, and the body's `text` only where it is UTF-8.
 - The core's and the standard's library paths default to the package's own `native/`, which the package's build

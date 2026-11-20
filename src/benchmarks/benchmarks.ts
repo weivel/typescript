@@ -2,10 +2,14 @@ import koffi from "koffi";
 import { createCore, EdgeSource, loadCoreLibrary, Status, type Core, type CoreLibrary, type Manifest } from "../core/index.js";
 import { wrapperHooks } from "../core/core.js";
 import { PluginContexts, type Logger, type PluginContext } from "../context/index.js";
+import type { BoundDefinition } from "../host/description/definition.js";
 import { Host, hostInternals } from "../host/host.js";
+import type { HostOptions } from "../host/model.js";
 import { bindBareBytesFunction, type LibraryDefinition } from "../host/libraries.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
+import { standardStructs } from "../standard/declarations.js";
+import { loadStandard } from "../standard/standard.js";
 import { CoreTimer } from "../timer/index.js";
 import {
   measureInterleaved,
@@ -47,6 +51,7 @@ export const defaultSamplings = {
   controlCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
   libraryCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
   definitionCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
+  describedCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
 } as const satisfies Record<string, Sampling>;
 
 function samplingOf(defaults: Sampling, options: BenchmarkOptions): Sampling {
@@ -68,9 +73,10 @@ function openPlugin(core: Core, contexts: PluginContexts, manifest: Manifest): O
 
 const providerManifest: Manifest = { importName: "provider", services: { provides: [{ id: arithmeticId }] } };
 const echoDefinitionId = "echo-definition";
+const mirrorId = "described-mirror";
 const consumerManifest: Manifest = {
   importName: "consumer",
-  services: { consumes: [{ id: arithmeticId }, { id: echoId }, { id: echoDefinitionId }] },
+  services: { consumes: [{ id: arithmeticId }, { id: echoId }, { id: echoDefinitionId }, { id: mirrorId }] },
 };
 
 /**
@@ -226,6 +232,16 @@ export function benchmarkControlCall(options: BenchmarkOptions = {}): FfiCallSum
   });
 }
 
+/** A host as the library benchmarks run it: the capabilities' edges, a silent log, and `extra` beside them. */
+function benchmarkHost(options: BenchmarkOptions, extra: Partial<HostOptions> = {}): Host {
+  return Host.create({
+    edgeSource: EdgeSource.Capabilities,
+    ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
+    log: silentLogger,
+    ...extra,
+  });
+}
+
 const echoDeclaration: LibraryDeclaration = {
   importName: "echo",
   version: "0.1.0",
@@ -256,11 +272,7 @@ function bareEcho(library: koffi.IKoffiLib, input: Uint8Array): MeasuredPath {
  * `echo_echo` with the same input called through a bare koffi binding, its answer released as the host releases it.
  */
 export async function benchmarkLibraryCall(options: LibraryBenchmarkOptions): Promise<FfiCallSummaries> {
-  const host = Host.create({
-    edgeSource: EdgeSource.Capabilities,
-    ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
-    log: silentLogger,
-  });
+  const host = benchmarkHost(options);
   const bareLibrary = koffi.load(options.echoLibraryPath);
   try {
     host.loadLibrary(echoDeclaration, options.echoLibraryPath);
@@ -325,11 +337,7 @@ function definitionEcho(definition: object, input: Uint8Array): MeasuredPath {
  * before it: the address the consumer resolved is the address the symbol answered, or the benchmark throws.
  */
 export async function benchmarkDefinitionCall(options: LibraryBenchmarkOptions): Promise<SameLanguageCallSummaries> {
-  const host = Host.create({
-    edgeSource: EdgeSource.Capabilities,
-    ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
-    log: silentLogger,
-  });
+  const host = benchmarkHost(options);
   const bareLibrary = koffi.load(options.echoLibraryPath);
   try {
     host.loadLibrary(echoDefinitionDeclaration, options.echoLibraryPath);
@@ -351,6 +359,213 @@ export async function benchmarkDefinitionCall(options: LibraryBenchmarkOptions):
       options.decorate,
     );
   } finally {
+    bareLibrary.unload();
+    await host.destroy();
+  }
+}
+
+export interface DescribedBenchmarkOptions extends LibraryBenchmarkOptions {
+  /** A build of the standard's `described` test library. */
+  readonly describedLibraryPath: string;
+  /** The standard whose check the host runs on the description; the package's own `native/` when absent. */
+  readonly standardLibraryPath?: string;
+}
+
+export interface DescribedCallSummaries extends FfiCallSummaries {
+  /** The echo library's bytes call through the host, sampled in the same rounds, for its time beside the pair's. */
+  readonly echoCall: Summary;
+}
+
+const describedDeclaration: LibraryDeclaration = {
+  importName: "described",
+  version: "1.0.0",
+  release: null,
+  services: [
+    {
+      id: mirrorId,
+      description: "described_mirror_description",
+      functions: [{ name: "definition", symbol: "described_mirror_definition", kind: FunctionKind.Definition, context: 0 }],
+    },
+  ],
+};
+
+/** The text and counted array both paths hand `reflect`, shaped as a request's path and header names. */
+const describedLabel = "request";
+const describedTags: readonly string[] = ["accept", "host", "content-length"];
+
+/** What `reflect` answered that both paths read back: the sample's text and counted array. */
+interface Reflected {
+  readonly label: string | null;
+  readonly tags: readonly (string | null)[];
+}
+
+function reflectedMatches(reflected: Reflected): boolean {
+  return reflected.label === describedLabel && reflected.tags.length === describedTags.length && reflected.tags.every((tag, index) => tag === describedTags[index]);
+}
+
+/** @implNote The fixture's types are declared by hand here alone, since the control is a binding written by hand. */
+const handPoint = koffi.struct({ label: "const char *", x: "int64_t", y: "double" });
+const handSample = koffi.struct({
+  size: "uint32_t",
+  shade: "uint32_t",
+  tier: "uint32_t",
+  flags: "uint32_t",
+  big: "uint64_t",
+  delta: "int64_t",
+  ratio: "double",
+  label: "const char *",
+  tags: "const char **",
+  tag_count: "size_t",
+  bytes: "void *",
+  length: "size_t",
+  origin: handPoint,
+  best: "void *",
+  points: "void *",
+  point_count: "size_t",
+  numbers: "void *",
+  number_count: "size_t",
+  held: standardStructs.weivel_standard_value,
+  extra: "void *",
+  values: "void *",
+  value_count: "size_t",
+});
+const handReflection = koffi.struct({ size: "uint32_t", sample: handSample, storage: "void *" });
+const handMirrorHead = koffi.struct({
+  size: "uint32_t",
+  context: "void *",
+  reflect: "void *",
+  tree: "void *",
+  find: "void *",
+  measure: "void *",
+  negate: "void *",
+  halve: "void *",
+  invert: "void *",
+  swap_shade: "void *",
+  grow: "void *",
+  weigh: "void *",
+  count_releases: "void *",
+  release_reflection: "void *",
+  release_tree: "void *",
+  release_refusal: "void *",
+});
+const handReflectOperation = koffi.proto("int32_t", ["void *", koffi.pointer(handSample), "void *", "void *"]);
+const pointerSize = koffi.sizeof("void *");
+
+interface HandMirror {
+  readonly context: unknown;
+  readonly reflect: unknown;
+  readonly release_reflection: unknown;
+  readonly release_refusal: unknown;
+}
+
+interface DecodedReflection {
+  readonly sample: { readonly label: string | null; readonly tags: object | null; readonly tag_count: number | bigint };
+}
+
+/** A measured path, and what frees the native blocks it holds once the measuring is done. */
+interface HeldPath {
+  readonly path: MeasuredPath;
+  readonly free: () => void;
+}
+
+function sizedBlock(type: ReturnType<typeof koffi.struct>): object {
+  const block = koffi.alloc(type, 1) as object;
+  koffi.encode(block, type, { size: koffi.sizeof(type) });
+  return block;
+}
+
+function decodedTexts(pointer: object | null, count: number): (string | null)[] {
+  const texts: (string | null)[] = [];
+  for (let index = 0; index < count; index++) {
+    texts.push(koffi.decode(pointer, index * pointerSize, "const char *") as string | null);
+  }
+  return texts;
+}
+
+/**
+ * `reflect` called through a bare koffi binding of the mirror, its sample encoded by koffi from the struct declared by
+ * hand, its answer read back and released, and its refusal released, as the generic binding releases both.
+ *
+ * @implNote The answer and the refusal are one block each, kept across calls, as a binding written by hand for one
+ * operation keeps them; the release empties both again.
+ */
+function handReflect(definition: object): HeldPath {
+  const mirror = koffi.decode(definition, handMirrorHead) as HandMirror;
+  const sample = { size: koffi.sizeof(handSample), label: describedLabel, tags: describedTags, tag_count: describedTags.length };
+  const reflection = sizedBlock(handReflection);
+  const refusal = sizedBlock(standardStructs.weivel_standard_service_refusal);
+  const path: MeasuredPath = () => {
+    const status = koffi.call(mirror.reflect, handReflectOperation, mirror.context, sample, reflection, refusal) as number;
+    try {
+      if (status !== Status.Ok) {
+        throw new Error(`The bare reflect answered status ${status}.`);
+      }
+      const answered = (koffi.decode(reflection, handReflection) as DecodedReflection).sample;
+      return { label: answered.label, tags: decodedTexts(answered.tags, Number(answered.tag_count)) } satisfies Reflected;
+    } finally {
+      koffi.call(mirror.release_reflection, releaseOperation, mirror.context, reflection);
+      koffi.call(mirror.release_refusal, releaseOperation, mirror.context, refusal);
+    }
+  };
+  return {
+    path,
+    free: () => {
+      koffi.free(reflection);
+      koffi.free(refusal);
+    },
+  };
+}
+
+function refuseUnlessReflected(reflected: Reflected | undefined, path: string): void {
+  if (reflected === undefined || !reflectedMatches(reflected)) {
+    throw new Error(`The ${path} reflect did not answer the sample it was handed.`);
+  }
+}
+
+/**
+ * Times the described mirror's `reflect`, a sample holding a text and a counted array of three texts in and its
+ * reflection out, called on the bound object a consumer resolved, as a plugin calls it, against the same operation
+ * called through a bare koffi binding marshalled by hand, with the same input and its answer released the same way.
+ * The echo library's bytes call through the host is sampled in the same rounds, for its time beside theirs.
+ *
+ * @remarks The bound method answers a promise, which the timed loop does not await: the call runs on the calling
+ * thread when the method is called, and awaiting would time the microtask queue, not the binding. A rejection there is
+ * an unhandled rejection, which fails the run; both paths' answers are checked once before the timing.
+ */
+export async function benchmarkDescribedCall(options: DescribedBenchmarkOptions): Promise<DescribedCallSummaries> {
+  const standard = loadStandard(options.standardLibraryPath);
+  const host = benchmarkHost(options, { descriptionCheck: (description) => standard.checkDescription(description) });
+  const bareLibrary = koffi.load(options.describedLibraryPath);
+  let hand: HeldPath | undefined;
+  try {
+    host.loadLibrary(echoDeclaration, options.echoLibraryPath);
+    host.loadLibrary(describedDeclaration, options.describedLibraryPath);
+    const { core, contexts } = hostInternals(host);
+    const consumer = openPlugin(core, contexts, consumerManifest).context;
+    const echo = consumer.services.get(consumer.service<{ echo(input: Uint8Array): Uint8Array }>(echoId));
+    const mirror = consumer.services.get(consumer.service<BoundDefinition>(mirrorId));
+    if (echo === undefined || mirror?.reflect === undefined) {
+      throw new Error("The consumer could not reach the echo library's service and the described mirror's reflect.");
+    }
+    const reflect = mirror.reflect;
+    hand = handReflect((bareLibrary.func("described_mirror_definition", "void *", []) as () => object)());
+    const input = { sample: { label: describedLabel, tags: describedTags } };
+    refuseUnlessReflected(((await reflect(input)) as { sample?: Reflected }).sample, "bound");
+    refuseUnlessReflected(hand.path(0) as Reflected, "bare");
+    const echoInput = new Uint8Array(16).fill(7);
+    const samples = sampleInterleaved(
+      { bareCall: hand.path, weivelCall: () => reflect(input), echoCall: () => echo.echo(echoInput) },
+      samplingOf(defaultSamplings.describedCall, options),
+      options.decorate,
+    );
+    return {
+      bareCall: summarise(samples.bareCall),
+      weivelCall: summarise(samples.weivelCall),
+      echoCall: summarise(samples.echoCall),
+      roundRatio: summariseRoundRatios(samples.weivelCall, samples.bareCall),
+    };
+  } finally {
+    hand?.free();
     bareLibrary.unload();
     await host.destroy();
   }
