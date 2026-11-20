@@ -139,3 +139,15 @@ describe("description/binding/a-handle-the-plugin-never-released-is-released-at-
     await witnessed("description/binding/a-handle-the-plugin-never-released-is-released-at-the-unload");
   });
 });
+
+describe("description/binding/an-input-the-operation-does-not-take-is-the-callers-mistake", () => {
+  it("refuses a name the operation does not take, a count it fills itself and a struct member it does not hold, calling nothing", async () => {
+    await witnessed("description/binding/an-input-the-operation-does-not-take-is-the-callers-mistake");
+  });
+});
+
+describe("description/binding/an-operation-its-provider-does-not-offer-is-the-callers-mistake", () => {
+  it("keeps an operation its provider holds NULL for on the bound object, and refuses a call of it", async () => {
+    await witnessed("description/binding/an-operation-its-provider-does-not-offer-is-the-callers-mistake");
+  });
+});

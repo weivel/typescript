@@ -5,7 +5,7 @@ import type { DescribedHandle, HandleHoldings } from "./handles.js";
 import { DescribedKind } from "./layout.js";
 import type { DescribedLayouts, LaidOutType, MemberPlan, ReachPlan } from "./layouts.js";
 import { scalarForC, scalarFromC, scalarTypes } from "./scalars.js";
-import { readValue, valueImage, valueKindOffset, writeValue } from "./values.js";
+import { depthLimit, readValue, valueImage, valueKindOffset, writeValue } from "./values.js";
 
 /** Frees a handle of the type it is named for, through the release the description names. */
 export type HandleRelease = (release: string | null, pointer: object) => void;
@@ -82,15 +82,62 @@ export function viewOf(pointer: object, length: number): DataView {
   return new DataView(koffi.view(pointer, length));
 }
 
+/** Where an arena struct's image is encoded once it is whole. */
+interface ArenaPlace {
+  readonly block: object;
+  readonly offset: number;
+}
+
+/** A struct whose image is still to be filled from what a caller handed, at its depth below the call's own. */
+interface StructFill {
+  readonly type: LaidOutType;
+  readonly object: unknown;
+  readonly where: string;
+  readonly inCall: boolean;
+  readonly depth: number;
+  readonly image: Record<string, unknown>;
+  readonly place: ArenaPlace | undefined;
+}
+
+/** A fill, or an arena struct's encoding, which runs once every fill its struct pushed has run. */
+type WriteTask = StructFill | (() => void);
+
+/** A struct an answer holds, still to be read into the object already standing for it. */
+interface StructRead {
+  readonly base: object;
+  readonly view: DataView;
+  readonly offset: number;
+  readonly type: LaidOutType;
+  readonly into: Record<string, unknown>;
+  readonly depth: number;
+  readonly handles: DescribedHandle[];
+}
+
+/** Reverses `tasks` from `from` on, so the tasks one struct pushed run in its members' order. */
+function reverseFrom(tasks: unknown[], from: number): void {
+  for (let low = from, high = tasks.length - 1; low < high; low += 1, high -= 1) {
+    const task = tasks[low];
+    tasks[low] = tasks[high];
+    tasks[high] = task;
+  }
+}
+
 /**
- * Writes and reads the structs of one call, by the plans its definition was bound with.
+ * Writes and reads the structs of one call, by the plans its definition was bound with. Structs nest no deeper than a
+ * value tree may, so a cycle of pointers, in a caller's objects or a provider's answer, is refused rather than followed
+ * for ever.
  *
  * @implNote A struct is written as one JavaScript image that koffi encodes in the call itself through the struct's
  * call type, texts, arrays and the structs they reach included, and read through a DataView over its memory, so a
  * scalar costs no call into koffi. What koffi cannot write from a value, a value tree and a struct reached through a
- * cycle of structs, is written into the call's arena and handed to koffi as an address.
+ * cycle of structs, is written into the call's arena and handed to koffi as an address. Both walks keep their own
+ * stack of structs still to fill or read rather than recursing, so the depth limit is reached on any stack, however
+ * little of it the caller left.
  */
 export class StructWriter {
+  readonly #writes: WriteTask[] = [];
+  readonly #reads: StructRead[] = [];
+
   constructor(
     readonly context: StructContext,
     readonly arena: CallArena,
@@ -100,28 +147,74 @@ export class StructWriter {
    * `object` as a `type`, its leading size set, a member it leaves out at its zero: koffi writes it through the type's
    * call type when `inCall`, and through its arena type otherwise.
    *
-   * @throws TypeError for anything but a plain object, a member the type does not let a caller write, or a value its
-   * member's kind does not hold.
+   * @throws TypeError for anything but a plain object, a member the type does not let a caller write, a value its
+   * member's kind does not hold, or structs nested deeper than the standard's limit.
    */
   image(type: LaidOutType, object: unknown, where: string, inCall: boolean): Record<string, unknown> {
+    return this.#writing(() => this.#structImage(type, object, where, inCall, 0, undefined));
+  }
+
+  /**
+   * What a pointer-sized member or parameter `plan` reaches is handed to koffi as, and how many it counts: the
+   * JavaScript value koffi writes when `inCall` and the plan lets it, an address in the arena otherwise. A left-out
+   * value is NULL with a count of 0.
+   */
+  written(plan: ReachPlan, value: unknown, where: string, inCall: boolean): Written {
+    return this.#writing(() => this.#written(plan, value, where, inCall, 0));
+  }
+
+  #writing<Result>(start: () => Result): Result {
+    try {
+      const result = start();
+      reverseFrom(this.#writes, 0);
+      for (let task = this.#writes.pop(); task !== undefined; task = this.#writes.pop()) {
+        if (typeof task === "function") {
+          task();
+        } else {
+          this.#fill(task);
+        }
+      }
+      return result;
+    } finally {
+      this.#writes.length = 0;
+    }
+  }
+
+  /** The image standing for `object`, filled once the walk reaches it, and encoded at `place` once it is whole. */
+  #structImage(type: LaidOutType, object: unknown, where: string, inCall: boolean, depth: number, place: ArenaPlace | undefined): Record<string, unknown> {
     const image: Record<string, unknown> = {};
     if (type.leadingSize) {
       image.size = type.described.size;
     }
+    if (object !== undefined && depth > depthLimit) {
+      throw new TypeError(`${where} nests structs deeper than ${depthLimit} levels, which no call hands on.`);
+    }
+    if (object !== undefined || place !== undefined) {
+      this.#writes.push({ type, object, where, inCall, depth, image, place });
+    }
+    return image;
+  }
+
+  #fill(fill: StructFill): void {
+    const { type, object, where, inCall, depth, image, place } = fill;
+    if (place !== undefined) {
+      this.#writes.push(() => koffi.encode(place.block, place.offset, type.arenaType, image));
+    }
     if (object === undefined) {
-      return image;
+      return;
     }
     if (!isPlainObject(object)) {
       throw new TypeError(`${where} is a ${type.described.name}, written as a plain object.`);
     }
     refuseUnknownNames(object, visibleNamesOf(type), where);
+    const pushedFrom = this.#writes.length;
     for (const plan of type.plans) {
-      this.#memberImage(image, plan, object[plan.member.name], `${where}.${plan.member.name}`, inCall);
+      this.#memberImage(image, plan, object[plan.member.name], `${where}.${plan.member.name}`, inCall, depth);
     }
-    return image;
+    reverseFrom(this.#writes, pushedFrom);
   }
 
-  #memberImage(image: Record<string, unknown>, plan: MemberPlan, value: unknown, where: string, inCall: boolean): void {
+  #memberImage(image: Record<string, unknown>, plan: MemberPlan, value: unknown, where: string, inCall: boolean, depth: number): void {
     const { member } = plan;
     const scalar = scalarTypes[member.kind];
     if (scalar !== undefined) {
@@ -129,7 +222,7 @@ export class StructWriter {
       return;
     }
     if (member.kind === DescribedKind.Struct) {
-      image[member.name] = this.image(plan.target!, value, where, inCall);
+      image[member.name] = this.#structImage(plan.target!, value, where, inCall, depth + 1, undefined);
       return;
     }
     if (member.kind === DescribedKind.Value) {
@@ -139,19 +232,14 @@ export class StructWriter {
       }
       return;
     }
-    const written = this.written(plan, value, where, inCall);
+    const written = this.#written(plan, value, where, inCall, depth + 1);
     image[member.name] = written.value;
     if (plan.count !== null) {
       image[plan.count.name] = written.count;
     }
   }
 
-  /**
-   * What a pointer-sized member or parameter `plan` reaches is handed to koffi as, and how many it counts: the
-   * JavaScript value koffi writes when `inCall` and the plan lets it, an address in the arena otherwise. A left-out
-   * value is NULL with a count of 0.
-   */
-  written(plan: ReachPlan, value: unknown, where: string, inCall: boolean): Written {
+  #written(plan: ReachPlan, value: unknown, where: string, inCall: boolean, depth: number): Written {
     const byKoffi = inCall && plan.marshalledByKoffi;
     switch (plan.reached.kind) {
       case DescribedKind.Text:
@@ -161,9 +249,9 @@ export class StructWriter {
       case DescribedKind.Bytes:
         return this.#bytes(value, where, byKoffi);
       case DescribedKind.Pointer:
-        return { value: this.#pointed(plan, value, where, byKoffi), count: 0 };
+        return { value: this.#pointed(plan, value, where, byKoffi, depth), count: 0 };
       case DescribedKind.Array:
-        return this.#array(plan, value, where, byKoffi);
+        return this.#array(plan, value, where, byKoffi, depth);
       case DescribedKind.Handle:
         return {
           value: value === undefined || value === null ? null : this.context.holdings.pointerOf(value, plan.reached.type!, where),
@@ -208,7 +296,7 @@ export class StructWriter {
     return { value: byKoffi ? value : this.arena.bytes(value), count: value.length };
   }
 
-  #pointed(plan: ReachPlan, value: unknown, where: string, byKoffi: boolean): unknown {
+  #pointed(plan: ReachPlan, value: unknown, where: string, byKoffi: boolean, depth: number): unknown {
     if (value === undefined) {
       return null;
     }
@@ -217,16 +305,15 @@ export class StructWriter {
       writeValue(this.arena, block, 0, value);
       return block;
     }
-    return byKoffi ? this.image(plan.target!, value, where, true) : this.#arenaStruct(plan.target!, value, where);
-  }
-
-  #arenaStruct(type: LaidOutType, value: unknown, where: string): object {
-    const block = this.arena.allocate(type.described.size);
-    koffi.encode(block, 0, type.arenaType, this.image(type, value, where, false));
+    if (byKoffi) {
+      return this.#structImage(plan.target!, value, where, true, depth, undefined);
+    }
+    const block = this.arena.allocate(plan.target!.described.size);
+    this.#structImage(plan.target!, value, where, false, depth, { block, offset: 0 });
     return block;
   }
 
-  #array(plan: ReachPlan, value: unknown, where: string, byKoffi: boolean): Written {
+  #array(plan: ReachPlan, value: unknown, where: string, byKoffi: boolean, depth: number): Written {
     const items = arrayOf(value, where);
     if (items.length === 0) {
       return nothingWritten;
@@ -243,17 +330,21 @@ export class StructWriter {
       return { value: block, count: items.length };
     }
     if (element === DescribedKind.Struct) {
-      const images = items.map((item, index) => this.image(plan.target!, item, `${where}[${index}]`, byKoffi));
-      return { value: byKoffi ? images : this.#arenaElements(plan, images), count: items.length };
+      if (byKoffi) {
+        return { value: items.map((item, index) => this.#structImage(plan.target!, item, `${where}[${index}]`, true, depth, undefined)), count: items.length };
+      }
+      const block = this.arena.allocate(items.length * plan.stride);
+      items.forEach((item, index) => this.#structImage(plan.target!, item, `${where}[${index}]`, false, depth, { block, offset: index * plan.stride }));
+      return { value: block, count: items.length };
     }
     const scalars = items.map((item, index) => scalarForC(element, item, `${where}[${index}]`));
-    return { value: byKoffi ? scalars : this.#arenaElements(plan, scalars), count: items.length };
+    return { value: byKoffi ? scalars : this.#arenaScalars(plan, scalars), count: items.length };
   }
 
-  #arenaElements(plan: ReachPlan, elements: readonly unknown[]): object {
-    const type = plan.reached.element === DescribedKind.Struct ? plan.target!.arenaType : scalarTypes[plan.reached.element]!;
-    const block = this.arena.allocate(elements.length * plan.stride);
-    elements.forEach((element, index) => koffi.encode(block, index * plan.stride, type, element));
+  #arenaScalars(plan: ReachPlan, scalars: readonly unknown[]): object {
+    const type = scalarTypes[plan.reached.element]!;
+    const block = this.arena.allocate(scalars.length * plan.stride);
+    scalars.forEach((scalar, index) => koffi.encode(block, index * plan.stride, type, scalar));
     return block;
   }
 
@@ -261,34 +352,11 @@ export class StructWriter {
    * Reads a `type` at `offset` of `base`, whose bytes `view` covers from `base` on, as a plain object, leaving out a
    * NULL pointer, a NULL handle and a value of kind NONE; a handle it holds is wrapped, `handles` collecting every one
    * wrapped.
+   *
+   * @throws Error for structs nested deeper than the standard's limit, as a cycle of pointers is.
    */
   readStruct(base: object, view: DataView, offset: number, type: LaidOutType, handles: DescribedHandle[]): Record<string, unknown> {
-    const object: Record<string, unknown> = {};
-    for (const plan of type.plans) {
-      const value = this.#readMember(base, view, offset, plan, handles);
-      if (value !== undefined) {
-        object[plan.member.name] = value;
-      }
-    }
-    return object;
-  }
-
-  #readMember(base: object, view: DataView, offset: number, plan: MemberPlan, handles: DescribedHandle[]): unknown {
-    const { member } = plan;
-    const at = offset + member.offset;
-    if (member.kind in scalarTypes) {
-      return scalarAt(view, at, member.kind);
-    }
-    switch (member.kind) {
-      case DescribedKind.Struct:
-        return this.readStruct(base, view, at, plan.target!, handles);
-      case DescribedKind.Value:
-        return view.getUint32(at + valueKindOffset, littleEndian) === 0 ? undefined : readValue(base, at);
-      default: {
-        const count = plan.count === null ? 0 : sizeAt(view, offset + plan.count.offset);
-        return this.readReached(plan, base, at, isNullAt(view, at), count, handles);
-      }
-    }
+    return this.#reading(() => this.#startStruct(base, view, offset, type, 0, handles));
   }
 
   /**
@@ -296,7 +364,64 @@ export class StructWriter {
    * for a NULL counted one.
    */
   readReached(plan: ReachPlan, holder: object, at: number, isNull: boolean, count: number, handles: DescribedHandle[]): unknown {
-    const { kind, element, release, type } = plan.reached;
+    return this.#reading(() => this.#readReached(plan, holder, at, isNull, count, 0, handles));
+  }
+
+  #reading<Result>(start: () => Result): Result {
+    try {
+      const result = start();
+      reverseFrom(this.#reads, 0);
+      for (let read = this.#reads.pop(); read !== undefined; read = this.#reads.pop()) {
+        this.#readMembers(read);
+      }
+      return result;
+    } finally {
+      this.#reads.length = 0;
+    }
+  }
+
+  /** The object standing for the struct at `offset` of `base`, its members read once the walk reaches it. */
+  #startStruct(base: object, view: DataView, offset: number, type: LaidOutType, depth: number, handles: DescribedHandle[]): Record<string, unknown> {
+    if (depth > depthLimit) {
+      throw new Error(`The provider answered structs nested deeper than ${depthLimit} levels.`);
+    }
+    const into: Record<string, unknown> = {};
+    this.#reads.push({ base, view, offset, type, into, depth, handles });
+    return into;
+  }
+
+  #readMembers(read: StructRead): void {
+    const pushedFrom = this.#reads.length;
+    for (const plan of read.type.plans) {
+      const value = this.#readMember(read, plan);
+      if (value !== undefined) {
+        read.into[plan.member.name] = value;
+      }
+    }
+    reverseFrom(this.#reads, pushedFrom);
+  }
+
+  #readMember(read: StructRead, plan: MemberPlan): unknown {
+    const { base, view, offset, depth, handles } = read;
+    const { member } = plan;
+    const at = offset + member.offset;
+    if (member.kind in scalarTypes) {
+      return scalarAt(view, at, member.kind);
+    }
+    switch (member.kind) {
+      case DescribedKind.Struct:
+        return this.#startStruct(base, view, at, plan.target!, depth + 1, handles);
+      case DescribedKind.Value:
+        return view.getUint32(at + valueKindOffset, littleEndian) === 0 ? undefined : readValue(base, at);
+      default: {
+        const count = plan.count === null ? 0 : sizeAt(view, offset + plan.count.offset);
+        return this.#readReached(plan, base, at, isNullAt(view, at), count, depth + 1, handles);
+      }
+    }
+  }
+
+  #readReached(plan: ReachPlan, holder: object, at: number, isNull: boolean, count: number, depth: number, handles: DescribedHandle[]): unknown {
+    const { kind, release, type } = plan.reached;
     switch (kind) {
       case DescribedKind.Text:
         return isNull ? null : (koffi.decode(holder, at, "const char *") as string);
@@ -305,9 +430,9 @@ export class StructWriter {
       case DescribedKind.Bytes:
         return isNull || count === 0 ? new Uint8Array(0) : (koffi.decode(pointerAt(holder, at), 0, "uint8_t", count) as Uint8Array).slice();
       case DescribedKind.Pointer:
-        return isNull ? undefined : this.#readElements(plan, pointerAt(holder, at), 1, handles)[0];
+        return isNull ? undefined : this.#readElements(plan, pointerAt(holder, at), 1, depth, handles)[0];
       case DescribedKind.Array:
-        return isNull || count === 0 ? [] : this.#readElements(plan, pointerAt(holder, at), count, handles);
+        return isNull || count === 0 ? [] : this.#readElements(plan, pointerAt(holder, at), count, depth, handles);
       case DescribedKind.Handle:
         return isNull ? undefined : this.#hold(pointerAt(holder, at), type!, release, handles);
       default:
@@ -315,11 +440,11 @@ export class StructWriter {
     }
   }
 
-  #readElements(plan: ReachPlan, pointer: object, count: number, handles: DescribedHandle[]): unknown[] {
+  #readElements(plan: ReachPlan, pointer: object, count: number, depth: number, handles: DescribedHandle[]): unknown[] {
     const { element } = plan.reached;
     if (element === DescribedKind.Struct) {
       const view = viewOf(pointer, count * plan.stride);
-      return Array.from({ length: count }, (_, index) => this.readStruct(pointer, view, index * plan.stride, plan.target!, handles));
+      return Array.from({ length: count }, (_, index) => this.#startStruct(pointer, view, index * plan.stride, plan.target!, depth, handles));
     }
     if (element === DescribedKind.Value) {
       return Array.from({ length: count }, (_, index) => readValue(pointer, index * plan.stride));

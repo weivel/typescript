@@ -29,3 +29,17 @@ export class DescribedCallError extends Error {
     this.fix = fix;
   }
 }
+
+/**
+ * A call of an operation the definition's provider does not offer, the struct its library answered ending before it or
+ * holding NULL there: the caller's mistake, refused before anything is called.
+ */
+export class OperationNotOfferedError extends Error {
+  readonly operation: string;
+
+  constructor(definition: string, operation: string) {
+    super(`${definition}'s provider does not offer ${operation}: the struct its library answered ends before it, or holds NULL there.`);
+    this.name = "OperationNotOfferedError";
+    this.operation = operation;
+  }
+}

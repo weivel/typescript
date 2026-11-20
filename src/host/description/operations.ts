@@ -3,40 +3,14 @@ import { Status } from "../../core/constants.js";
 import { CallArena } from "./arena.js";
 import type { DescribedHandle } from "./handles.js";
 import { DescribedKind, DescribedRole } from "./layout.js";
-import { DescriptionLayoutError, type DescribedLayouts, type LaidOutType, type ReachPlan } from "./layouts.js";
-import { none, DescribedCallError } from "./outcome.js";
+import type { DescribedLayouts, LaidOutType, ReachPlan } from "./layouts.js";
+import { none, DescribedCallError, OperationNotOfferedError } from "./outcome.js";
 import type { DescribedOperation, DescribedParameter } from "./reader.js";
 import { isScalarKind, scalarForC, scalarTypes } from "./scalars.js";
 import { littleEndian, refuseUnknownNames, scalarAt, StructWriter, type StructContext } from "./structs.js";
 import { readValue, valueTreeRootOffset, valueTreeSize } from "./values.js";
 
 type KoffiType = ReturnType<typeof koffi.opaque>;
-
-const inputKinds: readonly number[] = [
-  DescribedKind.Context,
-  DescribedKind.U32,
-  DescribedKind.U64,
-  DescribedKind.I64,
-  DescribedKind.F64,
-  DescribedKind.Size,
-  DescribedKind.Text,
-  DescribedKind.Texts,
-  DescribedKind.Bytes,
-  DescribedKind.Pointer,
-  DescribedKind.Array,
-  DescribedKind.Handle,
-];
-const answerKinds: readonly number[] = [
-  DescribedKind.U32,
-  DescribedKind.U64,
-  DescribedKind.I64,
-  DescribedKind.F64,
-  DescribedKind.Size,
-  DescribedKind.Text,
-  DescribedKind.Pointer,
-  DescribedKind.Value,
-  DescribedKind.Handle,
-];
 
 const pointerSize = koffi.sizeof("void *");
 
@@ -45,11 +19,10 @@ export class ReleaseCall {
   readonly #proto: KoffiType;
 
   constructor(
-    readonly operation: DescribedOperation,
     readonly functionPointer: object | null,
     readonly context: object | null,
   ) {
-    this.#proto = koffi.proto("void", operation.parameters.map(() => "void *"));
+    this.#proto = koffi.proto("void", ["void *", "void *"]);
   }
 
   /** Frees `pointer`; a release the provider left NULL frees nothing. */
@@ -57,8 +30,7 @@ export class ReleaseCall {
     if (this.functionPointer === null) {
       return;
     }
-    const parameters = this.operation.parameters.map((parameter) => (parameter.kind === DescribedKind.Context ? this.context : pointer));
-    koffi.call(this.functionPointer, this.#proto, ...parameters);
+    koffi.call(this.functionPointer, this.#proto, this.context, pointer);
   }
 }
 
@@ -123,7 +95,7 @@ export type OperationInput = Readonly<Record<string, unknown>>;
 
 /**
  * One operation of a described definition, its prototype, its parameter steps and its answer and refusal blocks
- * built once at the bind, and its parameters checked against what this binding marshals.
+ * built once at the bind, from a description the standard's check passed.
  */
 export class OperationCall {
   readonly name: string;
@@ -137,7 +109,7 @@ export class OperationCall {
   readonly #refusal: RefusalSlot | undefined;
   #calling = false;
 
-  /** @throws DescriptionLayoutError for a parameter this binding cannot marshal, or a release that is no release. */
+  /** @throws DescriptionLayoutError for a parameter reaching an element this binding cannot marshal. */
   constructor(
     readonly definition: string,
     operation: DescribedOperation,
@@ -149,13 +121,15 @@ export class OperationCall {
     this.name = operation.name;
     this.#operation = operation;
     this.#counted = new Set(operation.parameters.flatMap((parameter) => (parameter.count === null ? [] : [parameter.count])));
-    operation.parameters.forEach((parameter) => this.#refuseUnbindable(parameter));
+    operation.parameters.forEach((parameter) =>
+      this.layouts.refuseUnreachableElement(parameter.kind, parameter.element, parameter.type, `its operation ${this.name}'s ${parameter.name}`),
+    );
     this.inputNames = operation.parameters
       .filter((parameter) => parameter.role === DescribedRole.Input && parameter.kind !== DescribedKind.Context && !this.#counted.has(parameter.name))
       .map((parameter) => parameter.name);
     this.#steps = operation.parameters.map((parameter) => this.#stepOf(parameter));
     this.#answers = this.#steps.flatMap((step) => (step.role === "answer" ? [step.slot] : []));
-    this.#refusal = this.#steps.flatMap((step) => (step.role === "refusal" ? [step.slot] : []))[0];
+    this.#refusal = this.#steps.find((step): step is Extract<ParameterStep, { role: "refusal" }> => step.role === "refusal")?.slot;
     fixedBlocks.register(this, [...this.#answers.map((slot) => slot.fixed.block), ...(this.#refusal === undefined ? [] : [this.#refusal.fixed.block])]);
     this.#proto = koffi.proto(
       "int",
@@ -196,56 +170,20 @@ export class OperationCall {
     return { parameter, plan, type: undefined, fixed: new FixedBlock(Math.max(pointerSize, 8), undefined) };
   }
 
-  #refuse(detail: string): DescriptionLayoutError {
-    return new DescriptionLayoutError(this.definition, `its operation ${this.name} ${detail}`);
-  }
-
-  #refuseUnbindable(parameter: DescribedParameter): void {
-    const allowed = parameter.role === DescribedRole.Input ? inputKinds : parameter.role === DescribedRole.Answer ? answerKinds : [DescribedKind.Pointer];
-    if (!allowed.includes(parameter.kind)) {
-      throw this.#refuse(`takes ${parameter.name} of kind ${parameter.kind} in role ${parameter.role}, which this binding cannot marshal`);
-    }
-    const pointsAtValue = parameter.kind === DescribedKind.Pointer && parameter.element === DescribedKind.Value;
-    if (parameter.role !== DescribedRole.Input && pointsAtValue) {
-      throw this.#refuse(`answers ${parameter.name} as a pointer to a value, which is answered as a tree`);
-    }
-    this.layouts.refuseUnreachableElement(parameter.kind, parameter.element, parameter.type, `its operation ${this.name}'s ${parameter.name}`);
-    if (parameter.role === DescribedRole.Answer && parameter.kind === DescribedKind.Text && parameter.release !== null) {
-      throw this.#refuse(
-        `answers the text ${parameter.name} freed by ${parameter.release}, and which pointer a text's release is handed is not yet ruled, so this binding frees none`,
-      );
-    }
-    if (parameter.role !== DescribedRole.Input && parameter.release !== null && !this.releases.has(parameter.release)) {
-      throw this.#refuse(`frees ${parameter.name} by ${parameter.release}, which is no release of the definition`);
-    }
-    if (parameter.role === DescribedRole.Refusal) {
-      this.#refuseRefusalType(parameter);
-    }
-  }
-
-  #refuseRefusalType(parameter: DescribedParameter): void {
-    const type = this.layouts.type(parameter.type);
-    for (const text of ["detail", "fix"]) {
-      if (type.members.get(text)?.kind !== DescribedKind.Text) {
-        throw this.#refuse(`refuses through ${type.described.name}, which carries no ${text} text`);
-      }
-    }
-  }
-
   /**
    * Calls the operation with `input`, every answer copied out and released before it settles.
    *
    * @returns the answer on OK, `none` on NONE.
-   * @throws DescribedCallError for any other status, TypeError for an input its parameter does not hold.
+   * @throws DescribedCallError for any other status; TypeError for an input its parameter does not hold, a name it
+   * does not take or structs nested deeper than the standard's limit, and OperationNotOfferedError for an operation
+   * the provider does not offer, each the caller's mistake, refused before anything is called.
    */
   invoke(input: OperationInput, context: StructContext): unknown {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new TypeError(`${this.name} takes its inputs as one object, keyed by parameter name.`);
     }
     if (this.functionPointer === null) {
-      throw new Error(
-        `${this.definition}'s provider does not offer ${this.name}: the struct its library answered ends before it, or holds NULL there.`,
-      );
+      throw new OperationNotOfferedError(this.definition, this.name);
     }
     refuseUnknownNames(input, this.inputNames, `${this.name}'s input`);
     if (this.#calling) {
@@ -340,7 +278,7 @@ export class OperationCall {
     return writer.readReached(slot.plan, fixed.block, 0, isNullPointer(fixed.view), 0, handles) ?? null;
   }
 
-  /** A struct or tree answer is freed through what was handed in; a text answer naming a release is refused at the bind. */
+  /** A struct or tree answer is freed through what was handed in; the check lets no scalar or text answer name a release. */
   #releaseAnswer(slot: AnswerSlot): void {
     const { parameter } = slot;
     if (parameter.release !== null && parameter.kind !== DescribedKind.Handle) {
