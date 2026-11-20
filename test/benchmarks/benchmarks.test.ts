@@ -9,7 +9,6 @@ import {
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   callsPerPath,
-  isGateBounded,
   loadLanguageBudget,
   noiseBoundsOf,
   pairRatio,
@@ -289,15 +288,11 @@ describe("a described operation through the generic binding", () => {
     const summaries = await benchmarkDescribedCall(describedOptions);
     report("described-call-echo", summaries.echoCall);
     const ratio = reportFfiPair("described-call", summaries);
-    if (!isGateBounded(budget, "describedCall")) {
-      console.log(`weivel-benchmark described-call runner=${process.platform}-${process.arch} unbounded: the pinned kit bounds described-call nowhere yet`);
-      return;
-    }
 
     expect(ratio).toBeLessThanOrEqual(boundHere("describedCall"));
   });
 
-  it.runIf(isGateBounded(budget, "describedCall"))("is over its budget once it is slowed past it", { timeout }, async () => {
+  it("is over its budget once it is slowed past it", { timeout }, async () => {
     const options = { ...describedOptions, sampling: briefSampling };
     const added = slowdownPast(boundHere("describedCall"), await benchmarkDescribedCall(options));
     const slowed = await benchmarkDescribedCall({ ...options, decorate: slowing("weivelCall", added) });
@@ -375,18 +370,12 @@ describe("the bounds", () => {
     expect(noiseBoundsOf(budget, "freebsd")).toBeUndefined();
   });
 
-  it("leave a gate the kit bounds nowhere unjudged, and fail a platform the kit leaves out of a gate it bounds", () => {
-    const text = readFileSync(kitBudgetPath, "utf8").replace(/^described-call .*$/gm, "");
-    const unset = readLanguageBudget(text);
-    const linuxOnly = readLanguageBudget(`${text}
-described-call linux 2
-`);
+  it("leave a platform the kit gives no described-call line unbounded, which fails its gate", () => {
+    const linuxOnly = readLanguageBudget(readFileSync(kitBudgetPath, "utf8").replace(/^described-call (windows|macos) .*$/gm, ""));
 
-    expect(isGateBounded(unset, "describedCall")).toBe(false);
-    expect(isGateBounded(linuxOnly, "describedCall")).toBe(true);
-    expect(ratioBound(linuxOnly, "describedCall", "linux")).toBe(2 * kitLines.get("ratio-margin")!);
+    expect(ratioBound(linuxOnly, "describedCall", "linux")).toBe(kitLines.get("described-call linux")! * kitLines.get("ratio-margin")!);
     expect(ratioBound(linuxOnly, "describedCall", "win32")).toBeUndefined();
-    expect(isGateBounded(unset, "libraryCall")).toBe(true);
+    expect(ratioBound(linuxOnly, "describedCall", "darwin")).toBeUndefined();
   });
 
   it("judge a same-language pair by the noise margin of the platform they run on", () => {
