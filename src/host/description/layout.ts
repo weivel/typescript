@@ -55,6 +55,10 @@ const weivel_standard_description = structOf({
   enum_count: count,
   operations: pointer,
   operation_count: count,
+  blocking: pointer,
+  blocking_count: count,
+  definitions: pointer,
+  definition_count: count,
 });
 
 /**
@@ -91,10 +95,11 @@ export const DescribedKind = {
   Handle: 13,
   Context: 14,
   Storage: 15,
+  Definition: 16,
 } as const;
 
 /** The highest kind this binding knows; a description naming a later one is refused whole. */
-export const lastKnownKind = DescribedKind.Storage;
+export const lastKnownKind = DescribedKind.Definition;
 
 /** weivel_standard_described_role. */
 export const DescribedRole = { None: 0, Input: 1, Answer: 2, Refusal: 3 } as const;

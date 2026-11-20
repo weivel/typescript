@@ -52,6 +52,7 @@ export const defaultSamplings = {
   libraryCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
   definitionCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
   describedCall: { warmupCalls: 100_000, callsPerBatch: 200, batches: 201 },
+  blockingCall: { warmupCalls: 2_000, callsPerBatch: 50, batches: 201 },
 } as const satisfies Record<string, Sampling>;
 
 function samplingOf(defaults: Sampling, options: BenchmarkOptions): Sampling {
@@ -566,6 +567,129 @@ export async function benchmarkDescribedCall(options: DescribedBenchmarkOptions)
     };
   } finally {
     hand?.free();
+    bareLibrary.unload();
+    await host.destroy();
+  }
+}
+
+const walkerId = "described-walker";
+const walkerConsumerManifest: Manifest = { importName: "walker-consumer", services: { consumes: [{ id: walkerId }] } };
+const walkerDeclaration: LibraryDeclaration = {
+  importName: "described",
+  version: "1.0.0",
+  release: null,
+  services: [
+    {
+      id: walkerId,
+      description: "described_walker_description",
+      functions: [{ name: "definition", symbol: "described_walker_definition", kind: FunctionKind.Definition, context: 0 }],
+    },
+  ],
+};
+
+/** The walker's head up to `wait`, declared by hand as a binding written for one operation declares it. */
+const handWalkerHead = koffi.struct({
+  size: "uint32_t",
+  context: "void *",
+  open: "void *",
+  use: "void *",
+  visit: "void *",
+  release_cursor: "void *",
+  release_refusal: "void *",
+  wait: "void *",
+});
+const handWaitOperation = koffi.proto("int32_t", ["void *", "uint64_t", "void *"]);
+
+/**
+ * The ratio the blocking-call row is held under until CI has measured it on the kit's platforms: the worker round
+ * trip over the same `wait` called directly on the calling thread.
+ *
+ * @implNote Provisional, from three local Windows x64 runs on 2026-11-21 whose median ratios were 32.9, 33.6 and 34.3:
+ * a worker round trip is a thread hand-off and an event-loop wake, about 40 microseconds there, against a direct call
+ * of about one. The bound is five times the highest seen, wide enough for a platform whose direct call is cheaper or
+ * whose hand-off is dearer, and still catching a round trip grown by an order of magnitude; the kit sets the real
+ * bound per platform once CI has measured it. This constant is replaced by a `blocking-call` row in the kit's
+ * `benchmarks/typescript.txt`, read as the other gates' rows are, once that row lands.
+ */
+export const provisionalBlockingCallBound = 175;
+
+/** A path whose every call is awaited before the next starts, as a caller awaiting a blocking call does. */
+export type AwaitedPath = (call: number) => Promise<unknown>;
+
+async function timeAwaitedBatch(path: AwaitedPath, calls: number): Promise<number> {
+  const start = process.hrtime.bigint();
+  for (let call = 0; call < calls; call++) {
+    await path(call);
+  }
+  return Number(process.hrtime.bigint() - start) / calls;
+}
+
+function timeDirectBatch(path: MeasuredPath, calls: number): number {
+  const start = process.hrtime.bigint();
+  for (let call = 0; call < calls; call++) {
+    path(call);
+  }
+  return Number(process.hrtime.bigint() - start) / calls;
+}
+
+/**
+ * Samples the direct path and the awaited path one batch each per round, which goes first alternating by round, so
+ * a change in the machine's speed during the run falls on both alike.
+ */
+async function sampleBlockingPair(direct: MeasuredPath, awaited: AwaitedPath, sampling: Sampling): Promise<FfiCallSummaries> {
+  timeDirectBatch(direct, sampling.warmupCalls);
+  await timeAwaitedBatch(awaited, sampling.warmupCalls);
+  const bare: number[] = [];
+  const weivel: number[] = [];
+  for (let round = 0; round < sampling.batches; round++) {
+    if (round % 2 === 0) {
+      bare.push(timeDirectBatch(direct, sampling.callsPerBatch));
+      weivel.push(await timeAwaitedBatch(awaited, sampling.callsPerBatch));
+    } else {
+      weivel.push(await timeAwaitedBatch(awaited, sampling.callsPerBatch));
+      bare.push(timeDirectBatch(direct, sampling.callsPerBatch));
+    }
+  }
+  return { bareCall: summarise(bare), weivelCall: summarise(weivel), roundRatio: summariseRoundRatios(weivel, bare) };
+}
+
+/**
+ * Times the described walker's `wait`, which its description marks blocking, called and awaited on the bound object a
+ * consumer resolved, so it runs on koffi's worker thread, against the same `wait` called directly through a bare koffi
+ * binding on the calling thread, with the same input and its answer read back.
+ *
+ * @remarks The ratio is the worker round trip's price, not the binding's: a blocking call buys a free event loop for
+ * it, which a direct call cannot.
+ */
+export async function benchmarkBlockingCall(options: DescribedBenchmarkOptions): Promise<FfiCallSummaries> {
+  const standard = loadStandard(options.standardLibraryPath);
+  const host = benchmarkHost(options, { descriptionCheck: (description) => standard.checkDescription(description) });
+  const bareLibrary = koffi.load(options.describedLibraryPath);
+  const waited = koffi.alloc("uint64_t", 1) as object;
+  try {
+    host.loadLibrary(walkerDeclaration, options.describedLibraryPath);
+    const { core, contexts } = hostInternals(host);
+    const consumer = openPlugin(core, contexts, walkerConsumerManifest).context;
+    const walker = consumer.services.get(consumer.service<BoundDefinition>(walkerId));
+    if (walker?.wait === undefined) {
+      throw new Error("The consumer could not reach the described walker's wait.");
+    }
+    const wait = walker.wait;
+    const head = koffi.decode((bareLibrary.func("described_walker_definition", "void *", []) as () => object)(), handWalkerHead) as { context: unknown; wait: unknown };
+    const direct: MeasuredPath = (call) => {
+      const status = koffi.call(head.wait, handWaitOperation, head.context, call, waited) as number;
+      if (status !== Status.Ok) {
+        throw new Error(`The bare wait answered status ${status}.`);
+      }
+      return koffi.decode(waited, "uint64_t");
+    };
+    const awaited: AwaitedPath = (call) => wait({ ticks: call });
+    if ((await awaited(7)) !== 7 || Number(direct(7)) !== 7) {
+      throw new Error("A wait did not answer the ticks it was handed.");
+    }
+    return await sampleBlockingPair(direct, awaited, samplingOf(defaultSamplings.blockingCall, options));
+  } finally {
+    koffi.free(waited);
     bareLibrary.unload();
     await host.destroy();
   }

@@ -29,7 +29,7 @@ function struct(name: string, members: readonly DescribedMember[]): DescribedTyp
 }
 
 function description(types: readonly DescribedType[]): Description {
-  return { definition: "none", types, enums: [], operations: [] };
+  return { definition: "none", types, enums: [], operations: [], blocking: [], definitions: [] };
 }
 
 /** Both orders a description can list two structs in: whatever the binding decides must not depend on it. */
@@ -54,7 +54,7 @@ const comparison = koffi.proto("int", ["const void *", "const void *"]);
 function throughC<Answer>(layouts: DescribedLayouts, type: LaidOutType, object: unknown, read: (pointer: object) => Answer): Answer {
   const arena = new CallArena();
   arenas.push(arena);
-  const image = new StructWriter({ layouts, holdings: new HandleHoldings(), freeHandle: () => {} }, arena).image(type, object, "input", true);
+  const image = new StructWriter({ layouts, holdings: new HandleHoldings(), freeHandle: () => {}, bindCarried: () => { throw new Error("these structs carry no definition"); } }, arena).image(type, object, "input", true);
   const qsort = libc.func("qsort", "void", [koffi.pointer(type.callType), "size_t", "size_t", koffi.pointer(comparison)]) as (...parameters: unknown[]) => void;
   let answer: Answer | undefined;
   qsort([image, image], 2, type.described.size, (left: object) => {
