@@ -68,6 +68,10 @@ class LaidOut implements LaidOutType {
   }
 }
 
+/**
+ * @implNote Every load registers one globally named koffi struct per described struct and never frees it: koffi
+ * needs a name for a struct to point at itself, and frees no type it has registered.
+ */
 let callTypeSequence = 0;
 
 /** A description that does not hold for this platform's layout, or that this binding cannot bind: the caller's mistake. */
@@ -263,20 +267,25 @@ export class DescribedLayouts {
   }
 
   /**
-   * Builds the struct koffi writes from a JavaScript value during a call, named so a struct pointing at itself can name
-   * itself. A pointer closing a cycle through another struct stays a `void *` the binding writes into its arena, since
-   * koffi resolves no name it has not seen yet.
+   * Builds the struct koffi writes from a JavaScript value during a call, every struct it embeds built first, named so
+   * a struct pointing at itself can name itself.
    *
-   * @returns the koffi name of the struct, or undefined while it is still being built.
+   * @returns whether its call type is complete; false while it, or a struct it embeds however deep, is still being
+   * built, so a pointer reaching it from there stays a `void *` the binding writes into its arena, since koffi resolves
+   * no name it has not seen yet.
    */
-  #buildCallType(name: string): string | undefined {
+  #buildCallType(name: string): boolean {
     if (this.#callTyped.has(name)) {
-      return this.#callNames.get(name);
+      return true;
     }
     if (this.#callNames.has(name)) {
-      return undefined;
+      return false;
     }
     const laidOut = this.#laidOutType(name);
+    const embedded = laidOut.described.members.filter((member) => member.kind === DescribedKind.Struct);
+    if (!embedded.every((member) => this.#buildCallType(member.type!))) {
+      return false;
+    }
     const koffiName = `weivel_described_call_${callTypeSequence++}`;
     this.#callNames.set(name, koffiName);
     const fields = this.#fieldsOf(laidOut.described).map((field) => {
@@ -287,7 +296,7 @@ export class DescribedLayouts {
     this.#check(laidOut.described, callType, fields);
     laidOut.callType = callType;
     this.#callTyped.add(name);
-    return koffiName;
+    return true;
   }
 
   #callField(owner: string, member: DescribedMember): string | KoffiType {
@@ -297,7 +306,9 @@ export class DescribedLayouts {
       case DescribedKind.Bytes:
         return textCallTypes[member.kind]!;
       case DescribedKind.Struct:
-        this.#buildCallType(member.type!);
+        if (!this.#callTyped.has(member.type!)) {
+          throw new Error(`${owner}.${member.name} would embed ${member.type}'s arena layout in a call type, which koffi would write wrong.`);
+        }
         return this.#laidOutType(member.type).callType;
       case DescribedKind.Pointer:
       case DescribedKind.Array:
@@ -317,8 +328,7 @@ export class DescribedLayouts {
     if (member.type === owner) {
       return `${this.#callNames.get(owner)!} *`;
     }
-    this.#buildCallType(member.type!);
-    if (!this.#callTyped.has(member.type!)) {
+    if (!this.#buildCallType(member.type!)) {
       this.#arenaReached.add(member);
       return "void *";
     }
