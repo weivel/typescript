@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import koffi from "koffi";
 import { afterEach, describe, expect, it } from "vitest";
-import { bindDefinition, type BoundDefinition } from "../../src/host/description/definition.ts";
+import { bindDescribed, type BoundDefinition } from "../../src/host/description/definition.ts";
 import { HandleHoldings } from "../../src/host/description/handles.ts";
 import { DescribedKind, DescribedRole } from "../../src/host/description/layout.ts";
 import { readDescription, type Description } from "../../src/host/description/reader.ts";
@@ -38,7 +38,7 @@ function mirror(): Mirror {
 }
 
 function bind(pointer: object, description: Description): BoundDefinition {
-  return bindDefinition({ definition: { library: "described", pointer }, description, holdings: new HandleHoldings(), isOpen: () => true });
+  return bindDescribed({ definition: { library: "described", pointer }, description, holdings: new HandleHoldings(), isOpen: () => true });
 }
 
 /** A copy of the definition's struct the test may change, `size` bytes of it read from the library's own. */

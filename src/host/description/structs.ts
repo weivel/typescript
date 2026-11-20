@@ -10,11 +10,33 @@ import { depthLimit, readValue, valueImage, valueKindOffset, writeValue } from "
 /** Frees a handle of the type it is named for, through the release the description names. */
 export type HandleRelease = (release: string | null, pointer: object) => void;
 
+/** A definition an answer carried, bound for the caller, which lives until `end` is called with the answer's release. */
+export interface CarriedDefinition {
+  readonly bound: object;
+  end(): void;
+}
+
+/** Binds the definition at `pointer`, of the struct `type` names, which one of the description's `definitions` describes. */
+export type DefinitionBinder = (type: string, pointer: object) => CarriedDefinition;
+
+/** What one answer carries beyond its copy: every handle wrapped and every definition bound while it was read. */
+export class Carried {
+  readonly handles: DescribedHandle[] = [];
+  readonly definitions: CarriedDefinition[] = [];
+
+  /** Releases every handle and ends every definition, as an answer that is never handed to its caller must. */
+  releaseAll(): void {
+    this.handles.forEach((handle) => handle.release());
+    this.definitions.forEach((definition) => definition.end());
+  }
+}
+
 /** What one call reaches while it writes and reads structs: the layouts, the arena, and the library's handles. */
 export interface StructContext {
   readonly layouts: DescribedLayouts;
   readonly holdings: HandleHoldings;
   readonly freeHandle: HandleRelease;
+  readonly bindCarried: DefinitionBinder;
 }
 
 const pointerSize = koffi.sizeof("void *");
@@ -110,7 +132,7 @@ interface StructRead {
   readonly type: LaidOutType;
   readonly into: Record<string, unknown>;
   readonly depth: number;
-  readonly handles: DescribedHandle[];
+  readonly carried: Carried;
 }
 
 /** Reverses `tasks` from `from` on, so the tasks one struct pushed run in its members' order. */
@@ -350,21 +372,21 @@ export class StructWriter {
 
   /**
    * Reads a `type` at `offset` of `base`, whose bytes `view` covers from `base` on, as a plain object, leaving out a
-   * NULL pointer, a NULL handle and a value of kind NONE; a handle it holds is wrapped, `handles` collecting every one
-   * wrapped.
+   * NULL pointer, a NULL handle and a value of kind NONE; a handle it holds is wrapped and a definition it holds is
+   * bound, `carried` collecting every one.
    *
    * @throws Error for structs nested deeper than the standard's limit, as a cycle of pointers is.
    */
-  readStruct(base: object, view: DataView, offset: number, type: LaidOutType, handles: DescribedHandle[]): Record<string, unknown> {
-    return this.#reading(() => this.#startStruct(base, view, offset, type, 0, handles));
+  readStruct(base: object, view: DataView, offset: number, type: LaidOutType, carried: Carried): Record<string, unknown> {
+    return this.#reading(() => this.#startStruct(base, view, offset, type, 0, carried));
   }
 
   /**
    * Reads what the pointer stored at `at` of `holder` reaches; undefined for a NULL pointer or handle, an empty array
    * for a NULL counted one.
    */
-  readReached(plan: ReachPlan, holder: object, at: number, isNull: boolean, count: number, handles: DescribedHandle[]): unknown {
-    return this.#reading(() => this.#readReached(plan, holder, at, isNull, count, 0, handles));
+  readReached(plan: ReachPlan, holder: object, at: number, isNull: boolean, count: number, carried: Carried): unknown {
+    return this.#reading(() => this.#readReached(plan, holder, at, isNull, count, 0, carried));
   }
 
   #reading<Result>(start: () => Result): Result {
@@ -381,12 +403,12 @@ export class StructWriter {
   }
 
   /** The object standing for the struct at `offset` of `base`, its members read once the walk reaches it. */
-  #startStruct(base: object, view: DataView, offset: number, type: LaidOutType, depth: number, handles: DescribedHandle[]): Record<string, unknown> {
+  #startStruct(base: object, view: DataView, offset: number, type: LaidOutType, depth: number, carried: Carried): Record<string, unknown> {
     if (depth > depthLimit) {
       throw new Error(`The provider answered structs nested deeper than ${depthLimit} levels.`);
     }
     const into: Record<string, unknown> = {};
-    this.#reads.push({ base, view, offset, type, into, depth, handles });
+    this.#reads.push({ base, view, offset, type, into, depth, carried });
     return into;
   }
 
@@ -402,7 +424,7 @@ export class StructWriter {
   }
 
   #readMember(read: StructRead, plan: MemberPlan): unknown {
-    const { base, view, offset, depth, handles } = read;
+    const { base, view, offset, depth, carried } = read;
     const { member } = plan;
     const at = offset + member.offset;
     if (member.kind in scalarTypes) {
@@ -410,17 +432,17 @@ export class StructWriter {
     }
     switch (member.kind) {
       case DescribedKind.Struct:
-        return this.#startStruct(base, view, at, plan.target!, depth + 1, handles);
+        return this.#startStruct(base, view, at, plan.target!, depth + 1, carried);
       case DescribedKind.Value:
         return view.getUint32(at + valueKindOffset, littleEndian) === 0 ? undefined : readValue(base, at);
       default: {
         const count = plan.count === null ? 0 : sizeAt(view, offset + plan.count.offset);
-        return this.#readReached(plan, base, at, isNullAt(view, at), count, depth + 1, handles);
+        return this.#readReached(plan, base, at, isNullAt(view, at), count, depth + 1, carried);
       }
     }
   }
 
-  #readReached(plan: ReachPlan, holder: object, at: number, isNull: boolean, count: number, depth: number, handles: DescribedHandle[]): unknown {
+  #readReached(plan: ReachPlan, holder: object, at: number, isNull: boolean, count: number, depth: number, carried: Carried): unknown {
     const { kind, release, type } = plan.reached;
     switch (kind) {
       case DescribedKind.Text:
@@ -430,21 +452,23 @@ export class StructWriter {
       case DescribedKind.Bytes:
         return isNull || count === 0 ? new Uint8Array(0) : (koffi.decode(pointerAt(holder, at), 0, "uint8_t", count) as Uint8Array).slice();
       case DescribedKind.Pointer:
-        return isNull ? undefined : this.#readElements(plan, pointerAt(holder, at), 1, depth, handles)[0];
+        return isNull ? undefined : this.#readElements(plan, pointerAt(holder, at), 1, depth, carried)[0];
       case DescribedKind.Array:
-        return isNull || count === 0 ? [] : this.#readElements(plan, pointerAt(holder, at), count, depth, handles);
+        return isNull || count === 0 ? [] : this.#readElements(plan, pointerAt(holder, at), count, depth, carried);
       case DescribedKind.Handle:
-        return isNull ? undefined : this.#hold(pointerAt(holder, at), type!, release, handles);
+        return isNull ? undefined : this.#hold(pointerAt(holder, at), type!, release, carried);
+      case DescribedKind.Definition:
+        return isNull ? undefined : this.#bindCarried(pointerAt(holder, at), type!, carried);
       default:
         return undefined;
     }
   }
 
-  #readElements(plan: ReachPlan, pointer: object, count: number, depth: number, handles: DescribedHandle[]): unknown[] {
+  #readElements(plan: ReachPlan, pointer: object, count: number, depth: number, carried: Carried): unknown[] {
     const { element } = plan.reached;
     if (element === DescribedKind.Struct) {
       const view = viewOf(pointer, count * plan.stride);
-      return Array.from({ length: count }, (_, index) => this.#startStruct(pointer, view, index * plan.stride, plan.target!, depth, handles));
+      return Array.from({ length: count }, (_, index) => this.#startStruct(pointer, view, index * plan.stride, plan.target!, depth, carried));
     }
     if (element === DescribedKind.Value) {
       return Array.from({ length: count }, (_, index) => readValue(pointer, index * plan.stride));
@@ -452,10 +476,16 @@ export class StructWriter {
     return Array.from(koffi.decode(pointer, 0, scalarTypes[element]!, count) as ArrayLike<number | bigint>, (raw) => scalarFromC(element, raw));
   }
 
-  #hold(pointer: object, type: string, release: string | null, handles: DescribedHandle[]): DescribedHandle {
+  #hold(pointer: object, type: string, release: string | null, carried: Carried): DescribedHandle {
     const handle = this.context.holdings.hold(pointer, type, (held) => this.context.freeHandle(release, held));
-    handles.push(handle);
+    carried.handles.push(handle);
     return handle;
+  }
+
+  #bindCarried(pointer: object, type: string, carried: Carried): object {
+    const definition = this.context.bindCarried(type, pointer);
+    carried.definitions.push(definition);
+    return definition.bound;
   }
 }
 

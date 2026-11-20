@@ -4,8 +4,9 @@ import { Status } from "../core/constants.js";
 import { optionalTextForC, textForC } from "../core/text.js";
 import { FunctionKind } from "../standard/constants.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
-import { bindDefinition, type BoundDefinition } from "./description/definition.js";
+import { bindDescribed, type BoundDefinition } from "./description/definition.js";
 import { HandleHoldings } from "./description/handles.js";
+import type { CallTracking } from "./description/operations.js";
 import { readDescription } from "./description/reader.js";
 import type { LibraryFunction, LibraryService } from "./model.js";
 
@@ -57,6 +58,25 @@ interface LoadState {
   openToCalls: boolean;
   /** Whether the binary is still open, so a described definition, which its holders keep past the unload, may be called. */
   binaryOpen: boolean;
+  /** How many blocking calls are running on koffi's worker thread, inside the binary. */
+  running: number;
+  /** Called once `running` falls to 0, while the binary waits to be closed under the calls still running. */
+  whenIdle: (() => void) | undefined;
+}
+
+/** Counts a load's worker calls, calling its `whenIdle` once the last of them has returned. */
+function callTrackingOf(state: LoadState): CallTracking {
+  return {
+    begin: () => {
+      state.running += 1;
+    },
+    end: () => {
+      state.running -= 1;
+      if (state.running === 0) {
+        state.whenIdle?.();
+      }
+    },
+  };
 }
 
 /** What a description check answered: OK, or another status with the refusal saying why. */
@@ -225,11 +245,12 @@ function bindDescribedDefinitions(
     }
     bound.set(
       service.id,
-      bindDefinition({
+      bindDescribed({
         definition: definitions.get(service.id)!,
         description: readDescription(description),
         holdings: binding.holdings,
         isOpen: () => binding.state.binaryOpen,
+        calls: callTrackingOf(binding.state),
       }),
     );
   }
@@ -273,8 +294,9 @@ export interface BoundLibrary {
  * released, whichever ends last.
  *
  * @implNote A bytes answer and a described answer are copied into JavaScript memory and released before their call
- * settles, so nothing the library answered outlives a call but a handle, which the unload releases; and calls are
- * synchronous, so none is running when this decides.
+ * settles, so nothing the library answered outlives a call but a handle or an answer carrying a definition, which the
+ * unload releases. A blocking call may still be running on koffi's worker thread when this decides, so the binary is
+ * then closed to every new call at once and unmapped once the last running call has returned.
  */
 class BinaryClosing {
   readonly #awaiting = new Set<string>();
@@ -310,9 +332,18 @@ class BinaryClosing {
       this.holdings.releaseAll();
       this.#closed = true;
       this.state.binaryOpen = false;
-      this.library.unload();
-      this.onClosed();
+      if (this.state.running === 0) {
+        this.#unmap();
+      } else {
+        this.state.whenIdle = () => this.#unmap();
+      }
     }
+  }
+
+  #unmap(): void {
+    this.state.whenIdle = undefined;
+    this.library.unload();
+    this.onClosed();
   }
 
   #closeIfFree(): void {
@@ -353,7 +384,7 @@ export function bindLibrary(
     throw new Error(`The C library ${declaration.importName} is not at ${path}.`);
   }
   const library = koffi.load(path);
-  const state: LoadState = { openToCalls: true, binaryOpen: true };
+  const state: LoadState = { openToCalls: true, binaryOpen: true, running: 0, whenIdle: undefined };
   const holdings = new HandleHoldings();
   let services: Map<string, LibraryService>;
   let definitions: Map<string, LibraryDefinition>;

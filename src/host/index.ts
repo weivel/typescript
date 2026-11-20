@@ -10,7 +10,7 @@ export {
   type DescriptionCheckAnswer,
   type LibraryDefinition,
 } from "./libraries.js";
-export { boundDefinitionOf, type BoundDefinition } from "./description/definition.js";
+export { bindDefinition, blockingOperationsOf, boundDefinitionOf, type BoundDefinition } from "./description/definition.js";
 export type { DescribedHandle } from "./description/handles.js";
 export { DescribedCallError, OperationNotOfferedError, none } from "./description/outcome.js";
 export type { NativeValue } from "./description/values.js";

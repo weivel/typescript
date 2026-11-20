@@ -91,6 +91,7 @@ const pointerSized: readonly number[] = [
   DescribedKind.Handle,
   DescribedKind.Context,
   DescribedKind.Storage,
+  DescribedKind.Definition,
 ];
 
 /** A U32 called `size` at offset 0: the struct's own size, set by the binding and never answered. */
@@ -174,6 +175,24 @@ export class DescribedLayouts {
     } else if (element !== DescribedKind.Value) {
       throw this.#refuse(`${where} points at an element of kind ${element}, where a pointer points at a struct or a value`);
     }
+  }
+
+  /**
+   * Whether what a member or a parameter reaches can carry a definition: it is one, or a struct it holds by value or
+   * reaches through a pointer or an array holds one, however deep.
+   */
+  carriesDefinition(reached: Reached, looked: Set<string> = new Set()): boolean {
+    if (reached.kind === DescribedKind.Definition) {
+      return true;
+    }
+    const reachesStruct =
+      reached.kind === DescribedKind.Struct ||
+      ((reached.kind === DescribedKind.Pointer || reached.kind === DescribedKind.Array) && reached.element === DescribedKind.Struct);
+    if (!reachesStruct || looked.has(reached.type!)) {
+      return false;
+    }
+    looked.add(reached.type!);
+    return this.#laidOutType(reached.type).described.members.some((member) => this.carriesDefinition(member, looked));
   }
 
   /** @throws DescriptionLayoutError for a name the description holds no struct for. */

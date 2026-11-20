@@ -49,6 +49,10 @@ export interface Description {
   readonly types: readonly DescribedType[];
   readonly enums: readonly DescribedEnum[];
   readonly operations: readonly DescribedOperation[];
+  /** The operations that may block, in the description's order; none for a description whose `size` ends before them. */
+  readonly blocking: readonly string[];
+  /** The description of every definition a DEFINITION member or parameter names, each by its own `definition`. */
+  readonly definitions: readonly Description[];
 }
 
 function elementsOf(items: unknown, count: unknown, name: DescriptionStructName): DecodedFields[] {
@@ -113,16 +117,38 @@ function readOperation(fields: DecodedFields): DescribedOperation {
   };
 }
 
+const descriptionType = descriptionStructs.weivel_standard_description;
+const descriptionMembers = koffi.introspect(descriptionType).members!;
+const pointerSize = koffi.sizeof("void *");
+
+/** The field `name` of the description at `pointer`, or undefined when its answered `size` ends before the field does. */
+function fieldWithin(pointer: object, answeredSize: number, name: string): unknown {
+  const member = descriptionMembers[name]!;
+  return member.offset + koffi.sizeof(member.type) > answeredSize ? undefined : koffi.decode(pointer, member.offset, member.type);
+}
+
+/** The `count` pointers, each read as `type`, of the array at `items`; none for an array the description does not reach. */
+function arrayOfPointers<Item>(items: unknown, count: unknown, type: string): Item[] {
+  if (items === undefined || items === null || count === undefined) {
+    return [];
+  }
+  return Array.from({ length: Number(count) }, (_, index) => koffi.decode(items as object, index * pointerSize, type) as Item);
+}
+
 /**
- * Reads a description the standard's check has passed, so every array it names is as long as its count says and
- * every name it requires is set.
+ * Reads a description the standard's check has passed, so every array it names is as long as its count says, every
+ * name it requires is set, and its nested descriptions hold no cycle. A field past the `size` it answered is read as
+ * none, so a description of an earlier shape reads as blocking nothing and nesting nothing.
  */
 export function readDescription(pointer: object): Description {
-  const fields = koffi.decode(pointer, descriptionStructs.weivel_standard_description) as DecodedFields;
+  const answeredSize = koffi.decode(pointer, "uint32_t") as number;
+  const field = (name: string): unknown => fieldWithin(pointer, answeredSize, name);
   return {
-    definition: fields.definition as string,
-    types: elementsOf(fields.types, fields.type_count, "weivel_standard_described_type").map(readType),
-    enums: elementsOf(fields.enums, fields.enum_count, "weivel_standard_described_enum").map(readEnum),
-    operations: elementsOf(fields.operations, fields.operation_count, "weivel_standard_described_operation").map(readOperation),
+    definition: field("definition") as string,
+    types: elementsOf(field("types"), field("type_count"), "weivel_standard_described_type").map(readType),
+    enums: elementsOf(field("enums"), field("enum_count"), "weivel_standard_described_enum").map(readEnum),
+    operations: elementsOf(field("operations"), field("operation_count"), "weivel_standard_described_operation").map(readOperation),
+    blocking: arrayOfPointers<string>(field("blocking"), field("blocking_count"), "const char *"),
+    definitions: arrayOfPointers<object>(field("definitions"), field("definition_count"), "void *").map(readDescription),
   };
 }

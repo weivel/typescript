@@ -7,7 +7,7 @@ import { HandleHoldings } from "../../src/host/description/handles.ts";
 import { DescribedKind } from "../../src/host/description/layout.ts";
 import { DescribedLayouts, type LaidOutType } from "../../src/host/description/layouts.ts";
 import type { DescribedMember, DescribedType } from "../../src/host/description/reader.ts";
-import { StructWriter, viewOf } from "../../src/host/description/structs.ts";
+import { Carried, StructWriter, viewOf } from "../../src/host/description/structs.ts";
 import { readValue } from "../../src/host/description/values.ts";
 
 const pointerSize = koffi.sizeof("void *");
@@ -24,7 +24,7 @@ function member(name: string, offset: number, kind: number, type: string | null 
 }
 
 function laidOut(type: DescribedType): LaidOutType {
-  return new DescribedLayouts({ definition: type.name, types: [type], enums: [], operations: [] }).type(type.name);
+  return new DescribedLayouts({ definition: type.name, types: [type], enums: [], operations: [], blocking: [], definitions: [] }).type(type.name);
 }
 
 const linkType: DescribedType = {
@@ -37,7 +37,7 @@ const linkType: DescribedType = {
 function writer(type: LaidOutType): StructWriter {
   const arena = new CallArena();
   arenas.push(arena);
-  return new StructWriter({ layouts: new DescribedLayouts({ definition: type.described.name, types: [type.described], enums: [], operations: [] }), holdings: new HandleHoldings(), freeHandle: () => {} }, arena);
+  return new StructWriter({ layouts: new DescribedLayouts({ definition: type.described.name, types: [type.described], enums: [], operations: [], blocking: [], definitions: [] }), holdings: new HandleHoldings(), freeHandle: () => {}, bindCarried: () => { throw new Error("these structs carry no definition"); } }, arena);
 }
 
 /** A link with `below` links nested below it, each the one before's `next`. */
@@ -124,7 +124,7 @@ describe("structs nested in a provider's answer", () => {
     const type = laidOut(linkType);
     const read = (count: number) => {
       const first = nativeChain(count);
-      return writer(type).readStruct(first, viewOf(first, type.described.size), 0, type, []);
+      return writer(type).readStruct(first, viewOf(first, type.described.size), 0, type, new Carried());
     };
 
     expect(depthOf(read(1001))).toBe(1000);
@@ -136,7 +136,7 @@ describe("structs nested in a provider's answer", () => {
     const type = laidOut(linkType);
     const first = nativeChain(1001);
 
-    expect(depthOf(withLittleStackLeft(400, () => writer(type).readStruct(first, viewOf(first, type.described.size), 0, type, [])))).toBe(1000);
+    expect(depthOf(withLittleStackLeft(400, () => writer(type).readStruct(first, viewOf(first, type.described.size), 0, type, new Carried())))).toBe(1000);
   });
 });
 
