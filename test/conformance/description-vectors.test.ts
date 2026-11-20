@@ -151,3 +151,27 @@ describe("description/binding/an-operation-its-provider-does-not-offer-is-the-ca
     await witnessed("description/binding/an-operation-its-provider-does-not-offer-is-the-callers-mistake");
   });
 });
+
+describe("description/a-definition-described-without-its-nested-description-fails-the-load", () => {
+  it("refuses the load as the caller's mistake once the standard's check refuses a definition the walker does not describe", async () => {
+    await witnessed("description/a-definition-described-without-its-nested-description-fails-the-load");
+  });
+});
+
+describe("description/binding/a-blocking-operation-answers-as-any-does-and-is-reported-blocking", () => {
+  it("answers wait on the worker thread as a direct call answers, and reports wait blocking on the walker and nothing on the mirror", async () => {
+    await witnessed("description/binding/a-blocking-operation-answers-as-any-does-and-is-reported-blocking");
+  });
+});
+
+describe("description/binding/an-answer-carrying-a-definition-is-callable-until-released", () => {
+  it("binds the lent counter, calls it through its own context, and refuses it as the caller's mistake once its loan is released", async () => {
+    await witnessed("description/binding/an-answer-carrying-a-definition-is-callable-until-released");
+  });
+});
+
+describe("description/binding/a-nested-definitions-answers-are-released-exactly-once", () => {
+  it("frees the counter's refusal through its own release, once, and nothing more at the unload", async () => {
+    await witnessed("description/binding/a-nested-definitions-answers-are-released-exactly-once");
+  });
+});

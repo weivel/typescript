@@ -2,7 +2,7 @@ import koffi from "koffi";
 import { Status } from "../core/constants.js";
 import { RefusalError, type PluginContext } from "../context/index.js";
 import { EmbeddedNulError } from "../core/text.js";
-import { boundDefinitionOf, DescribedCallError, none, OperationNotOfferedError, OutOfMemoryError, type DescribedHandle, type LoadedLibrary } from "../host/index.js";
+import { blockingOperationsOf, boundDefinitionOf, DescribedCallError, none, OperationNotOfferedError, OutOfMemoryError, type DescribedHandle, type LoadedLibrary } from "../host/index.js";
 import { DescribedKind, DescribedRole } from "../host/description/layout.js";
 import { readDescription, type Description, type DescribedType } from "../host/description/reader.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
@@ -28,6 +28,7 @@ type Step =
   | { readonly holder: string; readonly get: string }
   | { readonly holder: string; readonly call: string; readonly operation: string; readonly with?: Record<string, unknown>; readonly keep?: string }
   | { readonly holder: string; readonly release: string }
+  | { readonly holder: string; readonly blocking: string }
   | { readonly holder: string; readonly readReleases: true }
   | { readonly unload: true };
 
@@ -44,6 +45,7 @@ const stepFields: Readonly<Record<string, readonly string[]>> = {
   get: ["holder", "get"],
   call: ["holder", "call", "operation", "with", "keep"],
   release: ["holder", "release"],
+  blocking: ["holder", "blocking"],
   readReleases: ["holder", "readReleases"],
   unload: ["unload"],
 };
@@ -98,15 +100,26 @@ function typeOf(description: Description, name: string | null): DescribedType {
   return type;
 }
 
+/** A definition an answer carried, kept under the name its step's `keep` gave, with the answer that carried it. */
+interface KeptDefinition {
+  readonly bound: unknown;
+  readonly description: Description;
+  release: () => void;
+}
+
 /**
  * Translates the JSON a vector writes into the values the bound object takes, and what it answers back into JSON, by
  * the kinds the description gives each one; a name the description does not give is handed on as written, for the
  * bound object to refuse.
  */
 class Translation {
+  /** The names the definitions this translation kept were kept under. */
+  readonly keptDefinitions: string[] = [];
+
   constructor(
     readonly description: Description,
     readonly kept: Map<string, DescribedHandle>,
+    readonly definitions: Map<string, KeptDefinition>,
   ) {}
 
   input(kind: number, element: number, type: string | null, json: Json | undefined): unknown {
@@ -160,6 +173,8 @@ class Translation {
         return (value as unknown[]).map((item) => this.answer(element, DescribedKind.None, type, item, keep)!);
       case DescribedKind.Handle:
         return this.#keep(value as DescribedHandle, keep);
+      case DescribedKind.Definition:
+        return this.#keepDefinition(value, type, keep);
       default:
         return value as Json;
     }
@@ -183,6 +198,19 @@ class Translation {
     return handle;
   }
 
+  #keepDefinition(bound: unknown, type: string | null, keep: string | undefined): Json {
+    if (keep === undefined) {
+      throw new Error("An operation answered a definition, and its step names no keep.");
+    }
+    const description = this.description.definitions.find((nested) => nested.definition === type);
+    if (description === undefined) {
+      throw new Error(`The description of ${this.description.definition} nests no description of ${type}.`);
+    }
+    this.definitions.set(keep, { bound, description, release: () => {} });
+    this.keptDefinitions.push(keep);
+    return { definition: keep };
+  }
+
   #keep(handle: DescribedHandle, keep: string | undefined): Json {
     if (keep === undefined) {
       throw new Error("An operation answered a handle, and its step names no keep.");
@@ -199,10 +227,16 @@ function isCallersMistake(error: unknown): boolean {
 
 type ReleaseCounts = Record<string, string>;
 
+/** A count's C field name as the vector spells it, `nested_refusals` as `nestedRefusals`. */
+function camelCaseOf(name: string): string {
+  return name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
 class DescriptionRun {
   readonly got: boolean[] = [];
   readonly calls: Record<string, Json>[] = [];
   readonly releases: ReleaseCounts[] = [];
+  readonly blocking: string[][] = [];
   loaded = false;
   callersMistake = false;
   readonly #declaration: LibraryDeclaration;
@@ -212,6 +246,7 @@ class DescriptionRun {
   readonly #descriptions = new Map<string, Description>();
   readonly #served: [string, unknown][] = [];
   readonly #kept = new Map<string, DescribedHandle>();
+  readonly #keptDefinitions = new Map<string, KeptDefinition>();
   #library: LoadedLibrary | undefined;
   #reportedFrom: { logs: number; sunk: number } | undefined;
 
@@ -256,7 +291,9 @@ class DescriptionRun {
     } else if ("call" in step) {
       this.calls.push(await this.#call(step.holder, step.call, step.operation, step.with ?? {}, step.keep));
     } else if ("release" in step) {
-      this.#keptHandle(step.release).release();
+      this.#release(step.release);
+    } else if ("blocking" in step) {
+      this.blocking.push(this.#blockingOf(step.holder, step.blocking));
     } else if ("readReleases" in step) {
       this.releases.push(await this.#readReleases(step.holder));
     } else {
@@ -304,14 +341,35 @@ class DescriptionRun {
     }
   }
 
-  async #call(holder: string, id: string, operation: string, input: Record<string, unknown>, keep: string | undefined): Promise<Record<string, Json>> {
+  /** The bound object and description a step names by `id`: a service the holder resolved, or a definition kept under that name. */
+  #callable(holder: string, id: string): { bound: unknown; description: Description } | undefined {
+    const kept = this.#keptDefinitions.get(id);
+    if (kept !== undefined) {
+      return kept;
+    }
     const description = this.#descriptions.get(id);
-    const bound = this.#resolved.get(`${holder} ${id}`) as Record<string, (input: unknown) => Promise<unknown>> | undefined;
-    if (description === undefined || bound === undefined) {
+    const bound = this.#resolved.get(`${holder} ${id}`);
+    return description === undefined || bound === undefined ? undefined : { bound, description };
+  }
+
+  #blockingOf(holder: string, id: string): string[] {
+    const callable = this.#callable(holder, id);
+    const blocking = callable === undefined ? undefined : blockingOperationsOf(callable.bound);
+    if (blocking === undefined) {
+      throw new Error(`${holder} holds no bound ${id} to read its blocking operations from.`);
+    }
+    return [...blocking];
+  }
+
+  async #call(holder: string, id: string, operation: string, input: Record<string, unknown>, keep: string | undefined): Promise<Record<string, Json>> {
+    const callable = this.#callable(holder, id);
+    if (callable === undefined) {
       throw new Error(`${holder} holds no described ${id} to call ${operation} on.`);
     }
+    const { description } = callable;
+    const bound = callable.bound as Record<string, (input: unknown) => Promise<unknown>>;
     const described = description.operations.find((candidate) => candidate.name === operation)!;
-    const translation = new Translation(description, this.#kept);
+    const translation = new Translation(description, this.#kept, this.#keptDefinitions);
     const arguments_ = Object.fromEntries(
       Object.entries(input).map(([name, json]) => {
         const parameter = described.parameters.find((candidate) => candidate.name === name);
@@ -325,6 +383,9 @@ class DescriptionRun {
       }
       const answerParameter = described.parameters.find((parameter) => parameter.role === DescribedRole.Answer)!;
       const answer = translation.answer(answerParameter.kind, answerParameter.element, answerParameter.type, answered, keep);
+      for (const name of translation.keptDefinitions) {
+        this.#keptDefinitions.get(name)!.release = () => (answered as { release(): void }).release();
+      }
       return answer === undefined ? { status: "ok" } : { status: "ok", answer };
     } catch (error) {
       if (isCallersMistake(error)) {
@@ -344,15 +405,18 @@ class DescriptionRun {
       throw new Error(`${holder} holds no definition answering count_releases.`);
     }
     const counts = (await (mirror[1] as { count_releases: () => Promise<Record<string, number | bigint>> }).count_releases()) ?? {};
-    return Object.fromEntries(Object.entries(counts).map(([kind, count]) => [kind, String(count)]));
+    return Object.fromEntries(Object.entries(counts).map(([kind, count]) => [camelCaseOf(kind), String(count)]));
   }
 
-  #keptHandle(name: string): DescribedHandle {
+  /** Lets go of the handle kept under `name`, or ends the answer that carried the definition kept under it. */
+  #release(name: string): void {
     const handle = this.#kept.get(name);
-    if (handle === undefined) {
-      throw new Error(`The vector releases the handle ${name}, which no earlier step kept.`);
+    const definition = this.#keptDefinitions.get(name);
+    if (handle === undefined && definition === undefined) {
+      throw new Error(`The vector releases ${name}, which no earlier step kept.`);
     }
-    return handle;
+    handle?.release();
+    definition?.release();
   }
 
   #contextOf(holder: string): PluginContext {
@@ -385,6 +449,7 @@ class DescriptionRun {
       sameObject: () => this.#served.length > 0 && this.#served.every(([id, object]) => this.#addressOf(object) === this.#addresses.get(id)),
       calls: () => [...this.calls],
       released: () => this.#released(),
+      blocking: () => this.blocking.map((names) => [...names]),
       reported: () => [
         ...this.world.logs.slice(this.#reportedFrom?.logs ?? 0).map((entry) => `${entry.source} ${entry.level} ${entry.message}`),
         ...this.world.sunk.slice(this.#reportedFrom?.sunk ?? 0).map((error) => (error instanceof Error ? error.message : String(error))),
