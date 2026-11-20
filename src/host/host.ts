@@ -79,6 +79,9 @@ function refuseMisdeclared(declaration: LibraryDeclaration): void {
     if (definition === undefined && service.functions.length > 0 && declaration.release === null) {
       throw new Error(`${declaration.importName} declares bytes functions and no release.`);
     }
+    if (service.description !== undefined && (definition === undefined || service.description === "")) {
+      throw new Error(`${declaration.importName}'s service ${service.id} declares a description, which only a definition's service declares, by a symbol.`);
+    }
   }
 }
 
@@ -303,8 +306,10 @@ export class Host {
   /**
    * Binds each bytes function of a C library's declaration, read by the standard or built by the caller, calls each
    * definition's symbol once, and registers each declared service under WEIVEL_HOST: a service of bytes functions as
-   * an object with one function per declared function, and a definition as a LibraryDefinition carrying the very
-   * address its symbol answered, registered awaiting releases.
+   * an object with one function per declared function, a definition that declares a description as the object its
+   * description binds (`BoundDefinition`), once the host's `descriptionCheck` has passed it, and any other definition
+   * as a LibraryDefinition carrying the very address its symbol answered, each definition registered awaiting
+   * releases.
    *
    * Unloading unregisters every service at once and refuses every later bytes call; the binary is closed once every
    * definition service has had every holding of it released, or once the host is destroyed.
@@ -312,8 +317,9 @@ export class Host {
    * @throws Error when a declaration the caller built names a kind other than bytes or definition, sets a definition
    * beside another function or gives one context facts, or names bytes functions and no release; an id is declared
    * twice or is already registered, by another live library, a plugin or the host itself; the library file is
-   * missing or lacks a symbol its declaration names; or a definition answers NULL or a struct smaller than
-   * `2 * sizeof(void *)`: each the caller's mistake, reported to no sink, the binary closed again. RefusalError when
+   * missing or lacks a symbol its declaration names; a definition answers NULL or a struct smaller than
+   * `2 * sizeof(void *)`; or a description is declared beside no definition, to a host given no `descriptionCheck`,
+   * answers NULL, is refused by the check or disagrees with this platform's layout: each the caller's mistake, reported to no sink, the binary closed again. RefusalError when
    * the core refuses one of its registrations, the load then undone as an unload.
    */
   loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
@@ -322,7 +328,7 @@ export class Host {
     }
     refuseMisdeclared(declaration);
     this.#refuseHeldIds(declaration);
-    const bound = bindLibrary(libraryPath, declaration, () => this.#openBinaries.delete(bound));
+    const bound = bindLibrary(libraryPath, declaration, () => this.#openBinaries.delete(bound), this.#options.descriptionCheck);
     this.#openBinaries.add(bound);
     const unregisters: (() => void)[] = [];
     const ids = [...bound.services.keys(), ...bound.definitions.keys()];
@@ -352,7 +358,7 @@ export class Host {
     for (const [id, definition] of bound.definitions) {
       bound.awaitRelease(id);
       try {
-        unregisters.push(this.#registerHostService({ id }, definition, {}, () => bound.released(id)));
+        unregisters.push(this.#registerHostService({ id }, bound.described.get(id) ?? definition, {}, () => bound.released(id)));
       } catch (error) {
         bound.released(id);
         throw error;

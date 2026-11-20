@@ -83,10 +83,48 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
   `registerHostService` throws for an id a live library declares. A load the core refuses partway is undone as an
   unload before it throws: what it registered is unregistered and its binary closed.
-- A definition service is registered as a frozen `LibraryDefinition`, `{ library, pointer }`: the import name it came
-  from and koffi's pointer to the very struct its symbol answered, never a copy. Translating the library's header
-  into koffi types is the consumer's. A definition that answers NULL, or a struct whose `size` is below
-  `2 * sizeof(void *)`, makes `loadLibrary` throw, as the caller's mistake, before anything is registered.
+- A definition service that declares no description is registered as a frozen `LibraryDefinition`,
+  `{ library, pointer }`: the import name it came from and koffi's pointer to the very struct its symbol answered,
+  never a copy. A definition that answers NULL, or a struct whose `size` is below `2 * sizeof(void *)`, makes
+  `loadLibrary` throw, as the caller's mistake, before anything is registered.
+- A definition service that declares a `description` is registered as its `BoundDefinition`, built from the
+  description alone (`src/host/description/`): no file of this package names a type of any library it binds. The
+  host never loads the standard, so its caller hands it the standard's check as `descriptionCheck`
+  (`(description) => standard.checkDescription(description)`); a host given none refuses a library that declares a
+  description. At the load each description is checked, then read, and every struct it names is built as a koffi
+  struct from its members in order, each member's offset and size and the struct's size compared with what koffi
+  computes, and a definition's operations laid among its members by offset; any difference, a kind this binding does
+  not know, or a parameter it cannot marshal refuses the load as the caller's mistake. The layouts and every
+  operation's prototype are built once there, never on a call. The one hand layout is `description.h`'s, beside the
+  standard module's layout of `value.h`, and both are checked against the standard's `layouts` program.
+- A `BoundDefinition` is a frozen object with no prototype holding one async method per operation that answers a
+  status, named as the operation; the releases are not methods, since the binding calls them. `boundDefinitionOf`
+  answers the `{ library, pointer }` it stands for. A method takes one object keyed by its input parameters' names,
+  a left-out input its kind's zero (0, NULL, or an empty array, bytes or texts): a number for a u32 or an f64; a number
+  that is a safe integer or a bigint for a u64, an i64 or a size, refused beyond the kind's range; a string or null for
+  a text; an array of strings and nulls for texts; a `Uint8Array` for bytes; an array for a counted array; a plain
+  object for a struct, held or pointed at, keyed by member name; a native value (null, boolean, finite number, string,
+  array, plain object) for a value tree, `undefined` standing for NONE only at its root; and a handle object for a
+  handle. Every `size` and every count the binding fills itself, and a caller writing one, or naming anything the
+  operation or struct does not take, is refused with a `TypeError` before the call, as is a value its kind does not
+  hold; a text holding a NUL is refused with an `EmbeddedNulError`.
+- A method resolves on OK with the answer copied into JavaScript values: a single answer parameter as its value, more
+  than one as an object keyed by parameter name, none as `undefined`. A struct answers every member but its leading
+  `size`, its counts, its context and storage, a NULL pointer, a NULL handle and a value of kind NONE; an integer of
+  64 bits answers as a number within 2^53 and a bigint beyond; a NULL counted array, texts or bytes answers empty. On
+  NONE it resolves with `none`, a symbol of the host module. On any other status it rejects with a
+  `DescribedCallError` carrying the `operation`, the `status`, and the refusal's `detail` and `fix` for REFUSED, both
+  null otherwise. Every answer and the refusal are released in a `finally` through the release the description names
+  for them: a struct or a tree through the answer handed in, a text through the text the provider wrote; an answer
+  naming no release, as a text the provider keeps, is released by no one.
+- A handle answer becomes a frozen object whose only member is `release()`, handed back as an input of an operation
+  taking that handle type. `release()` frees it once through the release its description names; a second call, or one
+  after the unload, does nothing, and a released handle handed as an input is refused with a `TypeError`. The unload
+  releases every handle of the library still held, while the binary is still open.
+- The call itself runs on the calling thread when the method is called; the promise is the method's shape, not a
+  worker. A holding outlives the unload, so a bound method stays callable until the binary closes, and rejects with a
+  `LibraryUnloadedError` from then on. An operation named `then` refuses the load, since it would make the bound
+  object a thenable that every `await` calls.
   `LoadedLibrary.definitions` hands its caller the same raw addresses, and that caller holds no registration of
   them, so its use keeps nothing open: each address dies with the binary.
 - A holder lets go of a revoked definition by calling the `release()` of the `revoked` event it was handed, once it
@@ -115,7 +153,9 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 `repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks
 them out there; locally, link or clone each checkout into `siblings/`. `scripts/native.ts` builds
 the core and the standard as shared libraries with CMake and copies them into `native/`, which git
-ignores. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
+ignores, and the tests' fixtures into `native/test/`: the core's `echo`, the standard's
+`weivel_standard_described`, which the description vectors bind, and the standard's `layouts` program, which the
+hand layouts are checked against. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
 
 Node runs the build scripts through its own type stripping, which needs Node 22.18 or later.
 

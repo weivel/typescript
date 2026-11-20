@@ -1,7 +1,7 @@
 import type { ActivationPlan, CoreOptions, EdgeSource, ListenerErrorSink, Manifest, Refusal } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
-import type { LibraryDefinition } from "./libraries.js";
+import type { DescriptionCheck, LibraryDefinition } from "./libraries.js";
 import type { Clock, Scheduler, TimerMoveListener } from "../timer/index.js";
 
 /**
@@ -38,6 +38,11 @@ export interface HostOptions {
   readonly pluginLog?: (manifest: Manifest) => Logger;
   /** Where an error thrown by code the layer calls goes; the wrapper's default by default. */
   readonly onListenerError?: ListenerErrorSink;
+  /**
+   * Checks each description a library declares before the host binds it: the standard's
+   * `(description) => standard.checkDescription(description)`. A host given none refuses a library that declares one.
+   */
+  readonly descriptionCheck?: DescriptionCheck;
 }
 
 /** A plugin the core registered for this host, with the entry its caller handed in. */

@@ -8,3 +8,8 @@ export function sharedLibraryFileName(name: string, platform: NodeJS.Platform = 
   }
   return `lib${name}.so`;
 }
+
+/** The file name CMake gives the executable `name` on `platform`. */
+export function executableFileName(name: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? `${name}.exe` : name;
+}

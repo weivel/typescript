@@ -1,6 +1,7 @@
 import { EdgeSource, type CoreOptions, type Manifest } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
 import { Host, isHostDestroyed, type HostDestroyed, type Plugin } from "../host/index.js";
+import { loadStandard } from "../standard/standard.js";
 import type { Clock, Scheduler } from "../timer/index.js";
 
 /** Where the driver finds the core; `native/` beside the package by default, as for the host. */
@@ -8,6 +9,10 @@ export interface DriverOptions {
   readonly coreLibraryPath?: string;
   /** A build of the core's `echo` test library, which a `library` vector loads. */
   readonly echoLibraryPath?: string;
+  /** A build of the standard's `described` test library, which a `description` vector loads. */
+  readonly describedLibraryPath?: string;
+  /** The standard whose check the host's descriptionCheck runs; `native/` beside the package by default. */
+  readonly standardLibraryPath?: string;
   /** Sees the host after the last step, before the driver destroys it. */
   readonly inspect?: (host: Host) => void;
 }
@@ -128,6 +133,7 @@ export class DriverWorld {
       pluginLog: (manifest: Manifest) => recordingLogger(manifest.importName, this.logs),
       onListenerError: (error) => void this.sunk.push(error),
       onTimerMove: (deadline) => void this.timerMoves.push([this.time.now(), deadline ?? null]),
+      descriptionCheck: (description) => loadStandard(options.standardLibraryPath).checkDescription(description),
     });
   }
 

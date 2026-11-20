@@ -1,5 +1,6 @@
 import { EdgeSource, type CoreOptions } from "../core/index.js";
 import { driveConsume } from "./consume.js";
+import { driveDescription } from "./description.js";
 import { driveLibrary } from "./library.js";
 import { driveLifecycle, lifecycleEdgeSource } from "./lifecycle.js";
 import { observe, type Observer } from "./expectations.js";
@@ -32,6 +33,11 @@ const opDrivers: Readonly<Record<string, OpDriver>> = {
     coreOptions: () => ({}),
     edgeSource: () => EdgeSource.Capabilities,
     drive: (vector, world, options) => driveLibrary(vector, world, options.echoLibraryPath),
+  },
+  description: {
+    coreOptions: () => ({}),
+    edgeSource: () => EdgeSource.Capabilities,
+    drive: (vector, world, options) => driveDescription(vector, world, options.describedLibraryPath),
   },
 };
 

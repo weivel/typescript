@@ -1,4 +1,4 @@
-export { sharedLibraryFileName } from "./library-file.js";
+export { executableFileName, sharedLibraryFileName } from "./library-file.js";
 export { EmbeddedNulError } from "./text.js";
 export * from "./constants.js";
 export {
