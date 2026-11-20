@@ -16,7 +16,6 @@ export {
 export {
   defaultBudgetPath,
   deviation,
-  isGateBounded,
   kitPlatformOf,
   loadLanguageBudget,
   noiseBoundsOf,

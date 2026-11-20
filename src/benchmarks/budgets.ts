@@ -133,14 +133,6 @@ export function ratioBound(budget: LanguageBudget, gate: RatioGate, nodePlatform
   return highest === undefined ? undefined : highest * budget.ratioMargin;
 }
 
-/**
- * Whether the kit bounds `gate` on any platform. A gate the kit bounds nowhere has not been measured in CI yet, so a run
- * reports its samples unjudged; once the kit bounds it anywhere, a platform with no line fails it.
- */
-export function isGateBounded(budget: LanguageBudget, gate: RatioGate): boolean {
-  return Object.keys(budget.highestMeasuredRatio[gate]).length > 0;
-}
-
 /** How many times slower `measured` ran than `reference`, by their medians. */
 export function pairRatio(measured: Summary, reference: Summary): number {
   return measured.median / reference.median;
