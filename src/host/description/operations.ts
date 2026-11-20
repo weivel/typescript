@@ -3,11 +3,11 @@ import { Status } from "../../core/constants.js";
 import { CallArena } from "./arena.js";
 import type { DescribedHandle } from "./handles.js";
 import { DescribedKind, DescribedRole } from "./layout.js";
-import { DescriptionLayoutError, type DescribedLayouts, type LaidOutType } from "./layouts.js";
+import { DescriptionLayoutError, type DescribedLayouts, type LaidOutType, type ReachPlan } from "./layouts.js";
 import { none, DescribedCallError } from "./outcome.js";
 import type { DescribedOperation, DescribedParameter } from "./reader.js";
-import { isScalarKind, scalarForC, scalarFromC, scalarTypes } from "./scalars.js";
-import { refuseUnknownNames, StructWriter, type StructContext } from "./structs.js";
+import { isScalarKind, scalarForC, scalarTypes } from "./scalars.js";
+import { littleEndian, refuseUnknownNames, scalarAt, StructWriter, type StructContext } from "./structs.js";
 import { readValue, valueTreeRootOffset, valueTreeSize } from "./values.js";
 
 type KoffiType = ReturnType<typeof koffi.opaque>;
@@ -62,32 +62,68 @@ export class ReleaseCall {
   }
 }
 
-/** An answer slot of one call: what the provider writes into, and how it is read and freed. */
+/**
+ * A block an operation hands its provider on every call, an answer or a refusal, allocated once at the bind and emptied
+ * before each call, its leading size set.
+ *
+ * @implNote One block per operation is enough because a call runs to its end on the calling thread, the provider
+ * calls back into nothing, and every answer is copied out and released in the call's `finally`.
+ */
+class FixedBlock {
+  readonly block: object;
+  readonly view: DataView;
+  readonly #bytes: Uint8Array;
+
+  constructor(
+    readonly byteSize: number,
+    readonly leadingSize: number | undefined,
+  ) {
+    this.block = koffi.alloc("uint8_t", byteSize) as object;
+    const memory = koffi.view(this.block, byteSize);
+    this.view = new DataView(memory);
+    this.#bytes = new Uint8Array(memory);
+  }
+
+  empty(): void {
+    this.#bytes.fill(0);
+    if (this.leadingSize !== undefined) {
+      this.view.setUint32(0, this.leadingSize, littleEndian);
+    }
+  }
+}
+
+const fixedBlocks = new FinalizationRegistry<readonly object[]>((blocks) => blocks.forEach((block) => koffi.free(block)));
+
+/** An answer slot of an operation: what the provider writes into, and how it is read and freed. */
 interface AnswerSlot {
   readonly parameter: DescribedParameter;
-  readonly block: object;
+  readonly plan: ReachPlan;
+  readonly fixed: FixedBlock;
   readonly type: LaidOutType | undefined;
 }
 
-/** The refusal of one call, read for its `detail` and `fix` and freed by the release it names. */
+/** The refusal of an operation, read for its `detail` and `fix` and freed by the release it names. */
 interface RefusalSlot {
   readonly parameter: DescribedParameter;
-  readonly block: object;
+  readonly fixed: FixedBlock;
   readonly type: LaidOutType;
 }
 
-interface PreparedCall {
-  readonly parameters: unknown[];
-  readonly answers: AnswerSlot[];
-  readonly refusal: RefusalSlot | undefined;
-}
+/** What one parameter is handed, worked out at the bind. */
+type ParameterStep =
+  | { readonly role: "context" }
+  | { readonly role: "answer"; readonly slot: AnswerSlot }
+  | { readonly role: "refusal"; readonly slot: RefusalSlot }
+  | { readonly role: "count"; readonly parameter: DescribedParameter }
+  | { readonly role: "scalar"; readonly parameter: DescribedParameter }
+  | { readonly role: "reached"; readonly parameter: DescribedParameter; readonly plan: ReachPlan; readonly countIndex: number };
 
 /** What a caller of the bound object's method hands it: one value per input parameter, keyed by its name. */
 export type OperationInput = Readonly<Record<string, unknown>>;
 
 /**
- * One operation of a described definition, its prototype built once at the bind and its parameters checked against
- * what this binding marshals.
+ * One operation of a described definition, its prototype, its parameter steps and its answer and refusal blocks
+ * built once at the bind, and its parameters checked against what this binding marshals.
  */
 export class OperationCall {
   readonly name: string;
@@ -96,6 +132,10 @@ export class OperationCall {
   readonly #operation: DescribedOperation;
   readonly #proto: KoffiType;
   readonly #counted: ReadonlySet<string>;
+  readonly #steps: readonly ParameterStep[];
+  readonly #answers: readonly AnswerSlot[];
+  readonly #refusal: RefusalSlot | undefined;
+  #calling = false;
 
   /** @throws DescriptionLayoutError for a parameter this binding cannot marshal, or a release that is no release. */
   constructor(
@@ -113,10 +153,47 @@ export class OperationCall {
     this.inputNames = operation.parameters
       .filter((parameter) => parameter.role === DescribedRole.Input && parameter.kind !== DescribedKind.Context && !this.#counted.has(parameter.name))
       .map((parameter) => parameter.name);
+    this.#steps = operation.parameters.map((parameter) => this.#stepOf(parameter));
+    this.#answers = this.#steps.flatMap((step) => (step.role === "answer" ? [step.slot] : []));
+    this.#refusal = this.#steps.flatMap((step) => (step.role === "refusal" ? [step.slot] : []))[0];
+    fixedBlocks.register(this, [...this.#answers.map((slot) => slot.fixed.block), ...(this.#refusal === undefined ? [] : [this.#refusal.fixed.block])]);
     this.#proto = koffi.proto(
       "int",
-      operation.parameters.map((parameter) => (parameter.role === DescribedRole.Input && isScalarKind(parameter.kind) ? scalarTypes[parameter.kind]! : "void *")),
+      this.#steps.map((step) => (step.role === "scalar" || step.role === "count" ? scalarTypes[step.parameter.kind]! : step.role === "reached" ? this.layouts.inputCallType(step.plan) : "void *")),
     );
+  }
+
+  #stepOf(parameter: DescribedParameter): ParameterStep {
+    if (parameter.kind === DescribedKind.Context) {
+      return { role: "context" };
+    }
+    if (parameter.role === DescribedRole.Answer) {
+      return { role: "answer", slot: this.#answerSlot(parameter) };
+    }
+    if (parameter.role === DescribedRole.Refusal) {
+      const type = this.layouts.type(parameter.type);
+      return { role: "refusal", slot: { parameter, type, fixed: new FixedBlock(type.described.size, sizeOf(type)) } };
+    }
+    if (this.#counted.has(parameter.name)) {
+      return { role: "count", parameter };
+    }
+    if (isScalarKind(parameter.kind)) {
+      return { role: "scalar", parameter };
+    }
+    const countIndex = parameter.count === null ? -1 : this.#operation.parameters.findIndex((candidate) => candidate.name === parameter.count);
+    return { role: "reached", parameter, plan: this.layouts.planOf(parameter), countIndex };
+  }
+
+  #answerSlot(parameter: DescribedParameter): AnswerSlot {
+    const plan = this.layouts.planOf(parameter);
+    if (parameter.kind === DescribedKind.Pointer) {
+      const type = this.layouts.type(parameter.type);
+      return { parameter, plan, type, fixed: new FixedBlock(type.described.size, sizeOf(type)) };
+    }
+    if (parameter.kind === DescribedKind.Value) {
+      return { parameter, plan, type: undefined, fixed: new FixedBlock(valueTreeSize, valueTreeSize) };
+    }
+    return { parameter, plan, type: undefined, fixed: new FixedBlock(Math.max(pointerSize, 8), undefined) };
   }
 
   #refuse(detail: string): DescriptionLayoutError {
@@ -171,86 +248,70 @@ export class OperationCall {
       );
     }
     refuseUnknownNames(input, this.inputNames, `${this.name}'s input`);
+    if (this.#calling) {
+      throw new Error(`${this.name} was called while a call of it was still running, which its answer blocks cannot hold.`);
+    }
+    this.#calling = true;
     const arena = new CallArena();
     try {
       const writer = new StructWriter(context, arena);
-      const prepared = this.#prepare(writer, input);
-      const status = koffi.call(this.functionPointer, this.#proto, ...prepared.parameters) as number;
-      return this.#outcome(writer, status, prepared);
+      const parameters = this.#prepare(writer, input);
+      const status = koffi.call(this.functionPointer, this.#proto, ...parameters) as number;
+      return this.#outcome(writer, status);
     } finally {
       arena.free();
+      this.#calling = false;
     }
   }
 
-  #prepare(writer: StructWriter, input: OperationInput): PreparedCall {
-    const counts = new Map<string, number>();
-    const answers: AnswerSlot[] = [];
-    let refusal: RefusalSlot | undefined;
-    const parameters = this.#operation.parameters.map((parameter) => {
-      const where = `${this.name}'s ${parameter.name}`;
-      if (parameter.kind === DescribedKind.Context) {
-        return this.context;
-      }
-      if (parameter.role === DescribedRole.Answer) {
-        const slot = this.#answerSlot(writer, parameter, where);
-        answers.push(slot);
-        return slot.block;
-      }
-      if (parameter.role === DescribedRole.Refusal) {
-        const type = this.layouts.type(parameter.type);
-        refusal = { parameter, type, block: writer.allocateStruct(type, undefined, where) };
-        return refusal.block;
-      }
-      if (this.#counted.has(parameter.name)) {
-        return 0;
-      }
-      if (isScalarKind(parameter.kind)) {
-        return scalarForC(parameter.kind, input[parameter.name], where);
-      }
-      const written = writer.writePointed(parameter.kind, parameter.element, parameter.type, input[parameter.name], where);
-      if (parameter.count !== null) {
-        counts.set(parameter.count, written.count);
-      }
-      return written.pointer;
-    });
-    this.#operation.parameters.forEach((parameter, index) => {
-      if (counts.has(parameter.name)) {
-        parameters[index] = counts.get(parameter.name)!;
+  #prepare(writer: StructWriter, input: OperationInput): unknown[] {
+    const parameters = new Array<unknown>(this.#steps.length);
+    this.#answers.forEach((slot) => slot.fixed.empty());
+    this.#refusal?.fixed.empty();
+    this.#steps.forEach((step, index) => {
+      switch (step.role) {
+        case "context":
+          parameters[index] = this.context;
+          return;
+        case "answer":
+        case "refusal":
+          parameters[index] = step.slot.fixed.block;
+          return;
+        case "count":
+          parameters[index] ??= 0;
+          return;
+        case "scalar":
+          parameters[index] = scalarForC(step.parameter.kind, input[step.parameter.name], `${this.name}'s ${step.parameter.name}`);
+          return;
+        case "reached": {
+          const written = writer.written(step.plan, input[step.parameter.name], `${this.name}'s ${step.parameter.name}`, true);
+          parameters[index] = written.value;
+          if (step.countIndex >= 0) {
+            parameters[step.countIndex] = written.count;
+          }
+        }
       }
     });
-    return { parameters, answers, refusal };
+    return parameters;
   }
 
-  #answerSlot(writer: StructWriter, parameter: DescribedParameter, where: string): AnswerSlot {
-    if (parameter.kind === DescribedKind.Pointer) {
-      const type = this.layouts.type(parameter.type);
-      return { parameter, type, block: writer.allocateStruct(type, undefined, where) };
-    }
-    if (parameter.kind === DescribedKind.Value) {
-      const block = writer.arena.allocate(valueTreeSize);
-      koffi.encode(block, 0, "uint32_t", valueTreeSize);
-      return { parameter, type: undefined, block };
-    }
-    return { parameter, type: undefined, block: writer.arena.allocate(Math.max(pointerSize, 8)) };
-  }
-
-  #outcome(writer: StructWriter, status: number, prepared: PreparedCall): unknown {
+  #outcome(writer: StructWriter, status: number): unknown {
     const handles: DescribedHandle[] = [];
     try {
       if (status === Status.Ok) {
-        return this.#answer(prepared.answers.map((slot) => [slot.parameter.name, this.#readAnswer(writer, slot, handles)] as const));
+        return this.#answer(this.#answers.map((slot) => [slot.parameter.name, this.#readAnswer(writer, slot, handles)] as const));
       }
       if (status === Status.None) {
         return none;
       }
-      throw this.#failure(status, prepared.refusal);
+      throw this.#failure(status, this.#refusal);
     } catch (error) {
       handles.forEach((handle) => handle.release());
       throw error;
     } finally {
-      prepared.answers.forEach((slot) => this.#releaseAnswer(slot));
-      if (prepared.refusal?.parameter.release != null) {
-        this.releases.get(prepared.refusal.parameter.release)!.free(prepared.refusal.block);
+      this.#answers.forEach((slot) => this.#releaseAnswer(slot));
+      if (this.#refusal?.parameter.release != null) {
+        this.releases.get(this.#refusal.parameter.release)!.free(this.#refusal.fixed.block);
       }
     }
   }
@@ -266,25 +327,24 @@ export class OperationCall {
   }
 
   #readAnswer(writer: StructWriter, slot: AnswerSlot, handles: DescribedHandle[]): unknown {
-    const { parameter, block } = slot;
+    const { parameter, fixed } = slot;
     if (slot.type !== undefined) {
-      return writer.readStruct(block, 0, slot.type, handles);
+      return writer.readStruct(fixed.block, fixed.view, 0, slot.type, handles);
     }
     if (parameter.kind === DescribedKind.Value) {
-      return readValue(block, valueTreeRootOffset);
+      return readValue(fixed.block, valueTreeRootOffset);
     }
     if (isScalarKind(parameter.kind)) {
-      return scalarFromC(parameter.kind, koffi.decode(block, 0, scalarTypes[parameter.kind]!));
+      return scalarAt(fixed.view, 0, parameter.kind);
     }
-    const pointer = koffi.decode(block, 0, "void *") as object | null;
-    return writer.readPointed(parameter.kind, parameter.element, parameter.type, parameter.release, pointer, 0, handles) ?? null;
+    return writer.readReached(slot.plan, fixed.block, 0, isNullPointer(fixed.view), 0, handles) ?? null;
   }
 
   /** A struct or tree answer is freed through what was handed in; a text answer naming a release is refused at the bind. */
   #releaseAnswer(slot: AnswerSlot): void {
-    const { parameter, block } = slot;
+    const { parameter } = slot;
     if (parameter.release !== null && parameter.kind !== DescribedKind.Handle) {
-      this.releases.get(parameter.release)!.free(block);
+      this.releases.get(parameter.release)!.free(slot.fixed.block);
     }
   }
 
@@ -292,7 +352,15 @@ export class OperationCall {
     if (status !== Status.Refused || refusal === undefined) {
       return new DescribedCallError(this.name, status, null, null);
     }
-    const text = (name: string): string | null => koffi.decode(refusal.block, refusal.type.members.get(name)!.offset, "const char *") as string | null;
+    const text = (name: string): string | null => koffi.decode(refusal.fixed.block, refusal.type.members.get(name)!.offset, "const char *") as string | null;
     return new DescribedCallError(this.name, status, text("detail"), text("fix"));
   }
+}
+
+function sizeOf(type: LaidOutType): number | undefined {
+  return type.leadingSize ? type.described.size : undefined;
+}
+
+function isNullPointer(view: DataView): boolean {
+  return pointerSize === 8 ? view.getBigUint64(0, littleEndian) === 0n : view.getUint32(0, littleEndian) === 0;
 }

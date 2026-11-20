@@ -97,7 +97,12 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   struct from its members in order, each member's offset and size and the struct's size compared with what koffi
   computes, and a definition's operations laid among its members by offset; any difference, a kind this binding does
   not know, or a parameter it cannot marshal refuses the load as the caller's mistake. The layouts and every
-  operation's prototype are built once there, never on a call. The one hand layout is `description.h`'s, beside the
+  operation's prototype are built once there, never on a call. Beside each struct's layout the load builds the struct
+  koffi writes from a JavaScript value, its texts, arrays and the structs they reach typed, so a call hands koffi one
+  checked image per input and koffi writes it during the call; only a value tree, and a struct reached through a
+  cycle of two or more structs, which no koffi struct can name, are written into the call's own memory. Each
+  operation keeps one answer block per answer and one refusal block, emptied before every call, and reads them through
+  a view of their memory, so a scalar costs no call into koffi. The one hand layout is `description.h`'s, beside the
   standard module's layout of `value.h`, and both are checked against the standard's `layouts` program.
 - A `BoundDefinition` is a frozen object with no prototype holding one async method per operation that answers a
   status, named as the operation; the releases are not methods, since the binding calls them. `boundDefinitionOf`
