@@ -46,8 +46,10 @@ export interface OperationTarget {
   readonly releases: ReadonlyMap<string, ReleaseCall>;
   readonly structs: StructContext;
   readonly calls: CallTracking;
-  /** Whether the binary is still open, so a provider's release may still be called. */
+  /** Whether the binary is still open to calls. */
   readonly isOpen: () => boolean;
+  /** Whether the binary is still mapped, so a provider's release may still be called. */
+  readonly canRelease: () => boolean;
 }
 
 /** How large a block an answer or a refusal is handed, and the size its leading `size` is set to, if it has one. */
@@ -392,17 +394,27 @@ export class OperationCall {
   }
 
   /**
-   * Gives an answer that carries a definition its own `release()`, kept among the library's holdings so its unload
-   * releases it too: releasing ends every definition it carried, then frees the answer through the release its
-   * description names.
+   * Gives an answer that carries a definition its own `release()`, kept among the holdings of what it was got through
+   * so their release releases it too: releasing ends every definition it carried, and once each has no call running
+   * and has released what was got through it, frees the answer through the release its description names.
    */
   #keep(answer: object, carried: Carried, blocks: CallBlocks, target: OperationTarget): object {
     const held = target.structs.holdings.keep(() => {
-      carried.definitions.forEach((definition) => definition.end());
-      if (target.isOpen()) {
-        this.#releaseAnswers(blocks, target);
-      }
-      blocks.answers.forEach((block) => block.free());
+      let ending = carried.definitions.length;
+      const releaseAnswer = (): void => {
+        if (target.canRelease()) {
+          this.#releaseAnswers(blocks, target);
+        }
+        blocks.answers.forEach((block) => block.free());
+      };
+      carried.definitions.forEach((definition) =>
+        definition.end(() => {
+          ending -= 1;
+          if (ending === 0) {
+            releaseAnswer();
+          }
+        }),
+      );
     });
     Object.defineProperty(answer, "release", { value: () => held.release() });
     carried.definitions.forEach((definition) => Object.freeze(definition.bound));

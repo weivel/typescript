@@ -58,6 +58,8 @@ interface LoadState {
   openToCalls: boolean;
   /** Whether the binary is still open, so a described definition, which its holders keep past the unload, may be called. */
   binaryOpen: boolean;
+  /** Whether the binary is still mapped, so a provider's release may still run after the binary closed to calls. */
+  mapped: boolean;
   /** How many blocking calls are running on koffi's worker thread, inside the binary. */
   running: number;
   /** Called once `running` falls to 0, while the binary waits to be closed under the calls still running. */
@@ -250,6 +252,7 @@ function bindDescribedDefinitions(
         description: readDescription(description),
         holdings: binding.holdings,
         isOpen: () => binding.state.binaryOpen,
+        canRelease: () => binding.state.mapped,
         calls: callTrackingOf(binding.state),
       }),
     );
@@ -342,6 +345,7 @@ class BinaryClosing {
 
   #unmap(): void {
     this.state.whenIdle = undefined;
+    this.state.mapped = false;
     this.library.unload();
     this.onClosed();
   }
@@ -384,7 +388,7 @@ export function bindLibrary(
     throw new Error(`The C library ${declaration.importName} is not at ${path}.`);
   }
   const library = koffi.load(path);
-  const state: LoadState = { openToCalls: true, binaryOpen: true, running: 0, whenIdle: undefined };
+  const state: LoadState = { openToCalls: true, binaryOpen: true, mapped: true, running: 0, whenIdle: undefined };
   const holdings = new HandleHoldings();
   let services: Map<string, LibraryService>;
   let definitions: Map<string, LibraryDefinition>;

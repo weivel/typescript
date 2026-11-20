@@ -10,10 +10,14 @@ import { depthLimit, readValue, valueImage, valueKindOffset, writeValue } from "
 /** Frees a handle of the type it is named for, through the release the description names. */
 export type HandleRelease = (release: string | null, pointer: object) => void;
 
-/** A definition an answer carried, bound for the caller, which lives until `end` is called with the answer's release. */
+/** A definition an answer carried, bound for the caller, which lives until its answer is released. */
 export interface CarriedDefinition {
   readonly bound: object;
-  end(): void;
+  /**
+   * Refuses every new call at once, and calls `then` once every call running on it has returned and everything got
+   * through it has been released.
+   */
+  end(then: () => void): void;
 }
 
 /** Binds the definition at `pointer`, of the struct `type` names, which one of the description's `definitions` describes. */
@@ -27,7 +31,7 @@ export class Carried {
   /** Releases every handle and ends every definition, as an answer that is never handed to its caller must. */
   releaseAll(): void {
     this.handles.forEach((handle) => handle.release());
-    this.definitions.forEach((definition) => definition.end());
+    this.definitions.forEach((definition) => definition.end(() => {}));
   }
 }
 

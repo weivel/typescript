@@ -37,17 +37,67 @@ export interface DefinitionToBind {
   readonly holdings: HandleHoldings;
   /** Whether the binary is still open, so a call may reach it. */
   readonly isOpen: () => boolean;
+  /** Whether the binary is still mapped, so a provider's release may run; `isOpen` when absent. */
+  readonly canRelease?: () => boolean;
   /** Counts the calls running on the worker thread; nothing counts them when absent. */
   readonly calls?: CallTracking;
 }
 
-/** What every definition one description binds shares with the library it came from. */
+/** What one bound definition shares with what it was got from: a library, or the answer that carried it. */
 interface BindingEnvironment {
   /** The import name of the library, or undefined for a definition a host bound itself. */
   readonly library: string | undefined;
+  /** Where every answer and handle got through the definition is held until it is released. */
   readonly holdings: HandleHoldings;
   readonly isOpen: () => boolean;
+  readonly canRelease: () => boolean;
   readonly calls: CallTracking;
+}
+
+/**
+ * What a definition an answer carried lives in, with everything got through it: its worker calls counted, each one
+ * counted in what it was got from too, and its answers and handles held, so the carrying answer is released only
+ * once all of that has ended.
+ */
+class CarriedScope implements CallTracking {
+  readonly holdings = new HandleHoldings();
+  live = true;
+  #running = 0;
+  #whenIdle: (() => void) | undefined;
+
+  constructor(readonly parent: CallTracking) {}
+
+  begin(): void {
+    this.#running += 1;
+    this.parent.begin();
+  }
+
+  end(): void {
+    this.#running -= 1;
+    if (this.#running === 0 && this.#whenIdle !== undefined) {
+      const idle = this.#whenIdle;
+      this.#whenIdle = undefined;
+      idle();
+    }
+    this.parent.end();
+  }
+
+  /**
+   * Refuses every new call at once; once every running call has returned, releases what was got through the
+   * definition, then calls `then`.
+   */
+  close(then: () => void): void {
+    this.live = false;
+    const finish = (): void => {
+      this.holdings.releaseAll();
+      then();
+    };
+    if (this.#running === 0) {
+      finish();
+    } else {
+      this.#whenIdle = finish;
+    }
+  }
 }
 
 const pointerSize = koffi.sizeof("void *");
@@ -73,28 +123,22 @@ const answerRelease = "release";
  * One description, bound: its layouts, one call per operation and the bindings of the definitions it nests, built
  * once, and every definition struct it describes bound through them.
  *
- * @implNote A definition an answer carries is bound once per address and handed out afresh per answer, so a provider
- * that lends the same definition on every call costs no prototype or layout after the first, and each answer's copy
- * still ends with that answer.
+ * @implNote A definition an answer carries reuses the description's layouts and prototypes, and has its functions,
+ * context and releases read afresh from its struct on every answer, since a provider may free a definition it lent
+ * and lend another at the same address.
  */
 class DescribedBinding {
   readonly layouts: DescribedLayouts;
   readonly blocking: readonly string[];
   readonly #description: Description;
-  readonly #environment: BindingEnvironment;
   readonly #calls: readonly OperationCall[];
   readonly #nested: ReadonlyMap<string, DescribedBinding>;
-  readonly #carriedTargets = new Map<bigint, ReadonlyMap<string, OperationTarget>>();
 
-  /**
-   * @throws DescriptionLayoutError for a description whose layout this platform disagrees with, that names what this
-   * binding cannot marshal, or that nests a definition it does not describe.
-   */
-  constructor(description: Description, environment: BindingEnvironment) {
+  /** @throws DescriptionLayoutError for a description whose layout this platform disagrees with, or that names what this binding cannot marshal. */
+  constructor(description: Description) {
     this.#description = description;
-    this.#environment = environment;
     this.layouts = new DescribedLayouts(description);
-    this.#nested = new Map(description.definitions.map((nested) => [nested.definition, new DescribedBinding(nested, environment)] as const));
+    this.#nested = new Map(description.definitions.map((nested) => [nested.definition, new DescribedBinding(nested)] as const));
     const blocking = new Set(description.blocking);
     const statusOperations = description.operations.filter((operation) => operation.returns === DescribedReturn.Status);
     this.#calls = statusOperations.map((operation) => {
@@ -105,7 +149,6 @@ class DescribedBinding {
     });
     this.blocking = Object.freeze(this.#calls.filter((call) => call.blocking).map((call) => call.name));
     this.#calls.filter((call) => call.keepsAnswers).forEach((call) => this.#refuseHiddenRelease(call));
-    this.#refuseUndescribedDefinitions();
   }
 
   get operationNames(): readonly string[] {
@@ -122,15 +165,6 @@ class DescribedBinding {
       throw this.#refuse(`it names ${name} as a definition and nests no description of it`);
     }
     return nested;
-  }
-
-  #refuseUndescribedDefinitions(): void {
-    for (const type of this.#description.types) {
-      type.members.filter((member) => member.kind === DescribedKind.Definition).forEach((member) => this.#nestedBinding(member.type));
-    }
-    for (const operation of this.#description.operations) {
-      operation.parameters.filter((parameter) => parameter.kind === DescribedKind.Definition).forEach((parameter) => this.#nestedBinding(parameter.type));
-    }
   }
 
   /** The names an answer of `call` is read with at its top, where its own `release()` is given it. */
@@ -166,7 +200,7 @@ class DescribedBinding {
   }
 
   /** Every operation's target for the definition struct at `pointer`: its functions, its context and its releases. */
-  #targetsOf(pointer: object): ReadonlyMap<string, OperationTarget> {
+  #targetsOf(pointer: object, environment: BindingEnvironment): ReadonlyMap<string, OperationTarget> {
     const answeredSize = this.#answeredSizeOf(pointer);
     const context = contextOf(pointer, answeredSize, this.layouts.type(this.#description.definition));
     const releases = new Map(
@@ -174,28 +208,28 @@ class DescribedBinding {
         .filter((operation) => operation.returns === DescribedReturn.Nothing)
         .map((operation) => [operation.name, new ReleaseCall(functionAt(pointer, operation.offset, answeredSize), context)] as const),
     );
-    const { holdings, isOpen, calls } = this.#environment;
+    const { holdings, isOpen, canRelease, calls } = environment;
     const structs: StructContext = {
       layouts: this.layouts,
       holdings,
       freeHandle: (release, held) => {
-        if (release !== null && isOpen()) {
+        if (release !== null && canRelease()) {
           releases.get(release)?.free(held);
         }
       },
-      bindCarried: (type, carried) => this.#nestedBinding(type).bindCarried(carried),
+      bindCarried: (type, carried) => this.#nestedBinding(type).bindCarried(carried, environment),
     };
     const offsets = new Map(this.#description.operations.map((operation) => [operation.name, operation.offset] as const));
     return new Map(
       this.#calls.map((call) => [
         call.name,
-        { symbol: `${this.#description.definition}.${call.name}`, functionPointer: functionAt(pointer, offsets.get(call.name)!, answeredSize), context, releases, structs, calls, isOpen },
+        { symbol: `${this.#description.definition}.${call.name}`, functionPointer: functionAt(pointer, offsets.get(call.name)!, answeredSize), context, releases, structs, calls, isOpen, canRelease },
       ] as const),
     );
   }
 
   /** A bound object of one async method per operation, each refused once `refusal` answers an error. */
-  #boundObject(pointer: object, targets: ReadonlyMap<string, OperationTarget>, refusal: (symbol: string) => Error | undefined): Record<string, unknown> {
+  #boundObject(pointer: object, targets: ReadonlyMap<string, OperationTarget>, library: string | undefined, refusal: (symbol: string) => Error | undefined): Record<string, unknown> {
     const bound = Object.create(null) as Record<string, unknown>;
     for (const call of this.#calls) {
       const target = targets.get(call.name)!;
@@ -211,43 +245,35 @@ class DescribedBinding {
       });
     }
     blockingNames.set(bound, this.blocking);
-    if (this.#environment.library !== undefined) {
-      boundAddresses.set(bound, Object.freeze({ library: this.#environment.library, pointer }));
+    if (library !== undefined) {
+      boundAddresses.set(bound, Object.freeze({ library, pointer }));
     }
     return bound;
   }
 
-  #unloadedRefusal(symbol: string): Error | undefined {
-    return this.#environment.isOpen() ? undefined : new LibraryUnloadedError(symbol);
-  }
-
   /** The definition struct at `pointer` as its frozen bound object. */
-  bind(pointer: object): BoundDefinition {
-    const bound = this.#boundObject(pointer, this.#targetsOf(pointer), (symbol) => this.#unloadedRefusal(symbol));
-    return Object.freeze(bound) as BoundDefinition;
+  bind(pointer: object, environment: BindingEnvironment): BoundDefinition {
+    const refusal = (symbol: string): Error | undefined => (environment.isOpen() ? undefined : new LibraryUnloadedError(symbol));
+    return Object.freeze(this.#boundObject(pointer, this.#targetsOf(pointer, environment), environment.library, refusal)) as BoundDefinition;
   }
 
   /**
-   * The definition struct at `pointer`, which an answer carried, as a bound object living until `end` is called; the
-   * answer freezes it once it has been given its own `release()`.
+   * The definition struct at `pointer`, which an answer got through `parent` carried, as a bound object living, with
+   * everything got through it, until `end`; the answer freezes it once it has been given its own `release()`.
    */
-  bindCarried(pointer: object): CarriedDefinition {
-    const address = koffi.address(pointer);
-    let targets = this.#carriedTargets.get(address);
-    if (targets === undefined) {
-      targets = this.#targetsOf(pointer);
-      this.#carriedTargets.set(address, targets);
-    }
-    let live = true;
+  bindCarried(pointer: object, parent: BindingEnvironment): CarriedDefinition {
+    const scope = new CarriedScope(parent.calls);
+    const environment: BindingEnvironment = { ...parent, holdings: scope.holdings, calls: scope };
     const definition = this.#description.definition;
-    const bound = this.#boundObject(pointer, targets, (symbol) =>
-      live ? this.#unloadedRefusal(symbol) : new TypeError(`${definition} was carried by an answer that has been released, and lives only as long as that answer.`),
-    );
+    const refusal = (symbol: string): Error | undefined => {
+      if (!scope.live) {
+        return new TypeError(`${definition} was carried by an answer that has been released, and lives only as long as that answer.`);
+      }
+      return parent.isOpen() ? undefined : new LibraryUnloadedError(symbol);
+    };
     return {
-      bound,
-      end: () => {
-        live = false;
-      },
+      bound: this.#boundObject(pointer, this.#targetsOf(pointer, environment), parent.library, refusal),
+      end: (then) => scope.close(then),
     };
   }
 }
@@ -264,14 +290,18 @@ export function bindDescribed(bind: DefinitionToBind): BoundDefinition {
     library: bind.definition.library,
     holdings: bind.holdings,
     isOpen: bind.isOpen,
+    canRelease: bind.canRelease ?? bind.isOpen,
     calls: bind.calls ?? noTracking,
   };
-  return new DescribedBinding(bind.description, environment).bind(bind.definition.pointer);
+  return new DescribedBinding(bind.description).bind(bind.definition.pointer, environment);
 }
 
 /**
  * Binds a definition a host got some other way than from a library's service, as the binding binds one a library
  * serves: one async method per operation, a blocking one run on koffi's worker thread.
+ *
+ * No library stands behind the object, so nothing is released for its caller: every handle it answers, and every
+ * answer carrying a definition, lives until the caller calls its `release()`.
  *
  * @param pointer the definition's struct, which must outlive the bound object.
  * @param description a `const weivel_standard_description *` that weivel_standard_description_check has passed; it is
@@ -279,6 +309,12 @@ export function bindDescribed(bind: DefinitionToBind): BoundDefinition {
  * @throws DescriptionLayoutError, the caller's mistake, for a description this platform or this binding cannot bind.
  */
 export function bindDefinition(pointer: object, description: object): BoundDefinition {
-  const environment: BindingEnvironment = { library: undefined, holdings: new HandleHoldings(), isOpen: () => true, calls: noTracking };
-  return new DescribedBinding(readDescription(description), environment).bind(pointer);
+  const environment: BindingEnvironment = {
+    library: undefined,
+    holdings: new HandleHoldings(),
+    isOpen: () => true,
+    canRelease: () => true,
+    calls: noTracking,
+  };
+  return new DescribedBinding(readDescription(description)).bind(pointer, environment);
 }
