@@ -608,7 +608,8 @@ const handWaitOperation = koffi.proto("int32_t", ["void *", "uint64_t", "void *"
  * a worker round trip is a thread hand-off and an event-loop wake, about 40 microseconds there, against a direct call
  * of about one. The bound is five times the highest seen, wide enough for a platform whose direct call is cheaper or
  * whose hand-off is dearer, and still catching a round trip grown by an order of magnitude; the kit sets the real
- * bound per platform once CI has measured it.
+ * bound per platform once CI has measured it. This constant is replaced by a `blocking-call` row in the kit's
+ * `benchmarks/typescript.txt`, read as the other gates' rows are, once that row lands.
  */
 export const provisionalBlockingCallBound = 175;
 
