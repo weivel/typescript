@@ -93,10 +93,12 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   description alone (`src/host/description/`): no file of this package names a type of any library it binds. The
   host never loads the standard, so its caller hands it the standard's check as `descriptionCheck`
   (`(description) => standard.checkDescription(description)`); a host given none refuses a library that declares a
-  description. At the load each description is checked, then read, and every struct it names is built as a koffi
+  description, and a check answering OUT_OF_MEMORY makes `loadLibrary` throw an `OutOfMemoryError`, never the
+  caller's mistake. At the load each description is checked, then read, and every struct it names is built as a koffi
   struct from its members in order, each member's offset and size and the struct's size compared with what koffi
-  computes, and a definition's operations laid among its members by offset; any difference, a kind this binding does
-  not know, or a parameter it cannot marshal refuses the load as the caller's mistake. The layouts and every
+  computes, and a definition's operations laid among its members by offset; any difference, or a kind this binding
+  does not know, refuses the load as the caller's mistake. Which kinds each role takes, the shape of a refusal and a
+  release, and where the context lies are the check's rules, which this binding does not repeat. The layouts and every
   operation's prototype are built once there, never on a call. Beside each struct's layout the load builds the struct
   koffi writes from a JavaScript value, its texts, arrays and the structs they reach typed, so a call hands koffi one
   checked image per input and koffi writes it during the call; only a value tree, and a struct reached through a
@@ -114,7 +116,9 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   array, plain object) for a value tree, `undefined` standing for NONE only at its root; and a handle object for a
   handle. Every `size` and every count the binding fills itself, and a caller writing one, or naming anything the
   operation or struct does not take, is refused with a `TypeError` before the call, as is a value its kind does not
-  hold; a text holding a NUL is refused with an `EmbeddedNulError`.
+  hold; a text holding a NUL is refused with an `EmbeddedNulError`. Structs nest at most 1000 levels below the one
+  a call takes, `WEIVEL_STANDARD_VALUE_DEPTH_LIMIT` as for a value tree, and a deeper input is refused with a
+  `TypeError` before the call.
 - A method resolves on OK with the answer copied into JavaScript values: a single answer parameter as its value, more
   than one as an object keyed by parameter name, none as `undefined`. A struct answers every member but its leading
   `size`, its counts, its context and storage, a NULL pointer, a NULL handle and a value of kind NONE; an integer of
@@ -123,7 +127,8 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   `DescribedCallError` carrying the `operation`, the `status`, and the refusal's `detail` and `fix` for REFUSED, both
   null otherwise. Every answer and the refusal are released in a `finally` through the release the description names
   for them, a struct or a tree through the answer handed in; an answer naming no release, as a text the provider
-  keeps, is released by no one.
+  keeps, is released by no one. An answer nesting structs deeper than 1000 levels, or a value tree holding a key twice
+  in one record, is the provider's fault and rejects with an `Error`, its answer released all the same.
 - A handle answer becomes a frozen object whose only member is `release()`, handed back as an input of an operation
   taking that handle type. `release()` frees it once through the release its description names; a second call, or one
   after the unload, does nothing, and a released handle handed as an input is refused with a `TypeError`. The unload
@@ -133,9 +138,10 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   `LibraryUnloadedError` from then on. An operation named `then` refuses the load, since it would make the bound
   object a thenable that every `await` calls.
 - An operation whose pointer lies past the `size` its definition answered, or is NULL there, is not offered: its
-  method rejects with an `Error` saying the provider does not offer it. An element of a pointer or an array this
-  binding does not know, or a struct element the description does not describe, refuses the load. Until the kit rules
-  which pointer a text's release is handed, a text answer that names a release refuses the load.
+  method rejects with an `OperationNotOfferedError`, the caller's mistake, before anything is called. An element of a
+  pointer or an array this binding does not know, or a struct element the description does not describe, refuses
+  the load. The walks that write and read structs keep their own stack rather than recursing, so the depth limit is
+  reached on any stack.
 - A holder lets go of a revoked definition by calling the `release()` of the `revoked` event it was handed, once it
   has released everything the definition gave it; for any other revocation `release()` does nothing. A holding a
   watch made counts the same. The event object grants the release: whoever the plugin hands it to can end the

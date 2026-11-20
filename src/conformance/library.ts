@@ -1,6 +1,6 @@
 import koffi from "koffi";
 import { RefusalError, type PluginContext } from "../context/index.js";
-import type { LibraryDefinition, LibraryService, LoadedLibrary } from "../host/index.js";
+import { OutOfMemoryError, type LibraryDefinition, type LibraryService, type LoadedLibrary } from "../host/index.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
 import { refuseUnknownKeys, type Observer } from "./expectations.js";
@@ -342,7 +342,7 @@ class LibraryRun {
       this.#library = alive(this.world.host.loadLibrary(this.#declaration, this.echoLibraryPath));
       this.loaded = true;
     } catch (error) {
-      this.callersMistake = !(error instanceof RefusalError);
+      this.callersMistake = !(error instanceof RefusalError || error instanceof OutOfMemoryError);
       return;
     }
     if (this.readsAddresses) {

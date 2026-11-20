@@ -2,13 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import koffi from "koffi";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EmbeddedNulError } from "../../src/core/index.ts";
+import { EmbeddedNulError, Status } from "../../src/core/index.ts";
 import { RefusalError } from "../../src/context/index.ts";
 import {
   boundDefinitionOf,
   DescribedCallError,
   LibraryUnloadedError,
   none,
+  OutOfMemoryError,
   type BoundDefinition,
   type DescribedHandle,
   type LoadedLibrary,
@@ -161,6 +162,14 @@ describe("loading a described library", () => {
 
     expect(error).not.toBeInstanceOf(RefusalError);
     expect((error as Error).message).toMatch(/was refused by the check, status 2 at types\[1\]\.members\[3\]\.count/);
+  });
+
+  it("fails the load as out of memory, never as the caller's mistake, when the check answers OUT_OF_MEMORY", () => {
+    const world = createHostWorld({}, { descriptionCheck: () => ({ status: Status.OutOfMemory, refusal: undefined }) });
+    const error = loadError("library.json", world);
+
+    expect(error).toBeInstanceOf(OutOfMemoryError);
+    expect((error as Error).message).toMatch(/check of described's description described_\w+_description ran out of memory/);
   });
 
   it("refuses a described library on a host given no check", () => {

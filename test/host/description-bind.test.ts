@@ -4,7 +4,7 @@ import koffi from "koffi";
 import { afterEach, describe, expect, it } from "vitest";
 import { bindDefinition, type BoundDefinition } from "../../src/host/description/definition.ts";
 import { HandleHoldings } from "../../src/host/description/handles.ts";
-import { DescribedKind, DescribedReturn, DescribedRole } from "../../src/host/description/layout.ts";
+import { DescribedKind, DescribedRole } from "../../src/host/description/layout.ts";
 import { readDescription, type Description } from "../../src/host/description/reader.ts";
 import { describedLibraryPath } from "./world.ts";
 
@@ -97,16 +97,6 @@ describe("binding a description", () => {
     member.type = "nothing_described";
 
     expect(() => bind(pointer, description)).toThrow(/names nothing_described as a struct and describes none/);
-  });
-
-  it("refuses a text answer that names a release, until the kit rules which pointer the release is handed", () => {
-    const { pointer, description } = mirror();
-    const parameter = description.operations
-      .flatMap((operation) => operation.parameters)
-      .find((candidate) => candidate.kind === DescribedKind.Text && candidate.role === DescribedRole.Answer)!;
-    parameter.release = description.operations.find((operation) => operation.returns === DescribedReturn.Nothing)!.name;
-
-    expect(() => bind(pointer, description)).toThrow(/freed by \w+, and which pointer a text's release is handed is not yet ruled/);
   });
 
   it("offers no operation past the size its definition answered, and every one before it", async () => {

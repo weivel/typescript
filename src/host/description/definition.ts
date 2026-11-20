@@ -2,7 +2,7 @@ import koffi from "koffi";
 import { LibraryUnloadedError, type LibraryDefinition } from "../libraries.js";
 import type { HandleHoldings } from "./handles.js";
 import { DescribedKind, DescribedReturn } from "./layout.js";
-import { DescribedLayouts, DescriptionLayoutError } from "./layouts.js";
+import { DescribedLayouts, DescriptionLayoutError, type LaidOutType } from "./layouts.js";
 import { OperationCall, ReleaseCall, type OperationInput } from "./operations.js";
 import type { Description } from "./reader.js";
 import type { StructContext } from "./structs.js";
@@ -28,12 +28,13 @@ export interface DefinitionToBind {
   readonly isOpen: () => boolean;
 }
 
-function contextOf(pointer: object, description: Description, layouts: DescribedLayouts): object | null {
-  const member = layouts.type(description.definition).described.members.find((candidate) => candidate.kind === DescribedKind.Context);
-  return member === undefined ? null : (koffi.decode(pointer, member.offset, "void *") as object | null);
-}
-
 const pointerSize = koffi.sizeof("void *");
+
+/** The context the definition's struct holds, read only inside the `answeredSize` bytes its library answered; null for none. */
+export function contextOf(pointer: object, answeredSize: number, definition: LaidOutType): object | null {
+  const member = definition.described.members.find((candidate) => candidate.kind === DescribedKind.Context);
+  return member === undefined || member.offset + pointerSize > answeredSize ? null : (koffi.decode(pointer, member.offset, "void *") as object | null);
+}
 
 /**
  * The operation at `offset`, or null when the provider does not offer it: the struct it answered ends before it, as
@@ -68,11 +69,11 @@ export function bindDefinition(bind: DefinitionToBind): BoundDefinition {
   const { definition, description, holdings } = bind;
   const layouts = new DescribedLayouts(description);
   const answeredSize = answeredSizeOf(definition, description, layouts);
-  const context = contextOf(definition.pointer, description, layouts);
+  const context = contextOf(definition.pointer, answeredSize, layouts.type(description.definition));
   const releases = new Map(
     description.operations
       .filter((operation) => operation.returns === DescribedReturn.Nothing)
-      .map((operation) => [operation.name, new ReleaseCall(operation, functionAt(definition.pointer, operation.offset, answeredSize), context)] as const),
+      .map((operation) => [operation.name, new ReleaseCall(functionAt(definition.pointer, operation.offset, answeredSize), context)] as const),
   );
   const structContext: StructContext = {
     layouts,

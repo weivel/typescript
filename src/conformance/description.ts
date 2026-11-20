@@ -1,7 +1,8 @@
 import koffi from "koffi";
 import { Status } from "../core/constants.js";
 import { RefusalError, type PluginContext } from "../context/index.js";
-import { boundDefinitionOf, DescribedCallError, none, type DescribedHandle, type LoadedLibrary } from "../host/index.js";
+import { EmbeddedNulError } from "../core/text.js";
+import { boundDefinitionOf, DescribedCallError, none, OperationNotOfferedError, OutOfMemoryError, type DescribedHandle, type LoadedLibrary } from "../host/index.js";
 import { DescribedKind, DescribedRole } from "../host/description/layout.js";
 import { readDescription, type Description, type DescribedType } from "../host/description/reader.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
@@ -99,7 +100,8 @@ function typeOf(description: Description, name: string | null): DescribedType {
 
 /**
  * Translates the JSON a vector writes into the values the bound object takes, and what it answers back into JSON, by
- * the kinds the description gives each one.
+ * the kinds the description gives each one; a name the description does not give is handed on as written, for the
+ * bound object to refuse.
  */
 class Translation {
   constructor(
@@ -135,10 +137,7 @@ class Translation {
     return Object.fromEntries(
       Object.entries(json).map(([name, value]) => {
         const member = described.members.find((candidate) => candidate.name === name);
-        if (member === undefined) {
-          throw new Error(`The vector writes ${described.name}.${name}, which its description does not hold.`);
-        }
-        return [name, this.input(member.kind, member.element, member.type, value)];
+        return [name, member === undefined ? value : this.input(member.kind, member.element, member.type, value)];
       }),
     );
   }
@@ -191,6 +190,11 @@ class Translation {
     this.kept.set(keep, handle);
     return { handle: keep };
   }
+}
+
+/** Whether a bound object refused a call as its caller's mistake, before calling anything. */
+function isCallersMistake(error: unknown): boolean {
+  return error instanceof TypeError || error instanceof EmbeddedNulError || error instanceof OperationNotOfferedError;
 }
 
 type ReleaseCounts = Record<string, string>;
@@ -265,7 +269,7 @@ class DescriptionRun {
       this.#library = alive(this.world.host.loadLibrary(this.#declaration, this.describedLibraryPath));
       this.loaded = true;
     } catch (error) {
-      this.callersMistake = !(error instanceof RefusalError);
+      this.callersMistake = !(error instanceof RefusalError || error instanceof OutOfMemoryError);
       return;
     }
     this.#readBinary();
@@ -310,8 +314,8 @@ class DescriptionRun {
     const translation = new Translation(description, this.#kept);
     const arguments_ = Object.fromEntries(
       Object.entries(input).map(([name, json]) => {
-        const parameter = described.parameters.find((candidate) => candidate.name === name)!;
-        return [name, translation.input(parameter.kind, parameter.element, parameter.type, json as Json)];
+        const parameter = described.parameters.find((candidate) => candidate.name === name);
+        return [name, parameter === undefined ? json : translation.input(parameter.kind, parameter.element, parameter.type, json as Json)];
       }),
     );
     try {
@@ -323,6 +327,9 @@ class DescriptionRun {
       const answer = translation.answer(answerParameter.kind, answerParameter.element, answerParameter.type, answered, keep);
       return answer === undefined ? { status: "ok" } : { status: "ok", answer };
     } catch (error) {
+      if (isCallersMistake(error)) {
+        return { callersMistake: true };
+      }
       if (!(error instanceof DescribedCallError)) {
         throw error;
       }

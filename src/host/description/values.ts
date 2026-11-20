@@ -10,8 +10,8 @@ export type NativeValue = null | boolean | number | string | readonly NativeValu
 
 const ValueKind = { None: 0, Null: 1, Boolean: 2, Number: 3, Text: 4, List: 5, Record: 6 } as const;
 
-/** WEIVEL_STANDARD_VALUE_DEPTH_LIMIT. */
-const depthLimit = 1000;
+/** WEIVEL_STANDARD_VALUE_DEPTH_LIMIT, which structs nest no deeper than either. */
+export const depthLimit = 1000;
 
 const node = standardStructs.weivel_standard_value;
 const entry = standardStructs.weivel_standard_entry;
@@ -145,8 +145,8 @@ function readTextOf(base: object, textOffset: number, lengthOffset: number): str
 /**
  * Reads the weivel_standard_value at `offset` of `base` as a NativeValue, or undefined for NONE at the root.
  *
- * @throws Error for a node a provider may not answer: NONE below the root, a kind this binding does not know, or a
- * tree deeper than the standard's limit.
+ * @throws Error for a node a provider may not answer: NONE below the root, a kind this binding does not know, a
+ * record holding a key twice, or a tree deeper than the standard's limit.
  */
 export function readValue(base: object, offset: number, depth = 0): NativeValue | undefined {
   if (depth > depthLimit) {
@@ -197,6 +197,9 @@ function readRecord(base: object, offset: number, depth: number): Record<string,
   for (let index = 0; block !== null && index < count; index += 1) {
     const at = index * entrySize;
     const key = readTextOf(block, at + entryField.key, at + entryField.keyLength);
+    if (Object.hasOwn(record, key)) {
+      throw new Error(`The provider answered a record holding the key ${JSON.stringify(key)} twice, where value.h holds each key once.`);
+    }
     Object.defineProperty(record, key, { value: readValue(block, at + entryField.value, depth + 1), enumerable: true, writable: true, configurable: true });
   }
   return record;

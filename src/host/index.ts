@@ -4,6 +4,7 @@ export { hostDestroyed, isHostDestroyed } from "./model.js";
 export {
   LibraryCallError,
   LibraryUnloadedError,
+  OutOfMemoryError,
   definitionSizeFloor,
   type DescriptionCheck,
   type DescriptionCheckAnswer,
@@ -11,7 +12,7 @@ export {
 } from "./libraries.js";
 export { boundDefinitionOf, type BoundDefinition } from "./description/definition.js";
 export type { DescribedHandle } from "./description/handles.js";
-export { DescribedCallError, none } from "./description/outcome.js";
+export { DescribedCallError, OperationNotOfferedError, none } from "./description/outcome.js";
 export type { NativeValue } from "./description/values.js";
 export type {
   ActivationOutcome,

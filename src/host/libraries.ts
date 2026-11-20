@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import koffi from "koffi";
+import { Status } from "../core/constants.js";
 import { optionalTextForC, textForC } from "../core/text.js";
 import { FunctionKind } from "../standard/constants.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
@@ -40,6 +41,14 @@ export class LibraryUnloadedError extends Error {
     super(`${symbol} belongs to a C library that has been unloaded.`);
     this.name = "LibraryUnloadedError";
     this.symbol = symbol;
+  }
+}
+
+/** A load that ran out of memory where the platform could not go on, as a description check answering OUT_OF_MEMORY: never the caller's mistake. */
+export class OutOfMemoryError extends Error {
+  constructor(what: string) {
+    super(`${what} ran out of memory.`);
+    this.name = "OutOfMemoryError";
   }
 }
 
@@ -185,7 +194,7 @@ type DescriptionSymbol = () => object | null;
  * Binds every described definition from its description, after the check has passed it.
  *
  * @throws Error, the caller's mistake, for a description symbol that is not exported or answers NULL, one the check
- * refuses, or one whose layout this platform disagrees with.
+ * refuses, or one whose layout this platform disagrees with; OutOfMemoryError for a check answering OUT_OF_MEMORY.
  */
 function bindDescribedDefinitions(
   library: koffi.IKoffiLib,
@@ -207,6 +216,9 @@ function bindDescribedDefinitions(
       throw new Error(`${declaration.importName}'s description ${service.description} answered NULL.`);
     }
     const checked = check(description);
+    if (checked.status === Status.OutOfMemory) {
+      throw new OutOfMemoryError(`The check of ${declaration.importName}'s description ${service.description}`);
+    }
     if (checked.status !== statusOk) {
       const where = checked.refusal === undefined ? "" : ` at ${checked.refusal.path === "" ? "its root" : checked.refusal.path}: ${checked.refusal.detail}`;
       throw new Error(`${declaration.importName}'s description ${service.description} was refused by the check, status ${checked.status}${where}.`);
@@ -327,7 +339,8 @@ function refuseTextsCutShort(path: string, declaration: LibraryDeclaration): voi
  * @param onClosed called once the binary is closed.
  * @throws Error when the file is missing, does not export a symbol the declaration names, a definition answers NULL or
  * a struct smaller than `2 * sizeof(void *)`, or a description is declared with no `check`, answers NULL, is refused
- * by the check or disagrees with this platform's layout; the binary is closed again before it throws.
+ * by the check or disagrees with this platform's layout; OutOfMemoryError for a check answering OUT_OF_MEMORY; the
+ * binary is closed again before it throws.
  */
 export function bindLibrary(
   path: string,

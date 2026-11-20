@@ -319,8 +319,10 @@ export class Host {
    * twice or is already registered, by another live library, a plugin or the host itself; the library file is
    * missing or lacks a symbol its declaration names; a definition answers NULL or a struct smaller than
    * `2 * sizeof(void *)`; or a description is declared beside no definition, to a host given no `descriptionCheck`,
-   * answers NULL, is refused by the check or disagrees with this platform's layout: each the caller's mistake, reported to no sink, the binary closed again. RefusalError when
-   * the core refuses one of its registrations, the load then undone as an unload.
+   * answers NULL, is refused by the check or disagrees with this platform's layout: each the caller's mistake,
+   * reported to no sink, the binary closed again. OutOfMemoryError when the description check answers OUT_OF_MEMORY,
+   * the binary closed again. RefusalError when the core refuses one of its registrations, the load then undone as an
+   * unload.
    */
   loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
     if (this.#destroyed) {
