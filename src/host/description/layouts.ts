@@ -71,6 +71,32 @@ export class DescribedLayouts {
     this.#description = description;
     description.types.forEach((type) => this.#byName.set(type.name, type));
     description.types.forEach((type) => this.#build(type.name));
+    description.types.forEach((type) =>
+      type.members.forEach((member) => this.refuseUnreachableElement(member.kind, member.element, member.type, `its member ${type.name}.${member.name}`)),
+    );
+  }
+
+  /**
+   * Resolves what a POINTER or an ARRAY reaches, so a description whose element this binding cannot marshal is refused
+   * whole at the bind rather than at the first call reaching it.
+   *
+   * @throws DescriptionLayoutError for an element of a kind this binding does not know or cannot hold there, or a
+   * struct element the description does not describe.
+   */
+  refuseUnreachableElement(kind: number, element: number, type: string | null, where: string): void {
+    if (kind !== DescribedKind.Pointer && kind !== DescribedKind.Array) {
+      return;
+    }
+    if (element < DescribedKind.U32 || element > lastKnownKind) {
+      throw this.#refuse(`${where} reaches elements of kind ${element}, which this binding does not know`);
+    }
+    if (kind === DescribedKind.Array) {
+      this.elementSize(element, type);
+    } else if (element === DescribedKind.Struct) {
+      this.type(type);
+    } else if (element !== DescribedKind.Value) {
+      throw this.#refuse(`${where} points at an element of kind ${element}, where a pointer points at a struct or a value`);
+    }
   }
 
   /** @throws DescriptionLayoutError for a name the description holds no struct for. */

@@ -11,7 +11,7 @@ async function witnessed(id: string): Promise<void> {
   const seen = await witnessLayerVector(vector, { coreLibraryPath, describedLibraryPath, standardLibraryPath });
 
   expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
-  expect(seen.observed).toEqual(vector.then);
+  expect(seen.observed).toStrictEqual(vector.then);
 }
 
 describe("description/a-checked-description-registers-the-providers-own-pointer", () => {
