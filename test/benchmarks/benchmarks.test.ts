@@ -3,6 +3,7 @@ import { join } from "node:path";
 import koffi from "koffi";
 import { describe, expect, it, vi } from "vitest";
 import {
+  benchmarkBlockingCall,
   benchmarkControlCall,
   benchmarkDefinitionCall,
   benchmarkDescribedCall,
@@ -12,6 +13,7 @@ import {
   loadLanguageBudget,
   noiseBoundsOf,
   pairRatio,
+  provisionalBlockingCallBound,
   ratioBound,
   readLanguageBudget,
   roundOrder,
@@ -313,6 +315,14 @@ describe("a described operation through the generic binding", () => {
     expect([...bound.values()]).toEqual([callsPerPath(briefSampling), callsPerPath(briefSampling), callsPerPath(briefSampling)]);
     expect(counting.calls.get("bareCall")).toEqual(bound);
     expect(counting.calls.has("echoCall")).toBe(false);
+  });
+});
+
+describe("a blocking described operation through the generic binding", () => {
+  it("costs at most its provisional multiple of the same operation called directly on the calling thread", { timeout }, async () => {
+    const ratio = reportFfiPair("blocking-call", await benchmarkBlockingCall(describedOptions));
+
+    expect(ratio).toBeLessThanOrEqual(provisionalBlockingCallBound);
   });
 });
 
