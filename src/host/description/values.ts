@@ -29,6 +29,8 @@ const field = {
   entries: koffi.offsetof(node, "entries"),
   count: koffi.offsetof(node, "count"),
 };
+/** Where a node's kind lies within it, so a reader can tell NONE apart without a call into koffi. */
+export const valueKindOffset = field.kind;
 const entryField = {
   key: koffi.offsetof(entry, "key"),
   keyLength: koffi.offsetof(entry, "key_length"),
@@ -51,13 +53,28 @@ function writeText(arena: CallArena, text: string): { pointer: object | null; le
   return { pointer: arena.text(text), length: encoder.encode(text).length };
 }
 
+/** One weivel_standard_value as koffi encodes it, every pointer an address in the call's arena. */
+export interface ValueNodeImage {
+  readonly kind: number;
+  readonly boolean: number;
+  readonly number: number;
+  readonly text: object | null;
+  readonly length: number;
+  readonly items: object | null;
+  readonly entries: object | null;
+  readonly count: number;
+}
+
+const emptyNode: ValueNodeImage = { kind: ValueKind.None, boolean: 0, number: 0, text: null, length: 0, items: null, entries: null, count: 0 };
+
 /**
- * Writes `value` as one weivel_standard_value at `offset` of `base`, every node below it in the arena.
+ * `value` as one weivel_standard_value koffi encodes in a single call, every node below it written into the arena;
+ * undefined for NONE at the root.
  *
  * @throws TypeError for a value no node holds: undefined below the root, a number that is not finite, a bigint, or
  * any object but an array or a plain one; and for a tree deeper than the standard's limit.
  */
-export function writeValue(arena: CallArena, base: object, offset: number, value: unknown, depth = 0): void {
+export function valueImage(arena: CallArena, value: unknown, depth = 0): ValueNodeImage | undefined {
   if (depth > depthLimit) {
     throw new TypeError(`A value tree nests deeper than ${depthLimit} below its root.`);
   }
@@ -65,58 +82,55 @@ export function writeValue(arena: CallArena, base: object, offset: number, value
     if (depth > 0) {
       throw new TypeError("A value tree holds undefined below its root, where NONE may not stand.");
     }
-    return;
+    return undefined;
   }
   if (value === null) {
-    koffi.encode(base, offset + field.kind, "uint32_t", ValueKind.Null);
-  } else if (typeof value === "boolean") {
-    koffi.encode(base, offset + field.kind, "uint32_t", ValueKind.Boolean);
-    koffi.encode(base, offset + field.boolean, "uint32_t", value ? 1 : 0);
-  } else if (typeof value === "number") {
-    writeNumber(base, offset, value);
-  } else if (typeof value === "string") {
+    return { ...emptyNode, kind: ValueKind.Null };
+  }
+  if (typeof value === "boolean") {
+    return { ...emptyNode, kind: ValueKind.Boolean, boolean: value ? 1 : 0 };
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`A value tree's number is finite, and ${value} is not.`);
+    }
+    return { ...emptyNode, kind: ValueKind.Number, number: value };
+  }
+  if (typeof value === "string") {
     const text = writeText(arena, value);
-    koffi.encode(base, offset + field.kind, "uint32_t", ValueKind.Text);
-    koffi.encode(base, offset + field.text, "void *", text.pointer);
-    koffi.encode(base, offset + field.length, "size_t", text.length);
-  } else if (Array.isArray(value)) {
-    writeList(arena, base, offset, value, depth);
-  } else if (isPlainObject(value)) {
-    writeRecord(arena, base, offset, value, depth);
-  } else {
-    throw new TypeError(`A value tree holds null, booleans, numbers, strings, arrays and plain objects, not ${typeof value}.`);
+    return { ...emptyNode, kind: ValueKind.Text, text: text.pointer, length: text.length };
+  }
+  if (Array.isArray(value)) {
+    return listImage(arena, value, depth);
+  }
+  if (isPlainObject(value)) {
+    return recordImage(arena, value, depth);
+  }
+  throw new TypeError(`A value tree holds null, booleans, numbers, strings, arrays and plain objects, not ${typeof value}.`);
+}
+
+/** Writes `value` as one weivel_standard_value at `offset` of `base`, every node below it in the arena; NONE writes nothing. */
+export function writeValue(arena: CallArena, base: object, offset: number, value: unknown, depth = 0): void {
+  const image = valueImage(arena, value, depth);
+  if (image !== undefined) {
+    koffi.encode(base, offset, node, image);
   }
 }
 
-function writeNumber(base: object, offset: number, value: number): void {
-  if (!Number.isFinite(value)) {
-    throw new TypeError(`A value tree's number is finite, and ${value} is not.`);
-  }
-  koffi.encode(base, offset + field.kind, "uint32_t", ValueKind.Number);
-  koffi.encode(base, offset + field.number, "double", value);
-}
-
-function writeList(arena: CallArena, base: object, offset: number, items: readonly unknown[], depth: number): void {
+function listImage(arena: CallArena, items: readonly unknown[], depth: number): ValueNodeImage {
   const block = items.length === 0 ? null : arena.allocate(items.length * valueNodeSize);
   items.forEach((item, index) => writeValue(arena, block!, index * valueNodeSize, item, depth + 1));
-  koffi.encode(base, offset + field.kind, "uint32_t", ValueKind.List);
-  koffi.encode(base, offset + field.items, "void *", block);
-  koffi.encode(base, offset + field.count, "size_t", items.length);
+  return { ...emptyNode, kind: ValueKind.List, items: block, count: items.length };
 }
 
-function writeRecord(arena: CallArena, base: object, offset: number, record: Record<string, unknown>, depth: number): void {
+function recordImage(arena: CallArena, record: Record<string, unknown>, depth: number): ValueNodeImage {
   const entries = Object.entries(record);
   const block = entries.length === 0 ? null : arena.allocate(entries.length * entrySize);
   entries.forEach(([key, value], index) => {
-    const at = index * entrySize;
     const text = writeText(arena, key);
-    koffi.encode(block!, at + entryField.key, "void *", text.pointer);
-    koffi.encode(block!, at + entryField.keyLength, "size_t", text.length);
-    writeValue(arena, block!, at + entryField.value, value, depth + 1);
+    koffi.encode(block!, index * entrySize, entry, { key: text.pointer, key_length: text.length, value: valueImage(arena, value, depth + 1) ?? emptyNode });
   });
-  koffi.encode(base, offset + field.kind, "uint32_t", ValueKind.Record);
-  koffi.encode(base, offset + field.entries, "void *", block);
-  koffi.encode(base, offset + field.count, "size_t", entries.length);
+  return { ...emptyNode, kind: ValueKind.Record, entries: block, count: entries.length };
 }
 
 function readTextOf(base: object, textOffset: number, lengthOffset: number): string {

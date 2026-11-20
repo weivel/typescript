@@ -1,13 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import koffi from "koffi";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   benchmarkControlCall,
   benchmarkDefinitionCall,
+  benchmarkDescribedCall,
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   callsPerPath,
+  isGateBounded,
   loadLanguageBudget,
   noiseBoundsOf,
   pairRatio,
@@ -26,8 +28,9 @@ import {
   type Summary,
 } from "../../src/benchmarks/index.ts";
 import { loadCoreLibrary, type CoreLibrary } from "../../src/core/index.ts";
-import { echoLibraryPath } from "../host/world.ts";
+import { describedLibraryPath, echoLibraryPath } from "../host/world.ts";
 import { coreLibraryPath } from "../real-core.ts";
+import { standardLibraryPath } from "../real-standard.ts";
 
 const libraries = { coreLibraryPath };
 const kitBudgetPath = join(import.meta.dirname, "..", "..", "siblings", "conformance", "benchmarks", "typescript.txt");
@@ -254,6 +257,70 @@ describe("a C library definition called through the definition a consumer resolv
   });
 });
 
+const describedOptions = { ...libraries, echoLibraryPath, describedLibraryPath, standardLibraryPath };
+
+/** Every koffi.call made while each measured path runs, by the path's name and the address of the function called. */
+function countingKoffiCalls(): { decorate: PathDecorator; calls: Map<string, Map<bigint, number>> } {
+  const calls = new Map<string, Map<bigint, number>>();
+  let running: string | undefined;
+  const call = koffi.call.bind(koffi) as (...parameters: unknown[]) => unknown;
+  vi.spyOn(koffi, "call").mockImplementation(((target: unknown, ...rest: unknown[]) => {
+    if (running !== undefined) {
+      const byAddress = calls.get(running) ?? new Map<bigint, number>();
+      const address = koffi.address(target);
+      byAddress.set(address, (byAddress.get(address) ?? 0) + 1);
+      calls.set(running, byAddress);
+    }
+    return call(target, ...rest);
+  }) as typeof koffi.call);
+  const decorate: PathDecorator = (name, path): MeasuredPath => (index) => {
+    running = name;
+    try {
+      return path(index);
+    } finally {
+      running = undefined;
+    }
+  };
+  return { decorate, calls };
+}
+
+describe("a described operation through the generic binding", () => {
+  it("costs at most its budgeted multiple of the same operation through a binding written by hand", { timeout }, async () => {
+    const summaries = await benchmarkDescribedCall(describedOptions);
+    report("described-call-echo", summaries.echoCall);
+    const ratio = reportFfiPair("described-call", summaries);
+    if (!isGateBounded(budget, "describedCall")) {
+      console.log(`weivel-benchmark described-call runner=${process.platform}-${process.arch} unbounded: the pinned kit bounds described-call nowhere yet`);
+      return;
+    }
+
+    expect(ratio).toBeLessThanOrEqual(boundHere("describedCall"));
+  });
+
+  it.runIf(isGateBounded(budget, "describedCall"))("is over its budget once it is slowed past it", { timeout }, async () => {
+    const options = { ...describedOptions, sampling: briefSampling };
+    const added = slowdownPast(boundHere("describedCall"), await benchmarkDescribedCall(options));
+    const slowed = await benchmarkDescribedCall({ ...options, decorate: slowing("weivelCall", added) });
+
+    expect(slowed.roundRatio.median).toBeGreaterThan(boundHere("describedCall"));
+  });
+
+  it("calls reflect and releases its answer and its refusal once for every call of both paths, through the same functions", { timeout }, async () => {
+    const counting = countingKoffiCalls();
+    try {
+      await benchmarkDescribedCall({ ...describedOptions, sampling: briefSampling, decorate: counting.decorate });
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    const bound = counting.calls.get("weivelCall")!;
+    expect(bound.size).toBe(3);
+    expect([...bound.values()]).toEqual([callsPerPath(briefSampling), callsPerPath(briefSampling), callsPerPath(briefSampling)]);
+    expect(counting.calls.get("bareCall")).toEqual(bound);
+    expect(counting.calls.has("echoCall")).toBe(false);
+  });
+});
+
 describe("the measuring", () => {
   it("starts each round one path later, so no path always follows the same one", () => {
     expect([0, 1, 2, 3].map((round) => roundOrder(["a", "b", "c"], round).join(""))).toEqual(["abc", "bca", "cab", "abc"]);
@@ -288,9 +355,11 @@ describe("the bounds", () => {
   it("are the kit's: each gate's highest measured ratio on the kit's platform, times the kit's margin", () => {
     const margin = kitLines.get("ratio-margin")!;
     const nodePlatforms = { linux: "linux", win32: "windows", darwin: "macos" } as const;
-    for (const [gate, kitGate] of [["controlCall", "control-call"], ["libraryCall", "library-call"]] as const) {
+    const gates = [["controlCall", "control-call"], ["libraryCall", "library-call"], ["describedCall", "described-call"]] as const;
+    for (const [gate, kitGate] of gates) {
       for (const [nodePlatform, kitPlatform] of Object.entries(nodePlatforms)) {
-        expect(ratioBound(budget, gate, nodePlatform)).toBe(kitLines.get(`${kitGate} ${kitPlatform}`)! * margin);
+        const line = kitLines.get(`${kitGate} ${kitPlatform}`);
+        expect(ratioBound(budget, gate, nodePlatform)).toBe(line === undefined ? undefined : line * margin);
       }
       expect(ratioBound(budget, gate, "freebsd")).toBeUndefined();
     }
@@ -304,6 +373,20 @@ describe("the bounds", () => {
       });
     }
     expect(noiseBoundsOf(budget, "freebsd")).toBeUndefined();
+  });
+
+  it("leave a gate the kit bounds nowhere unjudged, and fail a platform the kit leaves out of a gate it bounds", () => {
+    const text = readFileSync(kitBudgetPath, "utf8").replace(/^described-call .*$/gm, "");
+    const unset = readLanguageBudget(text);
+    const linuxOnly = readLanguageBudget(`${text}
+described-call linux 2
+`);
+
+    expect(isGateBounded(unset, "describedCall")).toBe(false);
+    expect(isGateBounded(linuxOnly, "describedCall")).toBe(true);
+    expect(ratioBound(linuxOnly, "describedCall", "linux")).toBe(2 * kitLines.get("ratio-margin")!);
+    expect(ratioBound(linuxOnly, "describedCall", "win32")).toBeUndefined();
+    expect(isGateBounded(unset, "libraryCall")).toBe(true);
   });
 
   it("judge a same-language pair by the noise margin of the platform they run on", () => {
