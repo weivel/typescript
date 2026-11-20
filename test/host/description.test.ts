@@ -139,6 +139,8 @@ describe("a described definition loaded through the host", () => {
 
     expect(struct).not.toHaveBeenCalled();
     expect(proto).not.toHaveBeenCalled();
+    koffi.proto("void", []);
+    expect(proto).toHaveBeenCalledTimes(1);
   });
 });
 
