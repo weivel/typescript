@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { sharedLibraryFileName } from "../src/core/library-file.ts";
+import { executableFileName, sharedLibraryFileName } from "../src/core/library-file.ts";
 
 interface BuiltTarget {
   target: string;
-  outputName: string;
+  /** The file CMake writes for the target, under the build's `bin`. */
+  fileName: string;
   destination: string;
 }
 
@@ -25,14 +26,22 @@ const nativeLibraries: NativeLibrary[] = [
   {
     sibling: "core",
     targets: [
-      { target: "weivel_core_shared", outputName: "weivel_core", destination: nativeDirectory },
-      { target: "echo", outputName: "echo", destination: testLibraryDirectory },
+      { target: "weivel_core_shared", fileName: sharedLibraryFileName("weivel_core"), destination: nativeDirectory },
+      { target: "echo", fileName: sharedLibraryFileName("echo"), destination: testLibraryDirectory },
     ],
     configureDefinitions: [],
   },
   {
     sibling: "standard",
-    targets: [{ target: "weivel_standard_shared", outputName: "weivel_standard", destination: nativeDirectory }],
+    targets: [
+      { target: "weivel_standard_shared", fileName: sharedLibraryFileName("weivel_standard"), destination: nativeDirectory },
+      {
+        target: "weivel_standard_described",
+        fileName: sharedLibraryFileName("weivel_standard_described"),
+        destination: testLibraryDirectory,
+      },
+      { target: "layouts", fileName: executableFileName("layouts"), destination: testLibraryDirectory },
+    ],
     configureDefinitions: [`-DWEIVEL_CORE_SOURCE_DIR=${join(siblingsDirectory, "core")}`],
   },
 ];
@@ -85,8 +94,7 @@ function buildNativeLibrary(library: NativeLibrary): void {
   const targetNames = library.targets.map((built) => built.target);
   runCmake(["--build", libraryBuildDirectory, "--config", "Release", "--target", ...targetNames, "--parallel"]);
   for (const built of library.targets) {
-    const fileName = sharedLibraryFileName(built.outputName);
-    copyFileSync(findBuiltLibrary(libraryBuildDirectory, fileName), join(built.destination, fileName));
+    copyFileSync(findBuiltLibrary(libraryBuildDirectory, built.fileName), join(built.destination, built.fileName));
   }
 }
 

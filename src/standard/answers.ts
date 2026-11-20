@@ -78,6 +78,8 @@ export interface LibraryFunction {
 export interface LibraryService {
   readonly id: string;
   readonly functions: readonly LibraryFunction[];
+  /** The symbol answering the service's definition described; left out for a service that declares none. */
+  readonly description?: string;
 }
 
 /** A C library's declaration as the standard read it. */
@@ -176,7 +178,7 @@ function readLibraryFunction(fields: DecodedFields): LibraryFunction {
   };
 }
 
-function readLibraryService(fields: DecodedFields): LibraryService {
+function readLibraryService(fields: DecodedFields, description: string | null): LibraryService {
   return {
     id: fields.id as string,
     functions: readFixedElements(
@@ -184,7 +186,12 @@ function readLibraryService(fields: DecodedFields): LibraryService {
       Number(fields.function_count),
       "weivel_standard_library_function",
     ).map(readLibraryFunction),
+    ...(description === null ? {} : { description }),
   };
+}
+
+function descriptionAt(descriptions: NativePointer, index: number): string | null {
+  return descriptions === null ? null : (koffi.decode(descriptions, index * koffi.sizeof("void *"), "const char *") as string | null);
 }
 
 export function readLibrary(fields: DecodedFields): LibraryDeclaration {
@@ -196,7 +203,7 @@ export function readLibrary(fields: DecodedFields): LibraryDeclaration {
       fields.services as NativePointer,
       Number(fields.service_count),
       "weivel_standard_library_service",
-    ).map(readLibraryService),
+    ).map((service, index) => readLibraryService(service, descriptionAt(fields.descriptions as NativePointer, index))),
   };
 }
 

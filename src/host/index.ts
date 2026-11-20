@@ -1,7 +1,18 @@
 export { Host } from "./host.js";
 export { ActivationFailure } from "./activation-failure.js";
 export { hostDestroyed, isHostDestroyed } from "./model.js";
-export { LibraryCallError, LibraryUnloadedError, definitionSizeFloor, type LibraryDefinition } from "./libraries.js";
+export {
+  LibraryCallError,
+  LibraryUnloadedError,
+  definitionSizeFloor,
+  type DescriptionCheck,
+  type DescriptionCheckAnswer,
+  type LibraryDefinition,
+} from "./libraries.js";
+export { boundDefinitionOf, type BoundDefinition } from "./description/definition.js";
+export type { DescribedHandle } from "./description/handles.js";
+export { DescribedCallError, none } from "./description/outcome.js";
+export type { NativeValue } from "./description/values.js";
 export type {
   ActivationOutcome,
   ActivationStart,

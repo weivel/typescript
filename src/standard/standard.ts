@@ -233,6 +233,17 @@ export class Standard {
     }));
   }
 
+  /**
+   * Checks a description a library answered, as weivel_standard_description_check does, before anything reads it; a
+   * host is handed this as its `descriptionCheck`.
+   */
+  checkDescription(description: object): StandardAnswer<undefined> {
+    return this.#withRefusal((refusal) => ({
+      status: this.#functions.weivel_standard_description_check(description, refusal) as Status,
+      value: undefined,
+    }));
+  }
+
   #manifestView(manifest: object): object {
     return this.#functions.weivel_standard_manifest_view(manifest) as object;
   }

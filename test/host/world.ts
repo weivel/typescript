@@ -14,6 +14,9 @@ import { realStandard } from "../real-standard.ts";
 
 export const echoLibraryPath = join(import.meta.dirname, "..", "..", "native", "test", sharedLibraryFileName("echo"));
 
+/** The standard's `described` test library, which every description vector and binding test loads. */
+export const describedLibraryPath = join(import.meta.dirname, "..", "..", "native", "test", sharedLibraryFileName("weivel_standard_described"));
+
 /** What the generated plugins tell the test: who activated and deactivated, in order, and each one's context. */
 export interface Probe {
   readonly activated: string[];

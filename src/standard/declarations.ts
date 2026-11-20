@@ -79,6 +79,7 @@ const weivel_standard_library = structOf({
   services: pointer,
   service_count: count,
   storage: pointer,
+  descriptions: pointer,
 });
 const weivel_standard_mirror_list = structOf({
   ...sizeField,
@@ -118,11 +119,25 @@ const weivel_standard_secrets = structOf({
   release_secret: pointer,
   release_refusal: pointer,
 });
+const weivel_standard_value = structOf({
+  kind: "uint32_t",
+  boolean: "uint32_t",
+  number: "double",
+  text: pointer,
+  length: count,
+  items: pointer,
+  entries: pointer,
+  count,
+});
+/** `key` is read by `key_length`, as a value's text is by `length`. */
+const weivel_standard_entry = structOf({ key: pointer, key_length: count, value: weivel_standard_value });
+const weivel_standard_value_tree = structOf({ ...sizeField, root: weivel_standard_value, storage: pointer });
 const weivel_standard_paths = structOf({ ...sizeField, context: pointer, cache: pointer, config: pointer, plugin: pointer });
 
 /**
- * Every struct the standard's headers declare by name, laid out field for field as the headers lay them out. The
- * core's structs they embed or point at (weivel_strings, weivel_manifest) are the core's own declarations.
+ * Every struct the standard's headers declare by name but `weivel/description.h`'s, laid out field for field as the
+ * headers lay them out. The core's structs they embed or point at (weivel_strings, weivel_manifest) are the core's
+ * own declarations, and a description's are the host's, which alone reads one.
  */
 export const standardStructs = {
   weivel_standard_refusal,
@@ -145,6 +160,9 @@ export const standardStructs = {
   weivel_standard_secret,
   weivel_standard_secrets,
   weivel_standard_paths,
+  weivel_standard_value,
+  weivel_standard_entry,
+  weivel_standard_value_tree,
 } as const;
 
 export type StandardStructName = keyof typeof standardStructs;
@@ -206,6 +224,7 @@ const standardSignatures = {
   weivel_standard_sha256_hex: ["void", [bytes, count, "char *"]],
   weivel_standard_is_sha256_hex: ["int", [text]],
   weivel_standard_verify_download: [status, [bytes, count, text, pointerTo("weivel_standard_refusal")]],
+  weivel_standard_description_check: [status, [pointer, pointerTo("weivel_standard_refusal")]],
 } as const satisfies Record<string, Signature>;
 
 export type StandardFunctionName = keyof typeof standardSignatures;

@@ -3,6 +3,9 @@ import koffi from "koffi";
 import { optionalTextForC, textForC } from "../core/text.js";
 import { FunctionKind } from "../standard/constants.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
+import { bindDefinition, type BoundDefinition } from "./description/definition.js";
+import { HandleHoldings } from "./description/handles.js";
+import { readDescription } from "./description/reader.js";
 import type { LibraryFunction, LibraryService } from "./model.js";
 
 type NativeFunction = (...parameters: unknown[]) => unknown;
@@ -43,7 +46,21 @@ export class LibraryUnloadedError extends Error {
 interface LoadState {
   /** Whether a bytes function may still be called: false from the unload on, though the binary may stay open. */
   openToCalls: boolean;
+  /** Whether the binary is still open, so a described definition, which its holders keep past the unload, may be called. */
+  binaryOpen: boolean;
 }
+
+/** What a description check answered: OK, or another status with the refusal saying why. */
+export interface DescriptionCheckAnswer {
+  readonly status: number;
+  readonly refusal: { readonly detail: string | null; readonly path: string } | undefined;
+}
+
+/**
+ * Checks a description before the host reads anything of it, as weivel_standard_description_check does: the host
+ * never loads the standard itself, so its caller hands it the standard's check.
+ */
+export type DescriptionCheck = (description: object) => DescriptionCheckAnswer;
 
 function utf8TextOf(body: Uint8Array): string | undefined {
   try {
@@ -162,6 +179,51 @@ function readDefinitions(importName: string, resolved: ReadonlyMap<string, Resol
   return new Map([...resolved].map(([id, definition]) => [id, readDefinition(importName, definition)] as const));
 }
 
+type DescriptionSymbol = () => object | null;
+
+/**
+ * Binds every described definition from its description, after the check has passed it.
+ *
+ * @throws Error, the caller's mistake, for a description symbol that is not exported or answers NULL, one the check
+ * refuses, or one whose layout this platform disagrees with.
+ */
+function bindDescribedDefinitions(
+  library: koffi.IKoffiLib,
+  declaration: LibraryDeclaration,
+  definitions: ReadonlyMap<string, LibraryDefinition>,
+  check: DescriptionCheck | undefined,
+  binding: { holdings: HandleHoldings; state: LoadState },
+): Map<string, BoundDefinition> {
+  const bound = new Map<string, BoundDefinition>();
+  for (const service of declaration.services) {
+    if (service.description === undefined) {
+      continue;
+    }
+    if (check === undefined) {
+      throw new Error(`${declaration.importName}'s service ${service.id} declares a description, and the host was given no descriptionCheck.`);
+    }
+    const description = (library.func(service.description, "void *", []) as DescriptionSymbol)();
+    if (description === null) {
+      throw new Error(`${declaration.importName}'s description ${service.description} answered NULL.`);
+    }
+    const checked = check(description);
+    if (checked.status !== statusOk) {
+      const where = checked.refusal === undefined ? "" : ` at ${checked.refusal.path === "" ? "its root" : checked.refusal.path}: ${checked.refusal.detail}`;
+      throw new Error(`${declaration.importName}'s description ${service.description} was refused by the check, status ${checked.status}${where}.`);
+    }
+    bound.set(
+      service.id,
+      bindDefinition({
+        definition: definitions.get(service.id)!,
+        description: readDescription(description),
+        holdings: binding.holdings,
+        isOpen: () => binding.state.binaryOpen,
+      }),
+    );
+  }
+  return bound;
+}
+
 /** @throws Error when the library does not export its release or a symbol a bytes function names, or names no release for one. */
 function bindBytesServices(library: koffi.IKoffiLib, declaration: LibraryDeclaration, state: LoadState): Map<string, LibraryService> {
   const release = declaration.release === null ? undefined : (library.func(declaration.release, "void", ["void *"]) as NativeFunction);
@@ -179,11 +241,16 @@ function bindBytesServices(library: koffi.IKoffiLib, declaration: LibraryDeclara
 export interface BoundLibrary {
   readonly services: ReadonlyMap<string, LibraryService>;
   readonly definitions: ReadonlyMap<string, LibraryDefinition>;
+  /** Each definition service that declares a description, by id, as the object its description binds. */
+  readonly described: ReadonlyMap<string, BoundDefinition>;
   /** Counts a definition service as registered, so the binary stays open until `released` is called for it. */
   awaitRelease(id: string): void;
   /** Says every holding of a definition service has ended since it was unregistered, or that it never was registered. */
   released(id: string): void;
-  /** Refuses every later bytes call, and closes the binary once no definition service awaits its release. */
+  /**
+   * Refuses every later bytes call, releases every handle a described definition answered and nobody released, and
+   * closes the binary once no definition service awaits its release.
+   */
   unload(): void;
   /** Closes the binary now, whatever still awaits its release; a later call does nothing. */
   close(): void;
@@ -193,8 +260,9 @@ export interface BoundLibrary {
  * Closes a library's binary once it is unloaded and every definition service it registered has had every holding
  * released, whichever ends last.
  *
- * @implNote A bytes answer is copied into JavaScript memory and released before its call answers, so no bytes the
- * library answered outlive a call, and calls are synchronous, so none is running when this decides.
+ * @implNote A bytes answer and a described answer are copied into JavaScript memory and released before their call
+ * settles, so nothing the library answered outlives a call but a handle, which the unload releases; and calls are
+ * synchronous, so none is running when this decides.
  */
 class BinaryClosing {
   readonly #awaiting = new Set<string>();
@@ -204,6 +272,7 @@ class BinaryClosing {
   constructor(
     readonly library: koffi.IKoffiLib,
     readonly state: LoadState,
+    readonly holdings: HandleHoldings,
     readonly onClosed: () => void,
   ) {}
 
@@ -219,13 +288,16 @@ class BinaryClosing {
   unload(): void {
     this.state.openToCalls = false;
     this.#unloaded = true;
+    this.holdings.releaseAll();
     this.#closeIfFree();
   }
 
   close(): void {
     this.state.openToCalls = false;
     if (!this.#closed) {
+      this.holdings.releaseAll();
       this.#closed = true;
+      this.state.binaryOpen = false;
       this.library.unload();
       this.onClosed();
     }
@@ -242,25 +314,37 @@ class BinaryClosing {
 function refuseTextsCutShort(path: string, declaration: LibraryDeclaration): void {
   textForC(path);
   optionalTextForC(declaration.release);
-  declaration.services.forEach((service) => service.functions.forEach((declared) => textForC(declared.symbol)));
+  declaration.services.forEach((service) => {
+    optionalTextForC(service.description);
+    service.functions.forEach((declared) => textForC(declared.symbol));
+  });
 }
 
 /**
- * Binds every bytes function of a declaration the layer accepted, and calls each definition's symbol once.
+ * Binds every bytes function of a declaration the layer accepted, calls each definition's symbol once, and binds each
+ * definition that declares a description from it, once `check` has passed it.
  *
  * @param onClosed called once the binary is closed.
- * @throws Error when the file is missing, does not export a symbol the declaration names, or a definition answers
- * NULL or a struct smaller than `2 * sizeof(void *)`; the binary is closed again before it throws.
+ * @throws Error when the file is missing, does not export a symbol the declaration names, a definition answers NULL or
+ * a struct smaller than `2 * sizeof(void *)`, or a description is declared with no `check`, answers NULL, is refused
+ * by the check or disagrees with this platform's layout; the binary is closed again before it throws.
  */
-export function bindLibrary(path: string, declaration: LibraryDeclaration, onClosed: () => void = () => {}): BoundLibrary {
+export function bindLibrary(
+  path: string,
+  declaration: LibraryDeclaration,
+  onClosed: () => void = () => {},
+  check?: DescriptionCheck,
+): BoundLibrary {
   refuseTextsCutShort(path, declaration);
   if (!existsSync(path)) {
     throw new Error(`The C library ${declaration.importName} is not at ${path}.`);
   }
   const library = koffi.load(path);
-  const state: LoadState = { openToCalls: true };
+  const state: LoadState = { openToCalls: true, binaryOpen: true };
+  const holdings = new HandleHoldings();
   let services: Map<string, LibraryService>;
   let definitions: Map<string, LibraryDefinition>;
+  let described: Map<string, BoundDefinition>;
   try {
     let resolved: Map<string, ResolvedDefinition>;
     try {
@@ -270,14 +354,16 @@ export function bindLibrary(path: string, declaration: LibraryDeclaration, onClo
       throw new Error(`The C library at ${path} does not export every symbol ${declaration.importName} declares.`, { cause: error });
     }
     definitions = readDefinitions(declaration.importName, resolved);
+    described = bindDescribedDefinitions(library, declaration, definitions, check, { holdings, state });
   } catch (error) {
     library.unload();
     throw error;
   }
-  const closing = new BinaryClosing(library, state, onClosed);
+  const closing = new BinaryClosing(library, state, holdings, onClosed);
   return {
     services,
     definitions,
+    described,
     awaitRelease: (id) => closing.awaitRelease(id),
     released: (id) => closing.released(id),
     unload: () => closing.unload(),
