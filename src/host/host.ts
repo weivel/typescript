@@ -266,6 +266,14 @@ export class Host {
   }
 
   /**
+   * The object the plugin under `plugin` itself registered under `id` and still has registered, or undefined: a
+   * registration under the id by another plugin or the host is never answered.
+   */
+  serviceRegisteredBy(plugin: bigint, id: string): unknown {
+    return this.#destroyed ? undefined : this.#contexts.registeredBy(plugin, id);
+  }
+
+  /**
    * Registers a service the host itself supplies under WEIVEL_HOST; the answer unregisters it.
    *
    * @throws Error for an id a live C library declares, since a registration under the host replaces one; RefusalError

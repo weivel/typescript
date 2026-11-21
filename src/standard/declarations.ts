@@ -162,6 +162,8 @@ const weivel_standard_host_plan = structOf({
   action_name: text,
   action_arguments: weivel_standard_value,
   storage: pointer,
+  action_service: text,
+  action_method: text,
 });
 const weivel_standard_host_outcome = structOf({ manifest: text, state: "uint32_t", detail: text });
 const weivel_standard_host_next = structOf({ ...sizeField, has_next: "uint32_t", next: "int64_t", storage: pointer });

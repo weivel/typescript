@@ -5,7 +5,7 @@ import { messageOf } from "../host/activation-failure.js";
 import type { ActivationOutcome, Host, LoadedLibrary, Plugin, PluginAction } from "../host/index.js";
 import { entryOnDisk, HostPluginState, type Standard } from "../standard/index.js";
 import { alive } from "./alive.js";
-import type { HostOutcome, PlannedPlugin } from "./model.js";
+import { isSet, type HostOutcome, type PlannedPlugin } from "./model.js";
 import { textForC } from "./provider.js";
 import { PluginScopes, type OpenedScope } from "./scopes.js";
 
@@ -138,17 +138,45 @@ export class PluginRun {
   }
 
   /** The action `name` of the plugin whose manifest the plan names `manifest`, or why there is none to run. */
-  actionOf(manifest: string | undefined, name: string | undefined): PluginAction | string {
-    if (manifest === undefined || name === undefined) {
+  actionOf(manifest: string | null | undefined, name: string | null | undefined): PluginAction | string {
+    if (!isSet(manifest) || !isSet(name)) {
       return "the plan names no action to run";
     }
-    const plugin = this.#registered.find((registered) => registered.planned.manifest === manifest);
-    if (plugin === undefined || this.#outcomes.get(manifest)?.state !== HostPluginState.Activated) {
+    const plugin = this.#activated(manifest);
+    if (plugin === undefined) {
       return `the plugin ${manifest} was not activated`;
     }
     const actions = plugin.entry.actions;
     const action = actions !== undefined && Object.hasOwn(actions, name) ? actions[name] : undefined;
     return typeof action === "function" ? action : `the plugin ${manifest} offers no action ${name}`;
+  }
+
+  /**
+   * The method `method` of the service object the plugin whose manifest the plan names `manifest` itself registered
+   * under `service`, or why there is none to run; the entry's actions are never read.
+   */
+  methodOf(manifest: string | null | undefined, service: string, method: string): PluginAction | string {
+    if (!isSet(manifest)) {
+      return "the plan names no action to run";
+    }
+    const plugin = this.#activated(manifest);
+    if (plugin === undefined) {
+      return `the plugin ${manifest} was not activated`;
+    }
+    const object = this.#host.serviceRegisteredBy(plugin.handle, service);
+    if ((typeof object !== "object" && typeof object !== "function") || object === null) {
+      return `the plugin ${manifest} does not provide ${service}`;
+    }
+    const offered = (object as Readonly<Record<string, unknown>>)[method];
+    if (typeof offered !== "function") {
+      return `the service ${service} of ${manifest} offers no method ${method}`;
+    }
+    return (actionArguments) => offered.call(object, actionArguments);
+  }
+
+  #activated(manifest: string): RunPlugin | undefined {
+    const plugin = this.#registered.find((registered) => registered.planned.manifest === manifest);
+    return plugin !== undefined && this.#outcomes.get(manifest)?.state === HostPluginState.Activated ? plugin : undefined;
   }
 
   /** Releases every plugin registered, the last first, and then its scope, each whatever became of the one before. */

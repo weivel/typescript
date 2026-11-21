@@ -207,9 +207,13 @@ the same way. A scope whose definitions cannot be offered, as when a loaded libr
 tells that plugin as `refused` with why, every definition already offered withdrawn and the scope released, and the
 next plugin is attempted. A NUL inside an outcome's detail or an
 action's failure is written as `\0`. A stop request during an ACTION run's action takes effect once `finished` was
-told. A library that will not load ends the run there, no plugin activated. Loading and activating is one phase: a
-stop requested during it, or before `start` answered, takes effect once `started` was told every plugin's outcome,
-and the run then calls `stop` with no tick and no action; one during a later call takes effect once that call returns.
+told. An ACTION plan naming both `action_service` and `action_method` calls that method of the object the action's
+plugin itself registered under that service id, never an entry's action: a method is a function-valued property of
+that object, called on it with the action's arguments and answering as an action does. A plan naming only one of the
+two, or either as an empty text, ends the run as a malformed answer, before any library is loaded. A library that
+will not load ends the run there, no plugin activated. Loading and activating is one phase: a stop requested during
+it, or before `start` answered, takes effect once `started` was told every plugin's outcome, and the run then calls
+`stop` with no tick and no action; one during a later call takes effect once that call returns.
 The `default` export is this language's convention for an entry, not the standard's.
 The core plans each activation over capabilities, under which a consumed one is always optional, so the plan's order
 is the library's alone.

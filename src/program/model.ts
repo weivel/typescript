@@ -19,6 +19,11 @@ export interface RunHostOptions {
   readonly entryExport?: string;
 }
 
+/** Whether a text of the plan is set: neither NULL nor past the size the provider answered. */
+export function isSet(text: string | null | undefined): text is string {
+  return text !== undefined && text !== null;
+}
+
 /** The code the program exits with when `start` did not answer OK, or `stop` answered no code. */
 export const failedRunExit = 1;
 
@@ -33,14 +38,19 @@ export interface PlannedPlugin {
   readonly entry: string;
 }
 
-/** A weivel_standard_host_plan as the bound `start` answers it: a NULL text or a NONE value is left out. */
+/**
+ * A weivel_standard_host_plan as the bound `start` answers it: a NULL text is null, a NONE value is undefined, and a
+ * member past the size the provider answered is left out.
+ */
 export interface HostPlan {
   readonly mode: HostMode;
   readonly libraries: readonly PlannedLibrary[];
   readonly plugins: readonly PlannedPlugin[];
-  readonly action_plugin?: string;
-  readonly action_name?: string;
+  readonly action_plugin?: string | null;
+  readonly action_name?: string | null;
   readonly action_arguments?: NativeValue;
+  readonly action_service?: string | null;
+  readonly action_method?: string | null;
 }
 
 /** A weivel_standard_host_outcome as the bound `started` takes it. */
