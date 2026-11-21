@@ -35,6 +35,25 @@ async function eventually(condition: () => boolean, what: string): Promise<void>
   }
 }
 
+/**
+ * Waits, within the bound, for the run of a killed child to end, which it does once Node has seen the child exit.
+ *
+ * @implNote On POSIX a signalled child stays a zombie that `kill(pid, 0)` still finds until libuv reaps it on a later
+ * turn, so the tree is judged only after the exit; Windows's taskkill leaves nothing to reap, so there the check runs
+ * at once, which is what tells a tree kill from a relay-only one.
+ */
+async function reaped(run: Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`The killed child did not exit within ${treeBoundMillis} ms`)), treeBoundMillis);
+  });
+  try {
+    await Promise.race([run, bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A serve run with nothing to tick, so the program waits for a stop request that never comes. */
 const servingUntilStopped = hostVector("serving-until-stopped", {
   stubHost: { mode: "serve", plugins: [{ name: "alpha", directory: "alpha", manifest: "alpha/manifest.json", scope: true }] },
@@ -82,6 +101,9 @@ describe("the bundled program as a child process", () => {
       }, "the child's tree starting");
 
       killEveryChild();
+      if (process.platform !== "win32") {
+        await reaped(witnessed);
+      }
 
       expect(tree.filter(isAlive)).toEqual([]);
       expect(await witnessed).toBeInstanceOf(Error);
