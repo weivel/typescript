@@ -9,8 +9,8 @@ standard's. It is held to the vectors in `weivel/conformance`.
 
 `src/` holds the modules every language implementation of weivel holds, in the order the core's
 `MODULES` list names them: `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance`
-and `benchmarks`, and `program`, the host program, which that list does not name yet. Each is a subpath of the
-package, `@weivel/typescript/<module>`.
+and `benchmarks`, and the two it names as optional: `program`, the host program, and `bundle`, its bundler. Each
+is a subpath of the package, `@weivel/typescript/<module>`.
 
 ## A plugin's entry
 
@@ -207,6 +207,20 @@ and the run then calls `stop` with no tick and no action; one during a later cal
 The `default` export is this language's convention for an entry, not the standard's.
 The core plans each activation over capabilities, under which a consumed one is always optional, so the plan's order
 is the library's alone.
+
+## The bundler
+
+`bundle` writes one ES module file with esbuild, pinned by version and loaded by this module alone, so importing
+`host` or `program` never loads it. `bundlePlugin(entry, outputDirectory)` bundles a plugin entry and what it imports
+into `<entry name>.mjs`; `bundleProgram(outputDirectory, options?)` bundles the command line into `weivel-host.mjs`,
+run as `node weivel-host.mjs <host library> <arguments...>`. koffi stays outside the bundle, imported from this
+package's install by its file URL, and the core's and the standard's shared libraries are loaded from the absolute
+paths `options` gives, this package's `native/` ones by default, so a bundle runs on the machine whose install made it.
+
+The kit's host vectors run twice: in process through `runHost`, and against the bundled program as a child process,
+every plugin entry bundled first. A POSIX child is sent SIGTERM as its stop request. Node's `kill` on Windows ends a
+child outright for every signal, so there the child runs under `test/program/console-relay.ts`, which gives it a
+console of its own and sends that console CTRL_BREAK_EVENT, which the program receives as SIGBREAK.
 
 ## Siblings and native libraries
 

@@ -44,6 +44,10 @@
     "./program": {
       "types": "./dist/program/index.d.ts",
       "default": "./dist/program/index.js"
+    },
+    "./bundle": {
+      "types": "./dist/bundle/index.d.ts",
+      "default": "./dist/bundle/index.js"
     }
   },
   "bin": {
@@ -54,6 +58,7 @@
     "test": "node scripts/native.ts && tsc -p tsconfig.test.json && vitest run"
   },
   "dependencies": {
+    "esbuild": "0.28.2",
     "koffi": "2.16.3"
   },
   "devDependencies": {
