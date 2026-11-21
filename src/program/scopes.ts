@@ -1,3 +1,4 @@
+import type { Logger } from "../context/index.js";
 import { messageOf } from "../host/activation-failure.js";
 import { DescribedCallError, none, type BoundDefinition, type Host, type LoadedLibrary } from "../host/index.js";
 import type { StandardServiceIds } from "../standard/index.js";
@@ -22,6 +23,33 @@ type ScopeMember = "config" | "secrets" | "paths" | "log";
 
 const scopeMembers: readonly ScopeMember[] = ["config", "secrets", "paths", "log"];
 
+/**
+ * Runs every withdrawal, then frees the scope, each whatever became of the one before.
+ *
+ * @throws the first failure, or an AggregateError of every failure when more than one failed.
+ */
+function releaseFully(withdrawals: (() => void)[], answer: ScopeAnswer): void {
+  const failures: unknown[] = [];
+  for (const withdraw of withdrawals.splice(0)) {
+    try {
+      withdraw();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  try {
+    answer.release?.();
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "The scope could not be released fully.");
+  }
+}
+
 /** The detail a refused scope carries: the provider's own, or what went wrong when it gave none. */
 function refusalDetail(error: unknown): string {
   return error instanceof DescribedCallError && error.detail !== null ? error.detail : messageOf(error);
@@ -31,11 +59,13 @@ function refusalDetail(error: unknown): string {
 export class PluginScopes {
   readonly #host: Host;
   readonly #ids: StandardServiceIds;
+  readonly #log: Logger;
   #provider: BoundDefinition | undefined;
 
-  constructor(host: Host, ids: StandardServiceIds) {
+  constructor(host: Host, ids: StandardServiceIds, log: Logger) {
     this.#host = host;
     this.#ids = ids;
+    this.#log = log;
   }
 
   /** Asks every scope of the first of `libraries` that serves a described `weivel.scope`. */
@@ -46,8 +76,8 @@ export class PluginScopes {
   /**
    * Opens the scope of the plugin whose manifest the plan names `manifest` and offers each definition it answers to
    * that plugin alone, under the standard's id for it; with no provider, it offers nothing. A scope refused, or one
-   * whose definitions cannot be offered, as when a loaded library declares one of the ids, answers why, the scope then
-   * freed again.
+   * whose definitions cannot be offered, as when a loaded library declares one of the ids, answers why; one offered in
+   * part has every offer withdrawn and is freed again before it answers.
    */
   async open(plugin: bigint, manifest: string): Promise<OpenedScope | RefusedScope> {
     if (this.#provider === undefined) {
@@ -69,12 +99,9 @@ export class PluginScopes {
     }
   }
 
+  /** @throws the error that stopped an offer, after the scope was released; a failing release is logged, not thrown. */
   #offer(plugin: bigint, answer: ScopeAnswer): OpenedScope {
     const withdrawals: (() => void)[] = [];
-    const release = (): void => {
-      withdrawals.splice(0).forEach((withdraw) => withdraw());
-      answer.release?.();
-    };
     try {
       for (const member of scopeMembers) {
         const definition = answer[member];
@@ -83,9 +110,13 @@ export class PluginScopes {
         }
       }
     } catch (error) {
-      release();
+      try {
+        releaseFully(withdrawals, answer);
+      } catch (releaseError) {
+        this.#log.error(`A scope that could not be offered could not be released either: ${messageOf(releaseError)}`, releaseError);
+      }
       throw error;
     }
-    return { release };
+    return { release: () => releaseFully(withdrawals, answer) };
   }
 }

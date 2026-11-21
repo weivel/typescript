@@ -52,7 +52,7 @@ export class PluginRun {
     this.#standard = standard;
     this.#entryExport = entryExport;
     this.#log = log;
-    this.#scopes = new PluginScopes(host, standard.serviceIds);
+    this.#scopes = new PluginScopes(host, standard.serviceIds, log);
   }
 
   /** Asks each plugin's scope of the first of the run's `libraries` that serves `weivel.scope`. */
