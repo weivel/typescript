@@ -210,17 +210,22 @@ is the library's alone.
 
 ## The bundler
 
-`bundle` writes one ES module file with esbuild, pinned by version and loaded by this module alone, so importing
-`host` or `program` never loads it. `bundlePlugin(entry, outputDirectory)` bundles a plugin entry and what it imports
-into `<entry name>.mjs`; `bundleProgram(outputDirectory, options?)` bundles the command line into `weivel-host.mjs`,
-run as `node weivel-host.mjs <host library> <arguments...>`. koffi stays outside the bundle, imported from this
-package's install by its file URL, and the core's and the standard's shared libraries are loaded from the absolute
-paths `options` gives, this package's `native/` ones by default, so a bundle runs on the machine whose install made it.
+`bundle` writes one ES module file with esbuild, which is an optional peer dependency of this package: only `bundle`
+loads it, so a consumer of `host` or `program` never installs it, and this repository pins it as a dev dependency for
+its own build and tests. `bundlePlugin(entry, outputDirectory)` bundles a plugin entry and what it imports into
+`<entry name>.mjs`; `bundleProgram(outputDirectory, options?)` bundles the command line into `weivel-host.mjs`, run as
+`node weivel-host.mjs <host library> <arguments...>`. koffi, a native addon, stays the bare import `koffi`, which Node
+resolves from a `node_modules/koffi` at or above the bundle. The core's and the standard's shared libraries are found
+at run time beside the bundle, under the file names CMake gives them on that platform, unless `nativeLibraries` gives
+two absolute paths instead. A directory holding the bundle, those two libraries and a `node_modules/koffi` therefore
+runs wherever it is moved.
 
-The kit's host vectors run twice: in process through `runHost`, and against the bundled program as a child process,
-every plugin entry bundled first. A POSIX child is sent SIGTERM as its stop request. Node's `kill` on Windows ends a
-child outright for every signal, so there the child runs under `test/program/console-relay.ts`, which gives it a
-console of its own and sends that console CTRL_BREAK_EVENT, which the program receives as SIGBREAK.
+The kit's host vectors run twice: in process through `runHost`, and as a child process of a bundle written to a
+temporary directory laid out that way, its `node_modules/koffi` a link to this package's koffi and every plugin entry
+bundled first. A POSIX child is sent SIGTERM as its stop request. Node's `kill` on Windows ends a child outright for
+every signal, so there the child runs under `test/program/console-relay.ts`, which gives it a console of its own and
+sends that console CTRL_BREAK_EVENT, which the program receives as SIGBREAK; a child left running by a failed test is
+killed with its whole tree.
 
 ## Siblings and native libraries
 

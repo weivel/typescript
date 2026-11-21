@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { bundlePlugin, bundleProgram } from "../../src/bundle/index.ts";
 import { failedRunExit } from "../../src/program/index.ts";
+import { bundleRelocatedProgram } from "../program/child.ts";
 import { temporaryDirectory } from "../program/world.ts";
 
 const sourceDirectory = join(import.meta.dirname, "..", "..", "src");
@@ -68,21 +69,37 @@ describe("bundlePlugin", () => {
   });
 });
 
+/** Runs `program` with no arguments and answers its exit code and what it wrote to stderr. */
+function runWithoutArguments(program: string): { exit: number; standardError: string } {
+  try {
+    execFileSync(process.execPath, [program], { stdio: ["ignore", "ignore", "pipe"] });
+    return { exit: 0, standardError: "" };
+  } catch (error) {
+    const failed = error as { status: number; stderr: Buffer };
+    return { exit: failed.status, standardError: failed.stderr.toString() };
+  }
+}
+
 describe("bundleProgram", () => {
-  it("writes a command line that runs on its own and answers its usage without a host library", async () => {
+  it("writes a command line that runs from a directory of its own and answers its usage without a host library", async () => {
+    const relocated = await bundleRelocatedProgram();
+    try {
+      const ran = runWithoutArguments(relocated.program);
+
+      expect(ran.exit).toBe(failedRunExit);
+      expect(ran.standardError).toContain("usage: weivel-host <host library>");
+    } finally {
+      relocated.remove();
+    }
+  });
+
+  it("leaves koffi a bare import, resolved from a node_modules at or above the bundle", async () => {
     const bundled = await bundleProgram(temporaryDirectory());
 
-    let exit = 0;
-    let standardError = "";
-    try {
-      execFileSync(process.execPath, [bundled], { stdio: ["ignore", "ignore", "pipe"] });
-    } catch (error) {
-      const failed = error as { status: number; stderr: Buffer };
-      exit = failed.status;
-      standardError = failed.stderr.toString();
-    }
+    const ran = runWithoutArguments(bundled);
 
-    expect(exit).toBe(failedRunExit);
-    expect(standardError).toContain("usage: weivel-host <host library>");
+    expect(readFileSync(bundled, "utf8")).toMatch(/from\s*"koffi"/);
+    expect(ran.exit).not.toBe(0);
+    expect(ran.standardError).toContain("Cannot find package 'koffi'");
   });
 });

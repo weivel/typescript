@@ -58,11 +58,19 @@
     "test": "node scripts/native.ts && tsc -p tsconfig.test.json && vitest run"
   },
   "dependencies": {
-    "esbuild": "0.28.2",
     "koffi": "2.16.3"
+  },
+  "peerDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "peerDependenciesMeta": {
+    "esbuild": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "22.10.2",
+    "esbuild": "0.28.2",
     "typescript": "5.7.2",
     "vitest": "3.2.7"
   }
