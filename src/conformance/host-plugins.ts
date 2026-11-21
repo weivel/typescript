@@ -3,6 +3,8 @@ import type { NativeValue } from "../host/index.js";
 /** What one plugin of a `host` vector's `given.plugins` does: its activation's steps and the actions it offers. */
 export interface HostVectorPlugin {
   readonly name: string;
+  /** True when its manifest is not written, so the program cannot read it. */
+  readonly unreadableManifest?: boolean;
   readonly activate?: readonly Readonly<Record<string, unknown>>[];
   readonly actions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
@@ -10,22 +12,44 @@ export interface HostVectorPlugin {
 /** The ids every plugin of a `host` vector consumes. */
 export const consumedServiceIds = ["weivel.config", "weivel.secrets", "weivel.paths", "weivel.log"] as const;
 
-const stepKinds = ["log", "logSetting", "set", "absent", "throw"] as const;
+const stepKinds = ["log", "logSetting", "set", "absent", "waitFor", "pause", "throw"] as const;
 const actionKinds = ["echo", "answer", "throw"] as const;
+const longestPauseMillis = 10_000;
+
+function isStepOfItsKind(step: Readonly<Record<string, unknown>>): boolean {
+  const keys = Object.keys(step);
+  const kind = stepKinds.find((candidate) => keys.includes(candidate));
+  const expected = kind === "set" ? ["set", "to"] : [kind];
+  if (kind === undefined || keys.length !== expected.length || !expected.every((key) => keys.includes(key!))) {
+    return false;
+  }
+  if (kind === "waitFor") {
+    return typeof step.waitFor === "string" && step.waitFor !== "";
+  }
+  if (kind === "pause") {
+    return Number.isInteger(step.pause) && (step.pause as number) >= 1 && (step.pause as number) <= longestPauseMillis;
+  }
+  return true;
+}
+
+function isActionOfItsKind(action: Readonly<Record<string, unknown>>): boolean {
+  const kinds = Object.keys(action).filter((key) => key !== "steps");
+  const steps = action.steps;
+  if (steps !== undefined && !(Array.isArray(steps) && steps.every((step) => typeof step === "object" && step !== null && isStepOfItsKind(step)))) {
+    return false;
+  }
+  return kinds.length === 0 || (kinds.length === 1 && actionKinds.includes(kinds[0] as (typeof actionKinds)[number]));
+}
 
 /** @throws Error for a step or an action of a kind this driver does not know, or one holding more than its kind. */
 function refuseUnknown(plugin: HostVectorPlugin): void {
   for (const step of plugin.activate ?? []) {
-    const keys = Object.keys(step);
-    const kind = stepKinds.find((candidate) => keys.includes(candidate));
-    const expected = kind === "set" ? ["set", "to"] : [kind];
-    if (kind === undefined || keys.length !== expected.length || !expected.every((key) => keys.includes(key!))) {
+    if (!isStepOfItsKind(step)) {
       throw new Error(`${plugin.name}'s step ${JSON.stringify(step)} is of no kind this driver realises.`);
     }
   }
   for (const [name, action] of Object.entries(plugin.actions ?? {})) {
-    const keys = Object.keys(action);
-    if (keys.length > 1 || (keys.length === 1 && !actionKinds.includes(keys[0] as (typeof actionKinds)[number]))) {
+    if (!isActionOfItsKind(action)) {
       throw new Error(`${plugin.name}'s action ${name} ${JSON.stringify(action)} is of no kind this driver realises.`);
     }
   }
@@ -36,7 +60,28 @@ function refuseUnknown(plugin: HostVectorPlugin): void {
  * the plugin, each the definition `weivel.scope` answered, bound by its description.
  */
 const entryRuntime = String.raw`
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 const infoLevel = 3;
+const pollMillis = 5;
+let activeContext;
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitFor(fileName) {
+  const path = join(runDirectory, fileName);
+  const startedAt = Date.now();
+  while (!existsSync(path)) {
+    if (Date.now() - startedAt > boundMillis) {
+      throw new Error(fileName + " did not appear within " + boundMillis + " ms");
+    }
+    await sleep(pollMillis);
+  }
+}
+
 const settingKind = { text: 1, number: 2, boolean: 3 };
 
 function service(context, id) {
@@ -83,12 +128,16 @@ async function runStep(context, step) {
     if (service(context, step.absent) !== undefined) {
       throw new Error(step.absent + " answered this plugin something");
     }
+  } else if ("waitFor" in step) {
+    await waitFor(step.waitFor);
+  } else if ("pause" in step) {
+    await sleep(step.pause);
   } else {
     throw new Error(step.throw);
   }
 }
 
-function actionOf(action) {
+function answerOf(action) {
   if ("echo" in action) {
     return (actionArguments) => actionArguments;
   }
@@ -103,8 +152,19 @@ function actionOf(action) {
   return () => undefined;
 }
 
+function actionOf(action) {
+  const answer = answerOf(action);
+  return async (actionArguments) => {
+    for (const step of action.steps ?? []) {
+      await runStep(activeContext, step);
+    }
+    return answer(actionArguments);
+  };
+}
+
 export default {
   async activate(context) {
+    activeContext = context;
     for (const step of steps) {
       await runStep(context, step);
     }
@@ -114,13 +174,20 @@ export default {
 `;
 
 /**
- * The source of an ES module realising `plugin`: its default export is the plugin.
+ * The source of an ES module realising `plugin`: its default export is the plugin. A `waitFor` step waits for its file
+ * in `runDirectory`, for up to `boundMillis`.
  *
  * @throws Error for a step or an action of a kind this driver does not know.
  */
-export function hostVectorEntrySource(plugin: HostVectorPlugin): string {
+export function hostVectorEntrySource(plugin: HostVectorPlugin, runDirectory: string, boundMillis: number): string {
   refuseUnknown(plugin);
-  return [`const steps = ${JSON.stringify(plugin.activate ?? [])};`, `const actions = ${JSON.stringify(plugin.actions ?? {})};`, entryRuntime].join("\n");
+  return [
+    `const runDirectory = ${JSON.stringify(runDirectory)};`,
+    `const boundMillis = ${JSON.stringify(boundMillis)};`,
+    `const steps = ${JSON.stringify(plugin.activate ?? [])};`,
+    `const actions = ${JSON.stringify(plugin.actions ?? {})};`,
+    entryRuntime,
+  ].join("\n");
 }
 
 /** The manifest of a `host` vector's plugin `name`, consuming every id the program may offer it. */

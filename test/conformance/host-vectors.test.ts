@@ -24,6 +24,14 @@ async function judge(id: string): Promise<void> {
   }
 }
 
+describe("host/a-malformed-next-ends-the-run", () => {
+  it("runs as the vector states", () => judge("host/a-malformed-next-ends-the-run"), hostTestTimeout);
+});
+
+describe("host/a-plan-library-that-will-not-load-still-stops", () => {
+  it("runs as the vector states", () => judge("host/a-plan-library-that-will-not-load-still-stops"), hostTestTimeout);
+});
+
 describe("host/a-plugin-reads-its-own-scoped-config", () => {
   it("runs as the vector states", () => judge("host/a-plugin-reads-its-own-scoped-config"), hostTestTimeout);
 });
@@ -48,6 +56,14 @@ describe("host/a-refused-tick-still-stops", () => {
   it("runs as the vector states", () => judge("host/a-refused-tick-still-stops"), hostTestTimeout);
 });
 
+describe("host/a-stop-request-during-activation-waits-for-started", () => {
+  it("runs as the vector states", () => judge("host/a-stop-request-during-activation-waits-for-started"), hostTestTimeout);
+});
+
+describe("host/a-stop-request-during-an-action-waits-for-finished", () => {
+  it("runs as the vector states", () => judge("host/a-stop-request-during-an-action-waits-for-finished"), hostTestTimeout);
+});
+
 describe("host/a-stop-request-stops-cleanly-while-a-tick-waits", () => {
   it("runs as the vector states", () => judge("host/a-stop-request-stops-cleanly-while-a-tick-waits"), hostTestTimeout);
 });
@@ -66,6 +82,10 @@ describe("host/an-action-runs-and-its-result-reaches-finished", () => {
 
 describe("host/an-activation-that-throws-is-told-as-failed", () => {
   it("runs as the vector states", () => judge("host/an-activation-that-throws-is-told-as-failed"), hostTestTimeout);
+});
+
+describe("host/an-unreadable-manifest-is-refused-and-the-rest-activate", () => {
+  it("runs as the vector states", () => judge("host/an-unreadable-manifest-is-refused-and-the-rest-activate"), hostTestTimeout);
 });
 
 describe("host/start-hands-its-arguments-and-activates-the-plan-in-order", () => {
