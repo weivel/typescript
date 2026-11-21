@@ -16,6 +16,14 @@ describe("host/a-plan-library-that-will-not-load-still-stops", () => {
   it("runs as the vector states", () => judge("host/a-plan-library-that-will-not-load-still-stops"), hostTestTimeout);
 });
 
+describe("host/a-library-declaring-a-standard-id-makes-the-scope-unofferable", () => {
+  it("runs as the vector states", () => judge("host/a-library-declaring-a-standard-id-makes-the-scope-unofferable"), hostTestTimeout);
+});
+
+describe("host/a-plugin-is-offered-no-scope-or-host-service", () => {
+  it("runs as the vector states", () => judge("host/a-plugin-is-offered-no-scope-or-host-service"), hostTestTimeout);
+});
+
 describe("host/a-plugin-reads-its-own-scoped-config", () => {
   it("runs as the vector states", () => judge("host/a-plugin-reads-its-own-scoped-config"), hostTestTimeout);
 });

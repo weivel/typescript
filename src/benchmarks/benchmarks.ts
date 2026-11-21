@@ -600,19 +600,6 @@ const handWalkerHead = koffi.struct({
 });
 const handWaitOperation = koffi.proto("int32_t", ["void *", "uint64_t", "void *"]);
 
-/**
- * The ratio the blocking-call row is held under until CI has measured it on the kit's platforms: the worker round
- * trip over the same `wait` called directly on the calling thread.
- *
- * @implNote Provisional, from three local Windows x64 runs on 2026-11-21 whose median ratios were 32.9, 33.6 and 34.3:
- * a worker round trip is a thread hand-off and an event-loop wake, about 40 microseconds there, against a direct call
- * of about one. The bound is five times the highest seen, wide enough for a platform whose direct call is cheaper or
- * whose hand-off is dearer, and still catching a round trip grown by an order of magnitude; the kit sets the real
- * bound per platform once CI has measured it. This constant is replaced by a `blocking-call` row in the kit's
- * `benchmarks/typescript.txt`, read as the other gates' rows are, once that row lands.
- */
-export const provisionalBlockingCallBound = 175;
-
 /** A path whose every call is awaited before the next starts, as a caller awaiting a blocking call does. */
 export type AwaitedPath = (call: number) => Promise<unknown>;
 

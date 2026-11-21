@@ -84,7 +84,8 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 - `host.destroy` makes the host quiet the moment it is called, starts no plugin of a plan not yet started (each
   answered `released`), and waits for every release under way, however long its deactivate takes.
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
-  `registerHostService` throws for an id a live library declares. A load the core refuses partway is undone as an
+  `registerHostService` throws for an id a live library declares. An id `loadLibrary`'s `withheld` names is bound and
+  registered for no plugin, reached through the loaded library alone. A load the core refuses partway is undone as an
   unload before it throws: what it registered is unregistered and its binary closed.
 - `host.registerPluginService(plugin, type, service)` offers a service to one plugin alone. The core has one
   registration per id, so every plugin offered an id shares one registration under the host, made with the first
@@ -176,6 +177,9 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   release the answer and the refusal after every call; the hand path keeps one answer and one refusal block across
   calls. It samples as the `library-call` rows do, with the echo library's bytes call in the same rounds for its time
   beside theirs, and the bound method's promise is not awaited in the timed loop.
+- The `blocking-call` benchmark times the described walker's `wait`, a blocking operation, through the bound object,
+  each call awaited before the next, over the same `wait` through a bare koffi binding on the calling thread: 2000
+  warm-up calls, then 201 rounds of 50 calls per path, judged by the kit's `blocking-call` row.
 - A library function that answers a status other than 0 throws a `LibraryCallError` carrying the status and the body
   as bytes, and the body's `text` only where it is UTF-8.
 - The core's and the standard's library paths default to the package's own `native/`, which the package's build
@@ -190,19 +194,21 @@ library's declaration is the `library.json` beside its binary. The program loads
 the plan's libraries and activates its plugins one at a time in the plan's order, each entry's export `default`
 unless `entryExport` names another, tells `started`, then ticks in a SERVE run or calls the named action in an
 ACTION run and tells `finished`, releases every plugin and then its scope, and calls `stop` last, exiting with its
-code. Immediately before each activation it opens the plugin's scope from whichever loaded library serves
-`weivel.scope`, the host library included, and offers that plugin alone each definition the scope answers under the
-standard's ids (`weivel.config`, `weivel.secrets`, `weivel.paths`, `weivel.log`), bound by its description; with no
-such library it offers nothing, and a refused scope tells the plugin as `refused`, never activated. It reads the
+code. It withholds `weivel.host` and `weivel.scope` of every library it loads from every plugin. Immediately before
+each activation it opens the plugin's scope from the first loaded library serving a described `weivel.scope`, the
+host library first, and offers that plugin alone each definition the scope answers under the standard's ids
+(`weivel.config`, `weivel.secrets`, `weivel.paths`, `weivel.log`), bound by its description; with no such library it
+offers nothing, and a refused scope tells the plugin as `refused`, never activated. It reads the
 clock and passes it in; every other decision is the library's. A plugin that cannot be registered, its manifest
 unreadable or refused, is told as `refused` with why; an activation that throws, as `failed` with the reason its
 quarantine carries. Once `start` answered OK, whatever ends the run early, a refusal or a library that will not load,
 is logged and `stop` is still called. A tick answering a `has_next` other than 0 or 1 is malformed and ends the run
 the same way. A scope whose definitions cannot be offered, as when a loaded library declares one of the standard ids,
-tells that plugin as `refused` with why, and the next plugin is attempted. A NUL inside an outcome's detail or an
+tells that plugin as `refused` with why, every definition already offered withdrawn and the scope released, and the
+next plugin is attempted. A NUL inside an outcome's detail or an
 action's failure is written as `\0`. A stop request during an ACTION run's action takes effect once `finished` was
-told. A library that will not load ends the run there, no plugin activated. Loading
-and activating is one phase: a stop requested during it takes effect once `started` was told every plugin's outcome,
+told. A library that will not load ends the run there, no plugin activated. Loading and activating is one phase: a
+stop requested during it, or before `start` answered, takes effect once `started` was told every plugin's outcome,
 and the run then calls `stop` with no tick and no action; one during a later call takes effect once that call returns.
 The `default` export is this language's convention for an entry, not the standard's.
 The core plans each activation over capabilities, under which a consumed one is always optional, so the plan's order

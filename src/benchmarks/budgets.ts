@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Summary } from "./measure.js";
 
-export type RatioGate = "controlCall" | "libraryCall" | "describedCall";
+export type RatioGate = "controlCall" | "libraryCall" | "describedCall" | "blockingCall";
 
 /**
  * The bounds the kit sets for this language, read from its `benchmarks/typescript.txt`: each ratio gate's highest
@@ -33,6 +33,7 @@ const gatesByKitName: Readonly<Record<string, RatioGate>> = {
   "control-call": "controlCall",
   "library-call": "libraryCall",
   "described-call": "describedCall",
+  "blocking-call": "blockingCall",
 };
 const noiseByKitName: Readonly<Record<string, NoiseName>> = {
   "quiet-noise": "quietNoise",
@@ -106,7 +107,7 @@ function scalarOf(read: BudgetLines, name: ScalarName): number {
  */
 export function readLanguageBudget(text: string): LanguageBudget {
   const read: BudgetLines = {
-    highest: { controlCall: {}, libraryCall: {}, describedCall: {} },
+    highest: { controlCall: {}, libraryCall: {}, describedCall: {}, blockingCall: {} },
     noise: { quietNoise: {}, worstNoise: {}, noiseMargin: {} },
     scalars: {},
   };
