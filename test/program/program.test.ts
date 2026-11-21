@@ -86,7 +86,7 @@ describe("the host program's serve run", () => {
   });
 
   it(
-    "calls stop next, and no tick, for a request made before start answered",
+    "tells started, then calls stop with no tick, for a request made before start answered",
     async () => {
       const stopRequest = new AbortController();
       stopRequest.abort();
@@ -94,7 +94,7 @@ describe("the host program's serve run", () => {
         runHost({ hostLibraryPath: stubHostLibraryPath, arguments: programArguments, signal: stopRequest.signal, coreLibraryPath, standardLibraryPath }),
       );
 
-      expect(seen.record).toEqual(["start", "stop"]);
+      expect(seen.record).toEqual(["start", "started 0", "stop"]);
       expect(seen.exit).toBe(0);
     },
     hostTestTimeout,
@@ -167,7 +167,7 @@ describe("the host program's plugins", () => {
   });
 
   it(
-    "calls stop next, telling started nothing, for a stop requested while a plugin activates",
+    "activates every plugin and tells started, then calls stop with no tick, for a stop requested while a plugin activates",
     async () => {
       const stopRequest = new AbortController();
       const requester = globalThis as { weivelRequestStop?: () => void };
@@ -177,14 +177,43 @@ describe("the host program's plugins", () => {
 
       const seen = await witness(vector, preparedRun((directory) => writeFileSync(join(directory, "alpha", "entry.js"), stopping), stopRequest.signal));
 
-      expect(seen.record).toEqual(["start", "open alpha scoped", "stop"]);
+      expect(seen.record).toEqual(["start", "open alpha scoped", "open beta scoped", "started 2", "outcome alpha activated no-detail", "outcome beta activated no-detail", "stop"]);
       delete requester.weivelRequestStop;
     },
     hostTestTimeout,
   );
 });
 
+describe("the host program's plan libraries", () => {
+  it("ends the run at a library that will not load, activating no plugin, and still calls stop", async () => {
+    const libraries = [{ binary: "lib/missing.dll", declaration: "lib/library.json" }];
+    const vector = hostVector("program/libraries", withPlugins(["alpha"], { mode: "serve", libraries, exit: 8 }));
+
+    const seen = await witness(vector);
+
+    expect(seen.record).toEqual(["start", "stop"]);
+    expect(seen.exit).toBe(8);
+  });
+});
+
 describe("the host program's action run", () => {
+  it(
+    "runs no action and tells finished nothing for a stop requested while a plugin activates",
+    async () => {
+      const stopRequest = new AbortController();
+      const requester = globalThis as { weivelRequestStop?: () => void };
+      requester.weivelRequestStop = () => stopRequest.abort();
+      const stopping = "export default { activate() { globalThis.weivelRequestStop(); }, actions: { echo: (given) => given } };";
+      const vector = hostVector("program/action", withPlugins(["alpha"], { mode: "action", action: { plugin: "alpha", name: "echo" } }));
+
+      const seen = await witness(vector, preparedRun((directory) => writeFileSync(join(directory, "alpha", "entry.js"), stopping), stopRequest.signal));
+
+      expect(seen.record).toEqual(["start", "open alpha scoped", "started 1", "outcome alpha activated no-detail", "stop"]);
+      delete requester.weivelRequestStop;
+    },
+    hostTestTimeout,
+  );
+
   function actionRun(name: string, plugin: Record<string, unknown>, stubPlugin: Record<string, unknown> = {}): ReturnType<typeof hostVector> {
     const given = withPlugins(["alpha"], { mode: "action", action: { plugin: "alpha", name }, exit: 2 }, [{ name: "alpha", ...plugin }]);
     const stubHost = given.stubHost as { plugins: Record<string, unknown>[] };

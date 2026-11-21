@@ -55,20 +55,18 @@ class Run {
     return this.#stopTheRun();
   }
 
+  /**
+   * @implNote Activation is one phase, as `host.h` says: a stop requested while it runs takes effect once `started`
+   * has been told every plugin's outcome, so it is read only after that call.
+   */
   async #carryOutThePlan(): Promise<void> {
     const mode = this.#plan.mode;
     if (mode !== HostMode.Serve && mode !== HostMode.Action) {
       throw new Error(`start answered the mode ${mode}, which this program does not run`);
     }
-    if (!this.#loadEveryLibrary()) {
-      return;
-    }
+    this.#loadEveryLibrary();
     this.#plugins.askScopesOf(this.#libraries);
-    const outcomes = await this.#activateEveryPlugin();
-    if (outcomes === undefined) {
-      return;
-    }
-    await this.#provider.started(outcomes);
+    await this.#provider.started(await this.#activateEveryPlugin());
     if (this.#stop.requested) {
       return;
     }
@@ -79,25 +77,18 @@ class Run {
     }
   }
 
-  /** Loads the plan's libraries in order; false when a stop was requested first. */
-  #loadEveryLibrary(): boolean {
+  /** Loads the plan's libraries in order. @throws Error for the first that will not load, which ends the run. */
+  #loadEveryLibrary(): void {
     for (const library of this.#plan.libraries) {
-      if (this.#stop.requested) {
-        return false;
-      }
       this.#libraries.push(loadDeclaredLibrary(this.#host, this.#standard, library.binary, library.declaration));
     }
-    return !this.#stop.requested;
   }
 
-  /** Every plugin's outcome in the plan's order, or undefined when a stop was requested before the last ended. */
-  async #activateEveryPlugin(): Promise<HostOutcome[] | undefined> {
+  /** Every plugin's outcome, in the plan's order, each one attempted. */
+  async #activateEveryPlugin(): Promise<HostOutcome[]> {
     const outcomes: HostOutcome[] = [];
     for (const planned of this.#plan.plugins) {
       outcomes.push(await this.#plugins.activate(planned));
-      if (this.#stop.requested) {
-        return undefined;
-      }
     }
     return outcomes;
   }

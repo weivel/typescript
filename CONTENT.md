@@ -196,7 +196,10 @@ such library it offers nothing, and a refused scope tells the plugin as `refused
 clock and passes it in; every other decision is the library's. A plugin that cannot be registered, its manifest
 unreadable or refused, is told as `refused` with why; an activation that throws, as `failed` with the reason its
 quarantine carries. Once `start` answered OK, whatever ends the run early, a refusal or a library that will not load,
-is logged and `stop` is still called; a stop request takes effect at the next step, once the call under way returns.
+is logged and `stop` is still called. A library that will not load ends the run there, no plugin activated. Loading
+and activating is one phase: a stop requested during it takes effect once `started` was told every plugin's outcome,
+and the run then calls `stop` with no tick and no action; one during a later call takes effect once that call returns.
+The `default` export is this language's convention for an entry, not the standard's.
 The core plans each activation over capabilities, under which a consumed one is always optional, so the plan's order
 is the library's alone.
 
