@@ -116,7 +116,7 @@ describe("a described definition loaded through the host", () => {
     await activated(world.host, [...handles.registered.values()]);
     const reached = globalThis.weivelHostProbe as unknown as { methods: string[]; found: unknown };
 
-    expect(reached.methods).toEqual(["reflect", "tree", "find", "measure", "negate", "halve", "invert", "swap_shade", "grow", "weigh", "count_releases"]);
+    expect(reached.methods).toEqual(["reflect", "tree", "find", "measure", "negate", "halve", "invert", "swap_shade", "grow", "weigh", "count_releases", "outline"]);
     expect(reached.found).toBe("the first letter");
   });
 

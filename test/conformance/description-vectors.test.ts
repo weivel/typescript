@@ -110,6 +110,12 @@ describe("description/binding/visit-takes-a-handle-inside-a-struct", () => {
   });
 });
 
+describe("description/binding/outline-copies-nodes-holding-nodes-both-ways", () => {
+  it("writes and answers a struct reaching its own kind as deep as the data goes, and releases each answer once", async () => {
+    await witnessed("description/binding/outline-copies-nodes-holding-nodes-both-ways");
+  });
+});
+
 describe("description/binding/a-refusal-arrives-with-its-detail-and-fix", () => {
   it("rejects with the provider's own detail and fix", async () => {
     await witnessed("description/binding/a-refusal-arrives-with-its-detail-and-fix");
