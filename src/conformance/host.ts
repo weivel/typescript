@@ -144,6 +144,10 @@ function sendStop(stopRequest: AbortController, directory: string): void {
   writeFileSync(join(directory, stopSentFileName), "");
 }
 
+/**
+ * @implNote A run that rejects while the suite still waits for `stopAfter` would otherwise reject unobserved, so
+ * `running` is marked handled at once; every path still awaits it and sees the rejection.
+ */
 async function drive(given: HostGiven, directory: string, run: HostProgramRun): Promise<number> {
   const stopRequest = new AbortController();
   const startedAt = Date.now();
@@ -151,6 +155,7 @@ async function drive(given: HostGiven, directory: string, run: HostProgramRun): 
   const running = run([directory, ...(given.arguments ?? [])], stopRequest.signal).finally(() => {
     state.ended = true;
   });
+  running.catch(() => undefined);
   if (given.stopAfter === undefined) {
     return withinTheBound(running, "starting");
   }

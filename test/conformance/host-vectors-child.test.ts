@@ -1,30 +1,46 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { bundleProgram } from "../../src/bundle/index.ts";
 import { readLayerVectors, type HostProgramRun } from "../../src/conformance/index.ts";
-import { childProgramRun, killEveryChild } from "../program/child.ts";
-import { hostTestTimeout, witness } from "../program/world.ts";
+import { failedRunExit } from "../../src/program/index.ts";
+import { bundleRelocatedProgram, childProgramRun, killEveryChild, runningChildPids, type RelocatedProgram } from "../program/child.ts";
+import { isAlive, processTreeOf } from "../program/process-tree.ts";
+import { hostTestTimeout, hostVector, judgeHostVector, witness } from "../program/world.ts";
 import { layerVectorDirectory } from "./kit.ts";
 
-interface HostThen {
-  readonly record: { readonly equals: readonly string[] };
-  readonly exit?: number;
-  readonly exitsNonZero?: boolean;
-}
-
 const hostVectors = readLayerVectors(layerVectorDirectory).filter((vector) => vector.op === "host");
-const bundleDirectory = mkdtempSync(join(tmpdir(), "weivel-bundled-program-"));
+const treeBoundMillis = 10_000;
+let relocated: RelocatedProgram;
 let run: HostProgramRun;
 
 beforeAll(async () => {
-  run = childProgramRun(await bundleProgram(bundleDirectory));
+  relocated = await bundleRelocatedProgram();
+  run = childProgramRun(relocated.program);
 });
 
 afterEach(killEveryChild);
 
-afterAll(() => rmSync(bundleDirectory, { recursive: true, force: true }));
+afterAll(() => relocated.remove());
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/** Polls `condition` until it holds, failing past the bound. */
+async function eventually(condition: () => boolean, what: string): Promise<void> {
+  const startedAt = Date.now();
+  while (!condition()) {
+    if (Date.now() - startedAt > treeBoundMillis) {
+      throw new Error(`${what} did not happen within ${treeBoundMillis} ms`);
+    }
+    await sleep(50);
+  }
+}
+
+/** A serve run with nothing to tick, so the program waits for a stop request that never comes. */
+const servingUntilStopped = hostVector("serving-until-stopped", {
+  stubHost: { mode: "serve", plugins: [{ name: "alpha", directory: "alpha", manifest: "alpha/manifest.json", scope: true }] },
+  plugins: [{ name: "alpha", activate: [{ log: "up" }] }],
+  stopAfter: "a line no run writes",
+});
 
 describe("the bundled program as a child process", () => {
   it("has host vectors to run", () => {
@@ -32,21 +48,44 @@ describe("the bundled program as a child process", () => {
   });
 
   for (const vector of hostVectors) {
-    it(
-      `runs ${vector.id} as the vector states`,
-      async () => {
-        const then = vector.then as unknown as HostThen;
-
-        const seen = await witness(vector, run);
-
-        expect(seen.record).toEqual(then.record.equals);
-        if (then.exitsNonZero === true) {
-          expect(seen.exit).not.toBe(0);
-        } else {
-          expect(seen.exit).toBe(then.exit);
-        }
-      },
-      hostTestTimeout,
-    );
+    it(`runs ${vector.id} as the vector states, relocated beside its libraries and koffi`, () => judgeHostVector(vector, run), hostTestTimeout);
   }
+
+  it(
+    "loads the native libraries from beside the bundle, not from this package",
+    async () => {
+      const bare = await bundleRelocatedProgram(false);
+      try {
+        const endsWithoutAStop = hostVectors.find((vector) => vector.id === "host/a-malformed-next-ends-the-run")!;
+        const seen = await witness(endsWithoutAStop, childProgramRun(bare.program));
+
+        expect(seen.exit).toBe(failedRunExit);
+        expect(seen.record).toEqual([]);
+      } finally {
+        bare.remove();
+      }
+    },
+    hostTestTimeout,
+  );
+
+  it(
+    "leaves no process of a child's tree behind once it is killed mid-serve",
+    async () => {
+      const witnessed = witness(servingUntilStopped, run).catch((error: unknown) => error);
+      const relayConsoleAndProgram = 3;
+      const minimumTree = process.platform === "win32" ? relayConsoleAndProgram : 1;
+      let tree: number[] = [];
+      await eventually(() => {
+        const [root] = runningChildPids();
+        tree = root === undefined ? [] : processTreeOf(root);
+        return tree.length >= minimumTree;
+      }, "the child's tree starting");
+
+      killEveryChild();
+
+      expect(tree.filter(isAlive)).toEqual([]);
+      expect(await witnessed).toBeInstanceOf(Error);
+    },
+    hostTestTimeout,
+  );
 });

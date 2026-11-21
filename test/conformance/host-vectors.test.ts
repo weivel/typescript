@@ -1,27 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 import { readLayerVector } from "../../src/conformance/index.ts";
-import { hostTestTimeout, witness } from "../program/world.ts";
+import { hostTestTimeout, judgeHostVector } from "../program/world.ts";
 import { layerVectorDirectory } from "./kit.ts";
 
-interface HostThen {
-  readonly record: { readonly equals: readonly string[] };
-  readonly exit?: number;
-  readonly exitsNonZero?: boolean;
-}
-
-/** Runs the kit's vector in process against `stub-host` and judges its record and exit code as LAYER.md states. */
-async function judge(id: string): Promise<void> {
-  const vector = readLayerVector(layerVectorDirectory, id);
-  const then = vector.then as unknown as HostThen;
-
-  const seen = await witness(vector);
-
-  expect(seen.record).toEqual(then.record.equals);
-  if (then.exitsNonZero === true) {
-    expect(seen.exit).not.toBe(0);
-  } else {
-    expect(seen.exit).toBe(then.exit);
-  }
+/** Runs the kit's vector in process against `stub-host` and judges it as LAYER.md states. */
+function judge(id: string): Promise<void> {
+  return judgeHostVector(readLayerVector(layerVectorDirectory, id));
 }
 
 describe("host/a-malformed-next-ends-the-run", () => {
