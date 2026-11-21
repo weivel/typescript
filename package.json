@@ -44,6 +44,10 @@
     "./program": {
       "types": "./dist/program/index.d.ts",
       "default": "./dist/program/index.js"
+    },
+    "./bundle": {
+      "types": "./dist/bundle/index.d.ts",
+      "default": "./dist/bundle/index.js"
     }
   },
   "bin": {
@@ -56,8 +60,17 @@
   "dependencies": {
     "koffi": "2.16.3"
   },
+  "peerDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "peerDependenciesMeta": {
+    "esbuild": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "22.10.2",
+    "esbuild": "0.28.2",
     "typescript": "5.7.2",
     "vitest": "3.2.7"
   }

@@ -1,7 +1,7 @@
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
 import { sharedLibraryFileName } from "../../src/core/index.ts";
 import { witnessHostVector, type HostProgramRun, type HostWitness, type LayerVector } from "../../src/conformance/index.ts";
 import { coreLibraryPath } from "../real-core.ts";
@@ -46,4 +46,24 @@ export function hostVector(id: string, given: Record<string, unknown>): LayerVec
 /** Runs `vector` against `stub-host`, in process unless `run` says otherwise. */
 export function witness(vector: LayerVector, run?: HostProgramRun): Promise<HostWitness> {
   return witnessHostVector(vector, { stubHostLibraryPath, coreLibraryPath, standardLibraryPath, ...(run === undefined ? {} : { run }) });
+}
+
+interface HostThen {
+  readonly record: { readonly equals: readonly string[] };
+  readonly exit?: number;
+  readonly exitsNonZero?: boolean;
+}
+
+/** Runs the kit's `vector` against `stub-host` and judges its record and exit code as LAYER.md states. */
+export async function judgeHostVector(vector: LayerVector, run?: HostProgramRun): Promise<void> {
+  const then = vector.then as unknown as HostThen;
+
+  const seen = await witness(vector, run);
+
+  expect(seen.record).toEqual(then.record.equals);
+  if (then.exitsNonZero === true) {
+    expect(seen.exit).not.toBe(0);
+  } else {
+    expect(seen.exit).toBe(then.exit);
+  }
 }

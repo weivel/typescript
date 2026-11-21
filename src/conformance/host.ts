@@ -10,6 +10,8 @@ import type { LayerVector } from "./vectors.js";
 export const hostVectorBoundMillis = 30_000;
 
 const recordFileName = "record.txt";
+/** The file the suite writes in the run directory once it has sent its stop request. */
+const stopSentFileName = "stop-sent";
 const entryFileName = "entry.js";
 const pollMillis = 5;
 
@@ -70,7 +72,8 @@ function writeFile(path: string, text: string): void {
 
 /**
  * Lays the vector's run out in `directory`: each plugin's manifest and entry at the paths its stub-host entry names,
- * and `stub-host.json` naming each entry it wrote.
+ * the manifest left out for a plugin whose `unreadableManifest` is true, and `stub-host.json` naming each entry it
+ * wrote.
  *
  * @throws Error for a plugin the stub-host file names and the vector gives no steps for, or a step this driver does
  * not realise.
@@ -82,8 +85,10 @@ function layOut(given: HostGiven, directory: string): void {
       throw new Error(`The vector gives no steps for the plugin ${stub.name}.`);
     }
     const entry = `${stub.directory}/${entryFileName}`;
-    writeFile(join(directory, stub.manifest), JSON.stringify(hostVectorManifest(stub.name, entryFileName)));
-    writeFile(join(directory, entry), hostVectorEntrySource(realised));
+    if (realised.unreadableManifest !== true) {
+      writeFile(join(directory, stub.manifest), JSON.stringify(hostVectorManifest(stub.name, entryFileName)));
+    }
+    writeFile(join(directory, entry), hostVectorEntrySource(realised, directory, hostVectorBoundMillis));
     return { ...stub, entry };
   });
   writeFile(join(directory, "stub-host.json"), JSON.stringify({ ...given.stubHost, plugins }));
@@ -128,6 +133,21 @@ async function withinTheBound(running: Promise<number>, what: string): Promise<n
   }
 }
 
+/**
+ * Sends the run its stop request and then writes `stop-sent`, as LAYER.md says.
+ *
+ * @implNote An AbortSignal runs its listeners within `abort()`, so a run that takes the request in process has taken
+ * it, and one that forwards it to a child has sent it, before the file is written.
+ */
+function sendStop(stopRequest: AbortController, directory: string): void {
+  stopRequest.abort();
+  writeFileSync(join(directory, stopSentFileName), "");
+}
+
+/**
+ * @implNote A run that rejects while the suite still waits for `stopAfter` would otherwise reject unobserved, so
+ * `running` is marked handled at once; every path still awaits it and sees the rejection.
+ */
 async function drive(given: HostGiven, directory: string, run: HostProgramRun): Promise<number> {
   const stopRequest = new AbortController();
   const startedAt = Date.now();
@@ -135,6 +155,7 @@ async function drive(given: HostGiven, directory: string, run: HostProgramRun): 
   const running = run([directory, ...(given.arguments ?? [])], stopRequest.signal).finally(() => {
     state.ended = true;
   });
+  running.catch(() => undefined);
   if (given.stopAfter === undefined) {
     return withinTheBound(running, "starting");
   }
@@ -145,7 +166,10 @@ async function drive(given: HostGiven, directory: string, run: HostProgramRun): 
     await running.catch(() => undefined);
     throw error;
   }
-  stopRequest.abort();
+  if (state.ended) {
+    return running;
+  }
+  sendStop(stopRequest, directory);
   return withinTheBound(running, "its stop request");
 }
 
