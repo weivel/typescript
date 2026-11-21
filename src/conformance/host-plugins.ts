@@ -5,11 +5,13 @@ export interface HostVectorPlugin {
   readonly name: string;
   /** True when its manifest is not written, so the program cannot read it. */
   readonly unreadableManifest?: boolean;
+  /** The ids its manifest consumes in place of `consumedServiceIds`. */
+  readonly consumes?: readonly string[];
   readonly activate?: readonly Readonly<Record<string, unknown>>[];
   readonly actions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
-/** The ids every plugin of a `host` vector consumes. */
+/** The ids a plugin of a `host` vector consumes unless it carries `consumes`. */
 export const consumedServiceIds = ["weivel.config", "weivel.secrets", "weivel.paths", "weivel.log"] as const;
 
 const stepKinds = ["log", "logSetting", "set", "absent", "waitFor", "pause", "throw"] as const;
@@ -190,7 +192,11 @@ export function hostVectorEntrySource(plugin: HostVectorPlugin, runDirectory: st
   ].join("\n");
 }
 
-/** The manifest of a `host` vector's plugin `name`, consuming every id the program may offer it. */
-export function hostVectorManifest(name: string, entryFileName: string): Readonly<Record<string, NativeValue>> {
-  return { api: 1, importName: name, entry: entryFileName, services: { consumes: [...consumedServiceIds] } };
+/** The manifest of a `host` vector's plugin `name`, consuming `consumes`, every id the program may offer it by default. */
+export function hostVectorManifest(
+  name: string,
+  entryFileName: string,
+  consumes: readonly string[] = consumedServiceIds,
+): Readonly<Record<string, NativeValue>> {
+  return { api: 1, importName: name, entry: entryFileName, services: { consumes: [...consumes] } };
 }

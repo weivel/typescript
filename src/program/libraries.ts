@@ -8,7 +8,9 @@ import type { Standard } from "../standard/index.js";
 export const declarationFileName = "library.json";
 
 /**
- * Loads a C library from its binary and the declaration the standard reads, as host services.
+ * Loads a C library from its binary and the declaration the standard reads, as host services, withholding
+ * `weivel.host` and `weivel.scope` from every plugin: the program binds them for itself, and a scope is made for one
+ * plugin and handed to no other.
  *
  * @throws Error when the declaration cannot be read or the standard refuses it, or for every reason
  * `Host.loadLibrary` throws.
@@ -24,7 +26,8 @@ export function loadDeclaredLibrary(host: Host, standard: Standard, binary: stri
   if (declaration.value === undefined) {
     throw new Error(`The standard refused the declaration ${declarationPath}: ${declaration.refusal?.detail ?? `status ${declaration.status}`}.`);
   }
-  const loaded = host.loadLibrary(declaration.value, binary);
+  const ids = standard.serviceIds;
+  const loaded = host.loadLibrary(declaration.value, binary, { withheld: [ids.host, ids.scope] });
   if (isHostDestroyed(loaded)) {
     throw new Error(`The host was destroyed before ${binary} was loaded.`);
   }
