@@ -4,7 +4,7 @@ import { messageOf } from "../host/activation-failure.js";
 import { DescribedCallError, Host, type LoadedLibrary } from "../host/index.js";
 import { HostMode, loadStandard, type Standard } from "../standard/index.js";
 import { loadDeclaredLibrary, loadHostLibrary } from "./libraries.js";
-import { failedRunExit, type ActionEnding, type HostOutcome, type HostPlan, type RunHostOptions } from "./model.js";
+import { failedRunExit, isSet, type ActionEnding, type HostOutcome, type HostPlan, type RunHostOptions } from "./model.js";
 import { PluginRun } from "./plugins.js";
 import { HostProvider } from "./provider.js";
 import { StopRequest } from "./stop-request.js";
@@ -16,6 +16,12 @@ function logEnding(log: Logger, during: string, error: unknown): void {
   } else {
     log.error(`The run ends: ${during} failed: ${messageOf(error)}`, error);
   }
+}
+
+/** Whether the plan sets only one of `action_service` and `action_method`, or sets either to an empty text. */
+function namesItsMethodMalformedly(plan: HostPlan): boolean {
+  const { action_service: service, action_method: method } = plan;
+  return service === "" || method === "" || isSet(service) !== isSet(method);
 }
 
 /** Destroys the run's host, logging what goes wrong, so the run still answers its exit code. */
@@ -73,6 +79,9 @@ class Run {
     if (mode !== HostMode.Serve && mode !== HostMode.Action) {
       throw new Error(`start answered the mode ${mode}, which this program does not run`);
     }
+    if (mode === HostMode.Action && namesItsMethodMalformedly(this.#plan)) {
+      throw new Error("start answered an action service without its method, a method without its service, or either empty");
+    }
     this.#loadEveryLibrary();
     this.#plugins.askScopesOf(this.#libraries);
     await this.#provider.started(await this.#activateEveryPlugin());
@@ -119,7 +128,11 @@ class Run {
   }
 
   async #runTheAction(): Promise<ActionEnding> {
-    const action = this.#plugins.actionOf(this.#plan.action_plugin, this.#plan.action_name);
+    const { action_plugin: plugin, action_service: service, action_method: method } = this.#plan;
+    const action =
+      isSet(service) && isSet(method)
+        ? this.#plugins.methodOf(plugin, service, method)
+        : this.#plugins.actionOf(plugin, this.#plan.action_name);
     if (typeof action === "string") {
       return { failure: action };
     }

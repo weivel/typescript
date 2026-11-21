@@ -171,6 +171,19 @@ export class PluginContexts {
     return false;
   }
 
+  /**
+   * The object `owner` itself registered under `id` and the core has not ended, or undefined: a registration under the
+   * id by another plugin or the host is never answered.
+   */
+  registeredBy(owner: bigint, id: string): unknown {
+    for (const [registration, offered] of this.#state.services.entries()) {
+      if (offered.owner === owner && offered.id === id && !this.#state.hasEnded(registration)) {
+        return offered.object;
+      }
+    }
+    return undefined;
+  }
+
   /** What `plugin` holds for the implementation handle the core handed it, or undefined once revoked. */
   held(plugin: bigint, implementation: bigint): unknown {
     return this.#state.holdings.lookup(plugin, implementation)?.implementation;

@@ -9,6 +9,8 @@ export interface HostVectorPlugin {
   readonly consumes?: readonly string[];
   readonly activate?: readonly Readonly<Record<string, unknown>>[];
   readonly actions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** Each service id its manifest provides, to that service's methods by name, each written as an action is. */
+  readonly provides?: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>>;
 }
 
 /** The ids a plugin of a `host` vector consumes unless it carries `consumes`. */
@@ -53,6 +55,13 @@ function refuseUnknown(plugin: HostVectorPlugin): void {
   for (const [name, action] of Object.entries(plugin.actions ?? {})) {
     if (!isActionOfItsKind(action)) {
       throw new Error(`${plugin.name}'s action ${name} ${JSON.stringify(action)} is of no kind this driver realises.`);
+    }
+  }
+  for (const [id, methods] of Object.entries(plugin.provides ?? {})) {
+    for (const [name, method] of Object.entries(methods)) {
+      if (!isActionOfItsKind(method)) {
+        throw new Error(`${plugin.name}'s method ${name} of ${id} ${JSON.stringify(method)} is of no kind this driver realises.`);
+      }
     }
   }
 }
@@ -164,14 +173,21 @@ function actionOf(action) {
   };
 }
 
+function methodsOf(methods) {
+  return Object.fromEntries(Object.entries(methods).map(([name, method]) => [name, actionOf(method)]));
+}
+
 export default {
   async activate(context) {
     activeContext = context;
+    for (const [id, methods] of Object.entries(provides)) {
+      context.services.register(context.service(id), methodsOf(methods));
+    }
     for (const step of steps) {
       await runStep(context, step);
     }
   },
-  actions: Object.fromEntries(Object.entries(actions).map(([name, action]) => [name, actionOf(action)])),
+  actions: methodsOf(actions),
 };
 `;
 
@@ -188,15 +204,24 @@ export function hostVectorEntrySource(plugin: HostVectorPlugin, runDirectory: st
     `const boundMillis = ${JSON.stringify(boundMillis)};`,
     `const steps = ${JSON.stringify(plugin.activate ?? [])};`,
     `const actions = ${JSON.stringify(plugin.actions ?? {})};`,
+    `const provides = ${JSON.stringify(plugin.provides ?? {})};`,
     entryRuntime,
   ].join("\n");
 }
 
-/** The manifest of a `host` vector's plugin `name`, consuming `consumes`, every id the program may offer it by default. */
+/**
+ * The manifest of a `host` vector's plugin `name`, consuming `consumes`, every id the program may offer it by default,
+ * and providing `provides`.
+ */
 export function hostVectorManifest(
   name: string,
   entryFileName: string,
   consumes: readonly string[] = consumedServiceIds,
+  provides: readonly string[] = [],
 ): Readonly<Record<string, NativeValue>> {
-  return { api: 1, importName: name, entry: entryFileName, services: { consumes: [...consumes] } };
+  const services: Record<string, NativeValue> = { consumes: [...consumes] };
+  if (provides.length > 0) {
+    services.provides = [...provides];
+  }
+  return { api: 1, importName: name, entry: entryFileName, services };
 }
