@@ -4,6 +4,7 @@ import type { CallArena } from "./arena.js";
 import type { DescribedHandle, HandleHoldings } from "./handles.js";
 import { DescribedKind } from "./layout.js";
 import type { DescribedLayouts, LaidOutType, MemberPlan, ReachPlan } from "./layouts.js";
+import { none } from "./outcome.js";
 import { scalarForC, scalarFromC, scalarTypes } from "./scalars.js";
 import { depthLimit, readValue, valueImage, valueKindOffset, writeValue } from "./values.js";
 
@@ -328,7 +329,9 @@ export class StructWriter {
     }
     if (plan.reached.element === DescribedKind.Value) {
       const block = this.arena.allocate(plan.stride);
-      writeValue(this.arena, block, 0, value);
+      if (value !== none) {
+        writeValue(this.arena, block, 0, value);
+      }
       return block;
     }
     if (byKoffi) {

@@ -40,7 +40,14 @@
     "./benchmarks": {
       "types": "./dist/benchmarks/index.d.ts",
       "default": "./dist/benchmarks/index.js"
+    },
+    "./program": {
+      "types": "./dist/program/index.d.ts",
+      "default": "./dist/program/index.js"
     }
+  },
+  "bin": {
+    "weivel-host": "dist/program/bin.js"
   },
   "scripts": {
     "build": "node scripts/native.ts && tsc",

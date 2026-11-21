@@ -14,6 +14,12 @@ export interface PluginContextsOptions {
   readonly log?: Logger;
 }
 
+/** One id the host offers plugins one by one: the one registration under the host, and each plugin's object. */
+interface PluginOffers {
+  readonly objects: Map<bigint, unknown>;
+  readonly unregister: () => void;
+}
+
 export const consoleLogger: Logger = {
   debug: (message) => console.debug(message),
   info: (message) => console.info(message),
@@ -29,6 +35,7 @@ export const consoleLogger: Logger = {
  */
 export class PluginContexts {
   readonly #state: ContextState;
+  readonly #pluginOffers = new Map<string, PluginOffers>();
 
   /** Hand every event the core dispatches to this, in the core's order. */
   readonly receive: EventDispatcher = (event: CoreEvent) => this.#state.receive(event);
@@ -99,6 +106,59 @@ export class PluginContexts {
       capacity: options.capacity,
       ...(whenReleased === undefined ? {} : { whenReleased }),
     });
+  }
+
+  /**
+   * Offers `service` under `id` to `plugin` alone; the answer withdraws it. Every plugin offered an id shares one
+   * registration under WEIVEL_HOST, made with the first offer and unregistered with the last withdrawal, so the core
+   * decides reach as for any host service, and each plugin that reaches it gets its own object; one offered nothing
+   * under an id another plugin is offered gets nothing from a `get`, a settled want or a watch.
+   *
+   * @implNote The core announces the registration once, when the first offer makes it, so a want or a watch of a
+   * plugin offered the id only later, or never, settles or hears `register` with nothing: a plugin whose scope left an
+   * id out and that wants or watches it while it activates is answered nothing once a later plugin's offer makes the
+   * shared registration. A core-level offer to one plugin is what would end this.
+   * @throws Error for an id registered for every plugin, or one already offered to `plugin`; RefusalError when the
+   * core refuses the registration.
+   */
+  registerPluginService<Service>(plugin: bigint, type: ServiceType<Service>, service: Service): () => void {
+    const existing = this.#pluginOffers.get(type.id);
+    if (existing?.objects.has(plugin) === true) {
+      throw new Error(`${type.id} is already offered to plugin ${plugin}.`);
+    }
+    const offers = existing ?? this.#firstOffer(type.id, plugin, service);
+    offers.objects.set(plugin, service);
+    let offered = true;
+    return () => {
+      if (offered) {
+        offered = false;
+        this.#withdraw(type.id, offers, plugin);
+      }
+    };
+  }
+
+  /** @implNote The object is in place before the registration is made, since the core settles a waiting want inside that call. */
+  #firstOffer(id: string, plugin: bigint, service: unknown): PluginOffers {
+    if (this.registers(id)) {
+      throw new Error(`${id} is registered for every plugin, so it may not be offered to one plugin alone.`);
+    }
+    const objects = new Map<bigint, unknown>([[plugin, service]]);
+    const offers = { objects, unregister: registerService(this.#state, HOST, id, undefined, { offeredTo: objects }) };
+    this.#pluginOffers.set(id, offers);
+    return offers;
+  }
+
+  #withdraw(id: string, offers: PluginOffers, plugin: bigint): void {
+    offers.objects.delete(plugin);
+    if (offers.objects.size === 0 && this.#pluginOffers.get(id) === offers) {
+      this.#pluginOffers.delete(id);
+      offers.unregister();
+    }
+  }
+
+  /** Whether some plugin is offered an object of its own under `id`. */
+  offersToPlugins(id: string): boolean {
+    return this.#pluginOffers.has(id);
   }
 
   /** Whether a registration under `id` that the core has not ended is live, a plugin's or the host's. */

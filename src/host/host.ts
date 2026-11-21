@@ -274,11 +274,41 @@ export class Host {
     if (this.#destroyed) {
       return hostDestroyed;
     }
-    const library = this.#libraryIds.get(type.id);
-    if (library !== undefined) {
-      throw new Error(`The C library ${library} declares ${type.id}, so the host may not register it under the host as well.`);
+    this.#refuseLibraryId(type.id);
+    if (this.#contexts.offersToPlugins(type.id)) {
+      throw new Error(`${type.id} is offered to plugins one by one, so the host may not register it for every plugin as well.`);
     }
     return this.#registerHostService(type, service, options);
+  }
+
+  /**
+   * Offers a service the host itself supplies to one registered plugin alone; the answer withdraws it. The core
+   * decides reach as for any host service: every plugin offered an id shares one registration under WEIVEL_HOST, and
+   * each plugin that reaches it gets the object offered to it, a plugin offered nothing under that id nothing.
+   *
+   * @throws Error for a plugin the host never registered or has forgotten, an id a live C library declares or the
+   * host registered for every plugin, or one already offered to that plugin; RefusalError when the core refuses the
+   * registration; EmbeddedNulError for an id that holds a NUL.
+   */
+  registerPluginService<Service>(plugin: bigint, type: ServiceType<Service>, service: Service): (() => void) | HostDestroyed {
+    if (this.#destroyed) {
+      return hostDestroyed;
+    }
+    this.#record(plugin);
+    this.#refuseLibraryId(type.id);
+    const withdraw = this.#contexts.registerPluginService(plugin, type, service);
+    return () => {
+      if (!this.#destroyed) {
+        withdraw();
+      }
+    };
+  }
+
+  #refuseLibraryId(id: string): void {
+    const library = this.#libraryIds.get(id);
+    if (library !== undefined) {
+      throw new Error(`The C library ${library} declares ${id}, so the host may not register it under the host as well.`);
+    }
   }
 
   #registerHostService<Service>(type: ServiceType<Service>, service: Service, options: RegisterOptions, whenReleased?: () => void): () => void {
@@ -350,7 +380,7 @@ export class Host {
       unload();
       throw error;
     }
-    return { declaration, services: bound.services, definitions: bound.definitions, unload };
+    return { declaration, services: bound.services, definitions: bound.definitions, described: bound.described, unload };
   }
 
   #registerLibraryServices(bound: BoundLibrary, unregisters: (() => void)[]): void {

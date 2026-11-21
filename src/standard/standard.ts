@@ -42,6 +42,9 @@ export interface StandardServiceIds {
   readonly config: string;
   readonly secrets: string;
   readonly paths: string;
+  readonly log: string;
+  readonly scope: string;
+  readonly host: string;
 }
 
 /** The standard library the package's own build leaves in `native/`, beside the core. */
@@ -113,6 +116,9 @@ export class Standard {
       config: this.#functions.weivel_standard_service_config() as string,
       secrets: this.#functions.weivel_standard_service_secrets() as string,
       paths: this.#functions.weivel_standard_service_paths() as string,
+      log: this.#functions.weivel_standard_service_log() as string,
+      scope: this.#functions.weivel_standard_service_scope() as string,
+      host: this.#functions.weivel_standard_service_host() as string,
     };
   }
 

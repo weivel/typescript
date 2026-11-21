@@ -8,7 +8,14 @@ const standard = realStandard();
 
 describe("the standard's service ids", () => {
   it("are the ones the standard library answers", () => {
-    expect(standard.serviceIds).toEqual({ config: "weivel.config", secrets: "weivel.secrets", paths: "weivel.paths" });
+    expect(standard.serviceIds).toEqual({
+      config: "weivel.config",
+      secrets: "weivel.secrets",
+      paths: "weivel.paths",
+      log: "weivel.log",
+      scope: "weivel.scope",
+      host: "weivel.host",
+    });
   });
 });
 

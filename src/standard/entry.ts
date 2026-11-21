@@ -56,8 +56,8 @@ async function importPlugin(entryPath: string | null, entryPresent: boolean, exp
 
 /**
  * The entry of a plugin laid out on disk: its activate imports the module the standard resolved and calls the
- * activate of the export its caller names; its deactivate calls that export's, once one was imported. No export name
- * is assumed, `default` included.
+ * activate of the export its caller names; its deactivate calls that export's, and its actions are that export's,
+ * once one was imported. No export name is assumed, `default` included.
  */
 export function entryOnDisk(entryPath: string | null, entryPresent: boolean, exportName: string): Plugin {
   let imported: Plugin | undefined;
@@ -68,6 +68,9 @@ export function entryOnDisk(entryPath: string | null, entryPresent: boolean, exp
     },
     deactivate() {
       return imported?.deactivate?.();
+    },
+    get actions() {
+      return imported?.actions;
     },
   };
 }

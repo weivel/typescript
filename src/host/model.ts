@@ -1,6 +1,8 @@
 import type { ActivationPlan, CoreOptions, EdgeSource, ListenerErrorSink, Manifest, Refusal } from "../core/index.js";
 import type { Logger, PluginContext } from "../context/index.js";
 import type { LibraryDeclaration } from "../standard/answers.js";
+import type { BoundDefinition } from "./description/definition.js";
+import type { NativeValue } from "./description/values.js";
 import type { DescriptionCheck, LibraryDefinition } from "./libraries.js";
 import type { Clock, Scheduler, TimerMoveListener } from "../timer/index.js";
 
@@ -13,7 +15,15 @@ export interface Plugin {
   activate(context: PluginContext): void | Promise<void>;
   /** Releases whatever `activate` took: timers, watchers, child processes. */
   deactivate?(): void | Promise<void>;
+  /** What the plugin offers to run once, by name, as a host program's ACTION run asks for one. */
+  readonly actions?: Readonly<Record<string, PluginAction>>;
 }
+
+/**
+ * One action of a plugin: it takes the run's arguments, `undefined` when there are none, and answers a value tree,
+ * or `undefined` for nothing, at once or as a promise.
+ */
+export type PluginAction = (actionArguments: NativeValue | undefined) => NativeValue | undefined | Promise<NativeValue | undefined>;
 
 export interface HostOptions {
   /** Which declarations order activation; the core has no default, so the host's caller chooses. */
@@ -115,6 +125,8 @@ export interface LoadedLibrary {
    * the unload, or once the host is destroyed.
    */
   readonly definitions: ReadonlyMap<string, LibraryDefinition>;
+  /** Each definition service that declares a description, by id, as the bound object registered under the host. */
+  readonly described: ReadonlyMap<string, BoundDefinition>;
   /**
    * Unregisters every service at once and refuses every later bytes call; the binary closes once every holding of
    * each definition has been released, as each holder's `release` of its revocation says.

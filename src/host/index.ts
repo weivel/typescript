@@ -25,5 +25,6 @@ export type {
   LibraryService,
   LoadedLibrary,
   Plugin,
+  PluginAction,
   RegisterAnswer,
 } from "./model.js";
