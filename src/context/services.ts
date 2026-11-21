@@ -1,7 +1,7 @@
 import { Choice, HandleCondition, PluginStatus, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
 import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, Want, WantOptions } from "./model.js";
 import { DetachedError, failureOf } from "./refusal.js";
-import { ensureAttached, type Attachment, type ContextState } from "./state.js";
+import { ensureAttached, objectFor, type Attachment, type ContextState } from "./state.js";
 
 function encodeWant(options: WantOptions, now: number): CoreWantOptions {
   return {
@@ -34,18 +34,20 @@ export interface Registering {
    * ended since it was unregistered.
    */
   readonly whenReleased?: () => void;
+  /** The object each plugin is offered, by plugin, for a registration the host offers plugins one by one. */
+  readonly offeredTo?: ReadonlyMap<bigint, unknown>;
 }
 
 /** Registers `object` under `id` for `owner`, a plugin or the host; the answer unregisters it. */
 export function registerService(state: ContextState, owner: bigint, id: string, object: unknown, registering: Registering = {}): () => void {
-  const { capacity, whenReleased } = registering;
+  const { capacity, whenReleased, offeredTo } = registering;
   const call = whenReleased === undefined ? "weivel_register_service" : "weivel_register_service_awaiting_releases";
   const result = state.call(() => {
     const registered =
       whenReleased === undefined ? state.core.registerService(owner, id) : state.core.registerServiceAwaitingReleases(owner, id);
     const registration = answered(registered);
     if (registration !== undefined) {
-      state.services.add(registration, { id, object, owner, capacity, awaitsReleases: whenReleased !== undefined });
+      state.services.add(registration, { id, object, owner, capacity, awaitsReleases: whenReleased !== undefined, ...(offeredTo === undefined ? {} : { offeredTo }) });
       state.rememberHandle(owner, registration);
       if (whenReleased !== undefined) {
         state.awaitingReleases.add(registration, { owner, released: whenReleased });
@@ -149,7 +151,7 @@ function get(state: ContextState, plugin: bigint, id: string): unknown {
   if (got.status !== Status.Ok && got.status !== Status.None) {
     throw failureOf("weivel_get_service", got);
   }
-  return offered?.object;
+  return offered === undefined ? undefined : objectFor(offered, plugin);
 }
 
 function ids(state: ContextState, plugin: bigint): string[] {

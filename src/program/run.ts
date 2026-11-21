@@ -63,6 +63,7 @@ class Run {
     if (!this.#loadEveryLibrary()) {
       return;
     }
+    this.#plugins.askScopesOf(this.#libraries);
     const outcomes = await this.#activateEveryPlugin();
     if (outcomes === undefined) {
       return;

@@ -27,6 +27,16 @@ export interface Offered {
   readonly capacity?: CapacityProvider;
   /** Whether it was registered with weivel_register_service_awaiting_releases, so each holding outlives its revocation. */
   readonly awaitsReleases?: boolean;
+  /**
+   * For a registration the host offers plugins one by one, the object each plugin is offered, by plugin; a plugin it
+   * names nothing for is offered nothing, and `object` is not read.
+   */
+  readonly offeredTo?: ReadonlyMap<bigint, unknown>;
+}
+
+/** What `plugin` reaches through an offered registration: its own object, where the host offers one per plugin. */
+export function objectFor(offered: Offered, plugin: bigint): unknown {
+  return offered.offeredTo === undefined ? offered.object : offered.offeredTo.get(plugin);
 }
 
 /** A registration made awaiting releases, kept until the core says every holding of it has ended. */
@@ -182,7 +192,7 @@ export class ContextState {
     this.holdings.hold(plugin, implementation, {
       reach,
       id: offered.id,
-      implementation: offered.object,
+      implementation: objectFor(offered, plugin),
       awaitsReleases: offered.awaitsReleases === true,
     });
   }

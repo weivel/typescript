@@ -2,25 +2,22 @@ import { lstatSync, readFileSync } from "node:fs";
 import type { Logger } from "../context/index.js";
 import type { Refusal } from "../core/index.js";
 import { messageOf } from "../host/activation-failure.js";
-import { isHostDestroyed, type ActivationOutcome, type Host, type HostDestroyed, type Plugin, type PluginAction } from "../host/index.js";
+import type { ActivationOutcome, Host, LoadedLibrary, Plugin, PluginAction } from "../host/index.js";
 import { entryOnDisk, HostPluginState, type Standard } from "../standard/index.js";
+import { alive } from "./alive.js";
 import type { HostOutcome, PlannedPlugin } from "./model.js";
 import { textForC } from "./provider.js";
+import { PluginScopes, type OpenedScope } from "./scopes.js";
 
 interface RunPlugin {
   readonly planned: PlannedPlugin;
   readonly handle: bigint;
   readonly entry: Plugin;
+  /** Its scope, once opened. */
+  scope?: OpenedScope;
 }
 
 type Registered = { readonly plugin: RunPlugin; readonly detail?: undefined } | { readonly plugin?: undefined; readonly detail: string };
-
-function alive<Answer>(answer: Answer | HostDestroyed): Answer {
-  if (isHostDestroyed(answer)) {
-    throw new Error("The host was destroyed while the run still used it.");
-  }
-  return answer;
-}
 
 /** The standard's test of an entry, a regular file reached through no link, for the last step of its path. */
 function isRegularFile(path: string): boolean {
@@ -37,14 +34,16 @@ function detailOf(reason: string | null | undefined): string | null {
 }
 
 /**
- * The plan's plugins as one run activates them: each registered from its manifest and activated alone, in the plan's
- * order, the next one only once the activation before it ended, and every one released on the way out.
+ * The plan's plugins as one run activates them: each registered from its manifest, its scope opened, and activated
+ * alone, in the plan's order, the next one's scope opened only once the activation before it ended; every one
+ * released on the way out, then its scope.
  */
 export class PluginRun {
   readonly #host: Host;
   readonly #standard: Standard;
   readonly #entryExport: string;
   readonly #log: Logger;
+  readonly #scopes: PluginScopes;
   readonly #registered: RunPlugin[] = [];
   readonly #outcomes = new Map<string, HostOutcome>();
 
@@ -53,6 +52,12 @@ export class PluginRun {
     this.#standard = standard;
     this.#entryExport = entryExport;
     this.#log = log;
+    this.#scopes = new PluginScopes(host, standard.serviceIds);
+  }
+
+  /** Asks each plugin's scope of the first of the run's `libraries` that serves `weivel.scope`. */
+  askScopesOf(libraries: readonly LoadedLibrary[]): void {
+    this.#scopes.askOf(libraries);
   }
 
   /** Activates one plugin of the plan and answers what became of it. */
@@ -67,7 +72,13 @@ export class PluginRun {
     if (registered.plugin === undefined) {
       return { manifest: planned.manifest, state: HostPluginState.Refused, detail: detailOf(registered.detail) };
     }
-    return this.#activateRegistered(registered.plugin);
+    const plugin = registered.plugin;
+    const scope = await this.#scopes.open(plugin.handle, planned.manifest);
+    if ("refused" in scope) {
+      return { manifest: planned.manifest, state: HostPluginState.Refused, detail: detailOf(scope.refused) };
+    }
+    plugin.scope = scope;
+    return this.#activateRegistered(plugin);
   }
 
   #register(planned: PlannedPlugin): Registered {
@@ -140,10 +151,15 @@ export class PluginRun {
     return typeof action === "function" ? action : `the plugin ${manifest} offers no action ${name}`;
   }
 
-  /** Releases every plugin registered, the last first, each whatever became of the one before. */
+  /** Releases every plugin registered, the last first, and then its scope, each whatever became of the one before. */
   async releaseEvery(): Promise<void> {
     for (const plugin of [...this.#registered].reverse()) {
       await this.#host.release(plugin.handle).catch((error: unknown) => this.#log.error(`${plugin.planned.manifest} could not be released.`, error));
+      try {
+        plugin.scope?.release();
+      } catch (error) {
+        this.#log.error(`The scope of ${plugin.planned.manifest} could not be released.`, error);
+      }
     }
   }
 }

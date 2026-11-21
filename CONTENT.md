@@ -86,6 +86,13 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
   `registerHostService` throws for an id a live library declares. A load the core refuses partway is undone as an
   unload before it throws: what it registered is unregistered and its binary closed.
+- `host.registerPluginService(plugin, type, service)` offers a service to one plugin alone. The core has one
+  registration per id, so every plugin offered an id shares one registration under the host, made with the first
+  offer and unregistered with the last withdrawal: the core decides reach as for any host service, and each plugin
+  that reaches it gets its own object, a plugin offered nothing under that id nothing. The core announces the
+  registration once, so a plugin offered the id after a want or watch of its own was announced it hears nothing; a
+  host offers a plugin its services before its activation. An id can be offered one by one or registered for every
+  plugin, never both.
 - A definition service that declares no description is registered as a frozen `LibraryDefinition`,
   `{ library, pointer }`: the import name it came from and koffi's pointer to the very struct its symbol answered,
   never a copy. A definition that answers NULL, or a struct whose `size` is below `2 * sizeof(void *)`, makes
@@ -181,7 +188,11 @@ is the same run from a command line, SIGINT and SIGTERM, or SIGINT and SIGBREAK 
 library's declaration is the `library.json` beside its binary. The program loads it, asks `start` for the plan, loads
 the plan's libraries and activates its plugins one at a time in the plan's order, each entry's export `default`
 unless `entryExport` names another, tells `started`, then ticks in a SERVE run or calls the named action in an
-ACTION run and tells `finished`, releases every plugin, and calls `stop` last, exiting with its code. It reads the
+ACTION run and tells `finished`, releases every plugin and then its scope, and calls `stop` last, exiting with its
+code. Immediately before each activation it opens the plugin's scope from whichever loaded library serves
+`weivel.scope`, the host library included, and offers that plugin alone each definition the scope answers under the
+standard's ids (`weivel.config`, `weivel.secrets`, `weivel.paths`, `weivel.log`), bound by its description; with no
+such library it offers nothing, and a refused scope tells the plugin as `refused`, never activated. It reads the
 clock and passes it in; every other decision is the library's. A plugin that cannot be registered, its manifest
 unreadable or refused, is told as `refused` with why; an activation that throws, as `failed` with the reason its
 quarantine carries. Once `start` answered OK, whatever ends the run early, a refusal or a library that will not load,

@@ -13,7 +13,7 @@ import {
 import { answerCapacity } from "./capacity.js";
 import { RefusalError } from "./refusal.js";
 import { releaseHolding } from "./services.js";
-import type { ContextState } from "./state.js";
+import { objectFor, type ContextState } from "./state.js";
 
 /**
  * Settles a want the core settled: with the provider's object, or rejected with the core's refusal.
@@ -42,7 +42,7 @@ function settleWant(state: ContextState, event: WantSettledEvent): void {
   if (event.degraded) {
     state.emit(event.plugin, { kind: "degraded", id: pending.id, refusal: event.refusal });
   }
-  pending.resolve(offered.object);
+  pending.resolve(objectFor(offered, event.plugin));
 }
 
 function hearService(state: ContextState, event: WatchEvent): void {
@@ -54,7 +54,7 @@ function hearService(state: ContextState, event: WatchEvent): void {
     const offered = state.services.lookup(event.implementation);
     if (offered !== undefined) {
       state.hold(event.plugin, event.implementation, ReachKind.Service, offered);
-      state.notify(() => watching.listener(offered.object, "register"), event);
+      state.notify(() => watching.listener(objectFor(offered, event.plugin), "register"), event);
     }
   } else if (event.change === Change.Unregistered) {
     state.notify(() => watching.listener(undefined, "unregister"), event);

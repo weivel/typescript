@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { HostProgramRun } from "../../src/conformance/index.ts";
 import { failedRunExit, main, runHost, terminateSignals } from "../../src/program/index.ts";
 import { recordingLogger } from "../context/world.ts";
 import { coreLibraryPath } from "../real-core.ts";
@@ -126,5 +127,99 @@ describe("the host program's command line", () => {
 
   it("exits non-zero, running nothing, when no host library is named", async () => {
     expect(await main([])).toBe(failedRunExit);
+  });
+});
+
+/** A plan of the plugins `names`, each scoped and activating with no step, in the mode and with the members given. */
+function withPlugins(names: readonly string[], stubHost: Record<string, unknown>, plugins: readonly Record<string, unknown>[] = []): Record<string, unknown> {
+  return {
+    stubHost: { plugins: names.map((name) => ({ name, directory: name, manifest: `${name}/manifest.json`, scope: true })), ...stubHost },
+    plugins: names.map((name) => plugins.find((plugin) => plugin.name === name) ?? { name }),
+  };
+}
+
+/** Runs the program in process after `prepare` has changed the directory the suite laid out. */
+function preparedRun(prepare: (directory: string) => void, signal?: AbortSignal): HostProgramRun {
+  return (programArguments, stopRequest) => {
+    prepare(programArguments[0]!);
+    return runHost({ hostLibraryPath: stubHostLibraryPath, arguments: programArguments, signal: signal ?? stopRequest, coreLibraryPath, standardLibraryPath, log: recordingLogger().logger });
+  };
+}
+
+describe("the host program's plugins", () => {
+  it("tells a plugin whose manifest cannot be read as refused with why, and activates the next", async () => {
+    const vector = hostVector("program/plugins", withPlugins(["alpha", "beta"], { mode: "serve", refuse: { started: "enough" } }));
+
+    const seen = await witness(vector, preparedRun((directory) => rmSync(join(directory, "alpha", "manifest.json"))));
+
+    expect(seen.record).toEqual(["start", "open beta scoped", "started 2", "outcome alpha refused detail", "outcome beta activated no-detail", "stop"]);
+  });
+
+  it("offers every plugin nothing, and opens no scope, when no loaded library serves weivel.scope", async () => {
+    const declaration = { ...stubHostDeclaration, services: stubHostDeclaration.services.filter((service) => service.id !== "weivel.scope") };
+    const hostLibraryPath = stubHostCopy(declaration);
+    const absent = ["weivel.config", "weivel.secrets", "weivel.paths", "weivel.log"].map((id) => ({ absent: id }));
+    const vector = hostVector("program/plugins", withPlugins(["alpha"], { mode: "serve", refuse: { started: "enough" } }, [{ name: "alpha", activate: absent }]));
+
+    const seen = await witness(vector, (programArguments, signal) => runHost({ hostLibraryPath, arguments: programArguments, signal, coreLibraryPath, standardLibraryPath }));
+
+    expect(seen.record).toEqual(["start", "started 1", "outcome alpha activated no-detail", "stop"]);
+  });
+
+  it(
+    "calls stop next, telling started nothing, for a stop requested while a plugin activates",
+    async () => {
+      const stopRequest = new AbortController();
+      const requester = globalThis as { weivelRequestStop?: () => void };
+      requester.weivelRequestStop = () => stopRequest.abort();
+      const stopping = "export default { activate() { globalThis.weivelRequestStop(); } };";
+      const vector = hostVector("program/plugins", withPlugins(["alpha", "beta"], { mode: "serve" }));
+
+      const seen = await witness(vector, preparedRun((directory) => writeFileSync(join(directory, "alpha", "entry.js"), stopping), stopRequest.signal));
+
+      expect(seen.record).toEqual(["start", "open alpha scoped", "stop"]);
+      delete requester.weivelRequestStop;
+    },
+    hostTestTimeout,
+  );
+});
+
+describe("the host program's action run", () => {
+  function actionRun(name: string, plugin: Record<string, unknown>, stubPlugin: Record<string, unknown> = {}): ReturnType<typeof hostVector> {
+    const given = withPlugins(["alpha"], { mode: "action", action: { plugin: "alpha", name }, exit: 2 }, [{ name: "alpha", ...plugin }]);
+    const stubHost = given.stubHost as { plugins: Record<string, unknown>[] };
+    return hostVector("program/action", { ...given, stubHost: { ...stubHost, plugins: stubHost.plugins.map((stub) => ({ ...stub, ...stubPlugin })) } });
+  }
+
+  it("tells finished a failure, never ticking, for an action the plugin does not offer", async () => {
+    const seen = await witness(actionRun("missing", { actions: { other: {} } }));
+
+    expect(seen.record).toEqual(["start", "open alpha scoped", "started 1", "outcome alpha activated no-detail", "finished failure", "stop"]);
+    expect(seen.exit).toBe(2);
+  });
+
+  it("tells finished a failure for an action of a plugin that was not activated", async () => {
+    const seen = await witness(actionRun("echo", { actions: { echo: { echo: true } } }, { scope: undefined, scopeRefused: "no" }));
+
+    expect(seen.record).toEqual(["start", "open alpha refused", "started 1", "outcome alpha refused detail", "finished failure", "stop"]);
+  });
+
+  it("tells finished a failure for an action answering what no value tree holds", async () => {
+    const answeringAFunction = "export default { activate() {}, actions: { odd: () => () => 1 } };";
+
+    const seen = await witness(actionRun("odd", {}), preparedRun((directory) => writeFileSync(join(directory, "alpha", "entry.js"), answeringAFunction)));
+
+    expect(seen.record).toEqual(["start", "open alpha scoped", "started 1", "outcome alpha activated no-detail", "finished failure", "stop"]);
+  });
+
+  it("hands the action its arguments as the plan carried them, and tells finished an awaited answer", async () => {
+    const awaiting = "export default { activate() {}, actions: { later: async (given) => ({ given }) } };";
+    const vector = actionRun("later", {});
+    const stubHost = vector.given.stubHost as Record<string, unknown>;
+    const withArguments = hostVector("program/action", { ...vector.given, stubHost: { ...stubHost, action: { plugin: "alpha", name: "later", arguments: [true, null, "x"] } } });
+
+    const seen = await witness(withArguments, preparedRun((directory) => writeFileSync(join(directory, "alpha", "entry.js"), awaiting)));
+
+    expect(seen.record).toContain('finished result {"given":[true,null,"x"]}');
   });
 });
