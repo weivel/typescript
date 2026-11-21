@@ -62,7 +62,7 @@ const nativeLibraries: NativeLibrary[] = [
       `-DWEIVEL_STANDARD_SOURCE_DIR=${join(siblingsDirectory, "standard")}`,
       `-DWEIVEL_CORE_SOURCE_DIR=${join(siblingsDirectory, "core")}`,
     ],
-    companions: [{ source: "library.json", destination: join(stubHostDirectory, "library.json") }],
+    companions: ["library.json", "library-declares-log.json"].map((name) => ({ source: name, destination: join(stubHostDirectory, name) })),
   },
 ];
 

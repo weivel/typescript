@@ -40,6 +40,7 @@ import {
   type HostedPlugin,
   type HostOptions,
   type LoadedLibrary,
+  type LoadLibraryOptions,
   type Plugin,
   type RegisterAnswer,
 } from "./model.js";
@@ -341,6 +342,9 @@ export class Host {
    * as a LibraryDefinition carrying the very address its symbol answered, each definition registered awaiting
    * releases.
    *
+   * An id `options.withheld` names is bound as any other and registered for no plugin, so only the caller reaches it,
+   * through the answer.
+   *
    * Unloading unregisters every service at once and refuses every later bytes call; the binary is closed once every
    * definition service has had every holding of it released, or once the host is destroyed.
    *
@@ -354,12 +358,13 @@ export class Host {
    * the binary closed again. RefusalError when the core refuses one of its registrations, the load then undone as an
    * unload.
    */
-  loadLibrary(declaration: LibraryDeclaration, libraryPath: string): LoadedLibrary | HostDestroyed {
+  loadLibrary(declaration: LibraryDeclaration, libraryPath: string, options: LoadLibraryOptions = {}): LoadedLibrary | HostDestroyed {
     if (this.#destroyed) {
       return hostDestroyed;
     }
     refuseMisdeclared(declaration);
-    this.#refuseHeldIds(declaration);
+    const withheld = new Set(options.withheld ?? []);
+    this.#refuseHeldIds(declaration, withheld);
     const bound = bindLibrary(libraryPath, declaration, () => this.#openBinaries.delete(bound), this.#options.descriptionCheck);
     this.#openBinaries.add(bound);
     const unregisters: (() => void)[] = [];
@@ -375,7 +380,7 @@ export class Host {
     this.#libraryUnloads.add(unload);
     ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
     try {
-      this.#registerLibraryServices(bound, unregisters);
+      this.#registerLibraryServices(bound, unregisters, withheld);
     } catch (error) {
       unload();
       throw error;
@@ -383,11 +388,16 @@ export class Host {
     return { declaration, services: bound.services, definitions: bound.definitions, described: bound.described, unload };
   }
 
-  #registerLibraryServices(bound: BoundLibrary, unregisters: (() => void)[]): void {
+  #registerLibraryServices(bound: BoundLibrary, unregisters: (() => void)[], withheld: ReadonlySet<string>): void {
     for (const [id, service] of bound.services) {
-      unregisters.push(this.#registerHostService({ id }, service, {}));
+      if (!withheld.has(id)) {
+        unregisters.push(this.#registerHostService({ id }, service, {}));
+      }
     }
     for (const [id, definition] of bound.definitions) {
+      if (withheld.has(id)) {
+        continue;
+      }
       bound.awaitRelease(id);
       try {
         unregisters.push(this.#registerHostService({ id }, bound.described.get(id) ?? definition, {}, () => bound.released(id)));
@@ -398,15 +408,18 @@ export class Host {
     }
   }
 
-  /** @implNote A registration under WEIVEL_HOST replaces one, so a library may take no id something already holds. */
-  #refuseHeldIds(declaration: LibraryDeclaration): void {
+  /**
+   * @implNote A registration under WEIVEL_HOST replaces one, so a library may take no id something already holds; an
+   * id it withholds registers nothing, so it replaces nothing.
+   */
+  #refuseHeldIds(declaration: LibraryDeclaration, withheld: ReadonlySet<string>): void {
     const declared = new Set<string>();
     for (const { id } of declaration.services) {
       if (declared.has(id)) {
         throw new Error(`The C library ${declaration.importName} declares ${id} twice.`);
       }
       declared.add(id);
-      if (this.#contexts.registers(id)) {
+      if (!withheld.has(id) && this.#contexts.registers(id)) {
         throw new Error(`${id} is already registered, so the C library ${declaration.importName} may not register it under the host.`);
       }
     }

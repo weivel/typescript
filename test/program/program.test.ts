@@ -184,6 +184,29 @@ describe("the host program's plugins", () => {
   );
 });
 
+describe("the host program's own services", () => {
+  it("offers no plugin weivel.host or weivel.scope, even one that consumes both", async () => {
+    const consumes = ["weivel.config", "weivel.secrets", "weivel.paths", "weivel.log", "weivel.scope", "weivel.host"];
+    const steps = [{ absent: "weivel.scope" }, { absent: "weivel.host" }, { log: "up" }];
+    const vector = hostVector("program/own", withPlugins(["alpha"], { mode: "serve", refuse: { started: "enough" } }, [{ name: "alpha", consumes, activate: steps }]));
+
+    const seen = await witness(vector);
+
+    expect(seen.record).toEqual(["start", "open alpha scoped", 'log alpha info "up"', "started 1", "outcome alpha activated no-detail", "stop"]);
+  });
+
+  it("loads a plan library that also serves weivel.scope, and asks the scope of the library it was started with", async () => {
+    const declaration = join(temporaryDirectory(), "library.json");
+    writeFileSync(declaration, JSON.stringify({ ...stubHostDeclaration, importName: "second-scope", services: stubHostDeclaration.services.filter((service) => service.id === "weivel.scope") }));
+    const libraries = [{ binary: stubHostLibraryPath, declaration }];
+    const vector = hostVector("program/own", withPlugins(["alpha"], { mode: "serve", libraries, refuse: { started: "enough" } }));
+
+    const seen = await witness(vector);
+
+    expect(seen.record).toEqual(["start", "open alpha scoped", "started 1", "outcome alpha activated no-detail", "stop"]);
+  });
+});
+
 describe("the host program's scopes", () => {
   it("tells a plugin whose scope cannot be offered as refused with why, and attempts the next", async () => {
     const logLibrary = stubHostCopy({

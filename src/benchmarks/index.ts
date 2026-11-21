@@ -6,7 +6,6 @@ export {
   benchmarkLibraryCall,
   benchmarkSameLanguageCall,
   defaultSamplings,
-  provisionalBlockingCallBound,
   type Arithmetic,
   type AwaitedPath,
   type BenchmarkOptions,

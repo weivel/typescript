@@ -13,7 +13,6 @@ import {
   loadLanguageBudget,
   noiseBoundsOf,
   pairRatio,
-  provisionalBlockingCallBound,
   ratioBound,
   readLanguageBudget,
   roundOrder,
@@ -319,10 +318,10 @@ describe("a described operation through the generic binding", () => {
 });
 
 describe("a blocking described operation through the generic binding", () => {
-  it("costs at most its provisional multiple of the same operation called directly on the calling thread", { timeout }, async () => {
+  it("costs at most its budgeted multiple of the same operation called directly on the calling thread", { timeout }, async () => {
     const ratio = reportFfiPair("blocking-call", await benchmarkBlockingCall(describedOptions));
 
-    expect(ratio).toBeLessThanOrEqual(provisionalBlockingCallBound);
+    expect(ratio).toBeLessThanOrEqual(boundHere("blockingCall"));
   });
 });
 
@@ -360,7 +359,12 @@ describe("the bounds", () => {
   it("are the kit's: each gate's highest measured ratio on the kit's platform, times the kit's margin", () => {
     const margin = kitLines.get("ratio-margin")!;
     const nodePlatforms = { linux: "linux", win32: "windows", darwin: "macos" } as const;
-    const gates = [["controlCall", "control-call"], ["libraryCall", "library-call"], ["describedCall", "described-call"]] as const;
+    const gates = [
+      ["controlCall", "control-call"],
+      ["libraryCall", "library-call"],
+      ["describedCall", "described-call"],
+      ["blockingCall", "blocking-call"],
+    ] as const;
     for (const [gate, kitGate] of gates) {
       for (const [nodePlatform, kitPlatform] of Object.entries(nodePlatforms)) {
         const line = kitLines.get(`${kitGate} ${kitPlatform}`);

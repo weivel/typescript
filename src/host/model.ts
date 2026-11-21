@@ -112,20 +112,29 @@ export function isHostDestroyed(answer: unknown): answer is HostDestroyed {
   return answer === hostDestroyed;
 }
 
+/** How `Host.loadLibrary` binds a C library. */
+export interface LoadLibraryOptions {
+  /**
+   * Ids of the declaration that are bound but registered for no plugin: the caller reaches each through the loaded
+   * library alone, and the binary's close does not wait on one.
+   */
+  readonly withheld?: readonly string[];
+}
+
 /** A C library bound as host services. */
 export interface LoadedLibrary {
   readonly declaration: LibraryDeclaration;
-  /** Each service of bytes functions, by id, as registered under the host: a method per declared function. */
+  /** Each service of bytes functions, by id, as bound, registered under the host unless withheld: a method per function. */
   readonly services: ReadonlyMap<string, LibraryService>;
   /**
-   * Each definition service, by id, as registered under the host.
+   * Each definition service, by id, as bound, registered under the host unless withheld.
    *
    * @remarks This hands the caller the raw address of each struct, and the caller holds no registration of it, so its
    * use keeps nothing open: the address dies with the binary, which closes once every holder has released it after
    * the unload, or once the host is destroyed.
    */
   readonly definitions: ReadonlyMap<string, LibraryDefinition>;
-  /** Each definition service that declares a description, by id, as the bound object registered under the host. */
+  /** Each definition service that declares a description, by id, as the bound object, registered unless withheld. */
   readonly described: ReadonlyMap<string, BoundDefinition>;
   /**
    * Unregisters every service at once and refuses every later bytes call; the binary closes once every holding of

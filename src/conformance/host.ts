@@ -22,7 +22,7 @@ const pollMillis = 5;
 export type HostProgramRun = (programArguments: readonly string[], signal: AbortSignal) => Promise<number>;
 
 export interface HostVectorOptions {
-  /** A build of the kit's `stub-host`, its `library.json` beside it. */
+  /** A build of the kit's `stub-host`, its `library.json` and the kit's other stub-host declarations beside it. */
   readonly stubHostLibraryPath: string;
   readonly coreLibraryPath?: string;
   readonly standardLibraryPath?: string;
@@ -43,8 +43,14 @@ interface StubPlugin {
   readonly manifest: string;
 }
 
+/** A library of the plan as a vector states it: a binary and a declaration, or `stub-host` under a kit declaration. */
+type StubLibrary = Readonly<Record<string, unknown>> & { readonly stubHostDeclaration?: string };
+
 interface HostGiven {
-  readonly stubHost: Readonly<Record<string, unknown>> & { readonly plugins: readonly StubPlugin[] };
+  readonly stubHost: Readonly<Record<string, unknown>> & {
+    readonly plugins: readonly StubPlugin[];
+    readonly libraries?: readonly StubLibrary[];
+  };
   readonly plugins: readonly HostVectorPlugin[];
   readonly arguments?: readonly string[];
   readonly stopAfter?: string;
@@ -70,15 +76,23 @@ function writeFile(path: string, text: string): void {
   writeFileSync(path, text);
 }
 
+/** A plan library as `stub-host.json` holds it: one naming a kit declaration becomes `stub-host` under that file. */
+function libraryOf(library: StubLibrary, stubHostLibraryPath: string): Readonly<Record<string, unknown>> {
+  if (library.stubHostDeclaration === undefined) {
+    return library;
+  }
+  return { binary: stubHostLibraryPath, declaration: join(dirname(stubHostLibraryPath), library.stubHostDeclaration) };
+}
+
 /**
  * Lays the vector's run out in `directory`: each plugin's manifest and entry at the paths its stub-host entry names,
  * the manifest left out for a plugin whose `unreadableManifest` is true, and `stub-host.json` naming each entry it
- * wrote.
+ * wrote and each library, one naming a stub-host declaration as `stub-host` under that declaration.
  *
  * @throws Error for a plugin the stub-host file names and the vector gives no steps for, or a step this driver does
  * not realise.
  */
-function layOut(given: HostGiven, directory: string): void {
+function layOut(given: HostGiven, directory: string, stubHostLibraryPath: string): void {
   const plugins = given.stubHost.plugins.map((stub) => {
     const realised = given.plugins.find((plugin) => plugin.name === stub.name);
     if (realised === undefined) {
@@ -86,12 +100,13 @@ function layOut(given: HostGiven, directory: string): void {
     }
     const entry = `${stub.directory}/${entryFileName}`;
     if (realised.unreadableManifest !== true) {
-      writeFile(join(directory, stub.manifest), JSON.stringify(hostVectorManifest(stub.name, entryFileName)));
+      writeFile(join(directory, stub.manifest), JSON.stringify(hostVectorManifest(stub.name, entryFileName, realised.consumes)));
     }
     writeFile(join(directory, entry), hostVectorEntrySource(realised, directory, hostVectorBoundMillis));
     return { ...stub, entry };
   });
-  writeFile(join(directory, "stub-host.json"), JSON.stringify({ ...given.stubHost, plugins }));
+  const libraries = given.stubHost.libraries?.map((library) => libraryOf(library, stubHostLibraryPath));
+  writeFile(join(directory, "stub-host.json"), JSON.stringify({ ...given.stubHost, plugins, ...(libraries === undefined ? {} : { libraries }) }));
 }
 
 /** The complete lines of the record: a line counts once the newline after it is written. */
@@ -186,7 +201,7 @@ export async function witnessHostVector(vector: LayerVector, options: HostVector
   const given = vector.given as unknown as HostGiven;
   const directory = mkdtempSync(join(tmpdir(), "weivel-host-vector-"));
   try {
-    layOut(given, directory);
+    layOut(given, directory, options.stubHostLibraryPath);
     const exit = await drive(given, directory, options.run ?? inProcessRun(options));
     return { id: vector.id, record: recordLines(directory), exit };
   } finally {

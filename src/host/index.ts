@@ -24,6 +24,7 @@ export type {
   LibraryFunction,
   LibraryService,
   LoadedLibrary,
+  LoadLibraryOptions,
   Plugin,
   PluginAction,
   RegisterAnswer,
