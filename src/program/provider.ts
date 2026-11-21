@@ -44,9 +44,16 @@ export class HostProvider {
     await this.#call("started", { outcomes });
   }
 
-  /** When to tick next, milliseconds since the Unix epoch, or undefined for never. */
+  /**
+   * When to tick next, milliseconds since the Unix epoch, or undefined for never.
+   *
+   * @throws Error for a `has_next` other than 0 or 1, a malformed answer that ends the run.
+   */
   async tick(now: number): Promise<number | undefined> {
     const answered = (await this.#call("tick", { now })) as AnsweredNext;
+    if (answered.has_next !== 0 && answered.has_next !== 1) {
+      throw new Error(`tick answered has_next ${answered.has_next}, which is neither 0 nor 1`);
+    }
     return answered.has_next === 1 ? Number(answered.next) : undefined;
   }
 

@@ -115,8 +115,9 @@ export class PluginContexts {
    * under an id another plugin is offered gets nothing from a `get`, a settled want or a watch.
    *
    * @implNote The core announces the registration once, when the first offer makes it, so a want or a watch of a
-   * plugin offered the id only later settles or hears with nothing. A host offers a plugin its services before that
-   * plugin's activation, so before the plugin can want or watch them.
+   * plugin offered the id only later, or never, settles or hears `register` with nothing: a plugin whose scope left an
+   * id out and that wants or watches it while it activates is answered nothing once a later plugin's offer makes the
+   * shared registration. A core-level offer to one plugin is what would end this.
    * @throws Error for an id registered for every plugin, or one already offered to `plugin`; RefusalError when the
    * core refuses the registration.
    */

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { HostProgramRun } from "../../src/conformance/index.ts";
 import { failedRunExit, main, runHost, terminateSignals } from "../../src/program/index.ts";
@@ -182,6 +182,32 @@ describe("the host program's plugins", () => {
     },
     hostTestTimeout,
   );
+});
+
+describe("the host program's scopes", () => {
+  it("tells a plugin whose scope cannot be offered as refused with why, and attempts the next", async () => {
+    const logLibrary = stubHostCopy({
+      importName: "log-library",
+      version: "1.0.0",
+      services: [{ id: "weivel.log", functions: [{ name: "definition", symbol: "stub_host_definition", kind: "definition" }] }],
+    });
+    const libraries = [{ binary: logLibrary, declaration: join(dirname(logLibrary), "library.json") }];
+    const given = withPlugins(["alpha", "beta"], { mode: "serve", libraries, refuse: { started: "enough" } });
+    const stubHost = given.stubHost as { plugins: Record<string, unknown>[] };
+    const vector = hostVector("program/scopes", { ...given, stubHost: { ...stubHost, plugins: stubHost.plugins.map((stub) => (stub.name === "beta" ? { ...stub, scope: undefined } : stub)) } });
+
+    const seen = await witness(vector);
+
+    expect(seen.record).toEqual([
+      "start",
+      "open alpha scoped",
+      "open beta empty",
+      "started 2",
+      "outcome alpha refused detail",
+      "outcome beta activated no-detail",
+      "stop",
+    ]);
+  });
 });
 
 describe("the host program's plan libraries", () => {

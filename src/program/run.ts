@@ -18,6 +18,15 @@ function logEnding(log: Logger, during: string, error: unknown): void {
   }
 }
 
+/** Destroys the run's host, logging what goes wrong, so the run still answers its exit code. */
+async function destroyQuietly(host: Host | undefined, log: Logger): Promise<void> {
+  try {
+    await host?.destroy();
+  } catch (error) {
+    log.error(`Destroying the host failed: ${messageOf(error)}`, error);
+  }
+}
+
 /** What one run started with an OK `start` holds, and how it carries the plan out. */
 class Run {
   readonly #host: Host;
@@ -166,6 +175,6 @@ export async function runHost(options: RunHostOptions): Promise<number> {
     return failedRunExit;
   } finally {
     stop.dispose();
-    await host?.destroy();
+    await destroyQuietly(host, log);
   }
 }

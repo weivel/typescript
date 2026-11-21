@@ -45,9 +45,9 @@ export class PluginScopes {
 
   /**
    * Opens the scope of the plugin whose manifest the plan names `manifest` and offers each definition it answers to
-   * that plugin alone, under the standard's id for it; with no provider, it offers nothing.
-   *
-   * @throws Error when an offer cannot be made, the scope then freed again.
+   * that plugin alone, under the standard's id for it; with no provider, it offers nothing. A scope refused, or one
+   * whose definitions cannot be offered, as when a loaded library declares one of the ids, answers why, the scope then
+   * freed again.
    */
   async open(plugin: bigint, manifest: string): Promise<OpenedScope | RefusedScope> {
     if (this.#provider === undefined) {
@@ -59,7 +59,14 @@ export class PluginScopes {
     } catch (error) {
       return { refused: refusalDetail(error) };
     }
-    return answer === none ? noScope : this.#offer(plugin, answer);
+    if (answer === none) {
+      return noScope;
+    }
+    try {
+      return this.#offer(plugin, answer);
+    } catch (error) {
+      return { refused: `its scope could not be offered: ${messageOf(error)}` };
+    }
   }
 
   #offer(plugin: bigint, answer: ScopeAnswer): OpenedScope {

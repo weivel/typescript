@@ -139,10 +139,10 @@ export class PluginRun {
 
   /** The action `name` of the plugin whose manifest the plan names `manifest`, or why there is none to run. */
   actionOf(manifest: string | undefined, name: string | undefined): PluginAction | string {
-    const plugin = this.#registered.find((registered) => registered.planned.manifest === manifest);
     if (manifest === undefined || name === undefined) {
       return "the plan names no action to run";
     }
+    const plugin = this.#registered.find((registered) => registered.planned.manifest === manifest);
     if (plugin === undefined || this.#outcomes.get(manifest)?.state !== HostPluginState.Activated) {
       return `the plugin ${manifest} was not activated`;
     }

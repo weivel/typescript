@@ -90,9 +90,10 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   registration per id, so every plugin offered an id shares one registration under the host, made with the first
   offer and unregistered with the last withdrawal: the core decides reach as for any host service, and each plugin
   that reaches it gets its own object, a plugin offered nothing under that id nothing. The core announces the
-  registration once, so a plugin offered the id after a want or watch of its own was announced it hears nothing; a
-  host offers a plugin its services before its activation. An id can be offered one by one or registered for every
-  plugin, never both.
+  registration once, when the first offer makes it, so a want or a watch of a plugin offered the id later, or never,
+  settles or hears `register` with nothing: a plugin whose scope left an id out and that wants or watches it while it
+  activates is answered nothing once a later plugin's offer makes the shared registration. An id can be offered one
+  by one or registered for every plugin, never both.
 - A definition service that declares no description is registered as a frozen `LibraryDefinition`,
   `{ library, pointer }`: the import name it came from and koffi's pointer to the very struct its symbol answered,
   never a copy. A definition that answers NULL, or a struct whose `size` is below `2 * sizeof(void *)`, makes
@@ -196,7 +197,11 @@ such library it offers nothing, and a refused scope tells the plugin as `refused
 clock and passes it in; every other decision is the library's. A plugin that cannot be registered, its manifest
 unreadable or refused, is told as `refused` with why; an activation that throws, as `failed` with the reason its
 quarantine carries. Once `start` answered OK, whatever ends the run early, a refusal or a library that will not load,
-is logged and `stop` is still called. A library that will not load ends the run there, no plugin activated. Loading
+is logged and `stop` is still called. A tick answering a `has_next` other than 0 or 1 is malformed and ends the run
+the same way. A scope whose definitions cannot be offered, as when a loaded library declares one of the standard ids,
+tells that plugin as `refused` with why, and the next plugin is attempted. A NUL inside an outcome's detail or an
+action's failure is written as `\0`. A stop request during an ACTION run's action takes effect once `finished` was
+told. A library that will not load ends the run there, no plugin activated. Loading
 and activating is one phase: a stop requested during it takes effect once `started` was told every plugin's outcome,
 and the run then calls `stop` with no tick and no action; one during a later call takes effect once that call returns.
 The `default` export is this language's convention for an entry, not the standard's.
