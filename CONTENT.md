@@ -9,7 +9,8 @@ standard's. It is held to the vectors in `weivel/conformance`.
 
 `src/` holds the modules every language implementation of weivel holds, in the order the core's
 `MODULES` list names them: `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance`
-and `benchmarks`. Each is a subpath of the package, `@weivel/typescript/<module>`.
+and `benchmarks`, and `program`, the host program, which that list does not name yet. Each is a subpath of the
+package, `@weivel/typescript/<module>`.
 
 ## A plugin's entry
 
@@ -18,6 +19,8 @@ of which may answer a promise. The host takes it beside the manifest value, as `
 and never needs the standard. The `standard` module feeds it from disk: `registrationOf(discovered, exportName)`
 turns a plugin the standard discovered into its manifest and an entry whose `activate` imports the module and
 activates the export named `exportName`. The caller names that export; the layer assumes none, `default` included.
+The entry may also carry `actions`, a record of name to function taking a run's arguments as a value tree and
+answering one, or nothing, at once or as a promise: what a host program's ACTION run calls.
 
 An activate settles at once when it returns something other than a promise, or throws. A promise is read when it
 settles, since its state cannot be read sooner, so an `async` activate is verified after the plan has started.
@@ -113,7 +116,8 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   that is a safe integer or a bigint for a u64, an i64 or a size, refused beyond the kind's range; a string or null for
   a text; an array of strings and nulls for texts; a `Uint8Array` for bytes; an array for a counted array; a plain
   object for a struct, held or pointed at, keyed by member name; a native value (null, boolean, finite number, string,
-  array, plain object) for a value tree, `undefined` standing for NONE only at its root; and a handle object for a
+  array, plain object) for a value tree, `undefined` standing for NONE only at its root, and for a pointer to a value
+  `none`, a value of kind NONE where `undefined` is NULL; and a handle object for a
   handle. Every `size` and every count the binding fills itself, and a caller writing one, or naming anything the
   operation or struct does not take, is refused with a `TypeError` before the call, as is a value its kind does not
   hold; a text holding a NUL is refused with an `EmbeddedNulError`. Structs nest at most 1000 levels below the one
@@ -169,14 +173,31 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 - The core's and the standard's library paths default to the package's own `native/`, which the package's build
   fills; a caller passes any other path. The default names the package's layout, never a file of its user's.
 
+## The host program
+
+`program` runs any C library serving the standard's `weivel.host` (`weivel/host.h`): `runHost(options)` answers a
+promise of the exit code, and `node dist/program/bin.js <host library> <arguments...>` (the package's `weivel-host`)
+is the same run from a command line, SIGINT and SIGTERM, or SIGINT and SIGBREAK on Windows, its stop request. The
+library's declaration is the `library.json` beside its binary. The program loads it, asks `start` for the plan, loads
+the plan's libraries and activates its plugins one at a time in the plan's order, each entry's export `default`
+unless `entryExport` names another, tells `started`, then ticks in a SERVE run or calls the named action in an
+ACTION run and tells `finished`, releases every plugin, and calls `stop` last, exiting with its code. It reads the
+clock and passes it in; every other decision is the library's. A plugin that cannot be registered, its manifest
+unreadable or refused, is told as `refused` with why; an activation that throws, as `failed` with the reason its
+quarantine carries. Once `start` answered OK, whatever ends the run early, a refusal or a library that will not load,
+is logged and `stop` is still called; a stop request takes effect at the next step, once the call under way returns.
+The core plans each activation over capabilities, under which a consumed one is always optional, so the plan's order
+is the library's alone.
+
 ## Siblings and native libraries
 
 `repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks
 them out there; locally, link or clone each checkout into `siblings/`. `scripts/native.ts` builds
 the core and the standard as shared libraries with CMake and copies them into `native/`, which git
 ignores, and the tests' fixtures into `native/test/`: the core's `echo`, the standard's
-`weivel_standard_described`, which the description vectors bind, and the standard's `layouts` program, which the
-hand layouts are checked against. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
+`weivel_standard_described`, which the description vectors bind, the standard's `layouts` program, which the
+hand layouts are checked against, and the kit's `stub-host` into `native/test/stub-host/` beside its `library.json`,
+which the host vectors run. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
 
 Node runs the build scripts through its own type stripping, which needs Node 22.18 or later.
 

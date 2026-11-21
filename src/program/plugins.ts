@@ -1,0 +1,149 @@
+import { lstatSync, readFileSync } from "node:fs";
+import type { Logger } from "../context/index.js";
+import type { Refusal } from "../core/index.js";
+import { messageOf } from "../host/activation-failure.js";
+import { isHostDestroyed, type ActivationOutcome, type Host, type HostDestroyed, type Plugin, type PluginAction } from "../host/index.js";
+import { entryOnDisk, HostPluginState, type Standard } from "../standard/index.js";
+import type { HostOutcome, PlannedPlugin } from "./model.js";
+import { textForC } from "./provider.js";
+
+interface RunPlugin {
+  readonly planned: PlannedPlugin;
+  readonly handle: bigint;
+  readonly entry: Plugin;
+}
+
+type Registered = { readonly plugin: RunPlugin; readonly detail?: undefined } | { readonly plugin?: undefined; readonly detail: string };
+
+function alive<Answer>(answer: Answer | HostDestroyed): Answer {
+  if (isHostDestroyed(answer)) {
+    throw new Error("The host was destroyed while the run still used it.");
+  }
+  return answer;
+}
+
+/** The standard's test of an entry, a regular file reached through no link, for the last step of its path. */
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A reason as an outcome's detail: set and not empty whenever a reason was given. */
+function detailOf(reason: string | null | undefined): string | null {
+  return reason === null || reason === undefined || reason === "" ? null : textForC(reason);
+}
+
+/**
+ * The plan's plugins as one run activates them: each registered from its manifest and activated alone, in the plan's
+ * order, the next one only once the activation before it ended, and every one released on the way out.
+ */
+export class PluginRun {
+  readonly #host: Host;
+  readonly #standard: Standard;
+  readonly #entryExport: string;
+  readonly #log: Logger;
+  readonly #registered: RunPlugin[] = [];
+  readonly #outcomes = new Map<string, HostOutcome>();
+
+  constructor(host: Host, standard: Standard, entryExport: string, log: Logger) {
+    this.#host = host;
+    this.#standard = standard;
+    this.#entryExport = entryExport;
+    this.#log = log;
+  }
+
+  /** Activates one plugin of the plan and answers what became of it. */
+  async activate(planned: PlannedPlugin): Promise<HostOutcome> {
+    const outcome = await this.#activate(planned);
+    this.#outcomes.set(planned.manifest, outcome);
+    return outcome;
+  }
+
+  async #activate(planned: PlannedPlugin): Promise<HostOutcome> {
+    const registered = this.#register(planned);
+    if (registered.plugin === undefined) {
+      return { manifest: planned.manifest, state: HostPluginState.Refused, detail: detailOf(registered.detail) };
+    }
+    return this.#activateRegistered(registered.plugin);
+  }
+
+  #register(planned: PlannedPlugin): Registered {
+    let json: string;
+    try {
+      json = readFileSync(planned.manifest, "utf8");
+    } catch (error) {
+      return { detail: `its manifest ${planned.manifest} could not be read: ${messageOf(error)}` };
+    }
+    const loaded = this.#standard.loadManifest(json);
+    if (loaded.value === undefined) {
+      return { detail: loaded.refusal?.detail ?? `the standard refused its manifest ${planned.manifest}` };
+    }
+    const entry = entryOnDisk(planned.entry, isRegularFile(planned.entry), this.#entryExport);
+    const answer = alive(this.#host.register(loaded.value, entry));
+    if (answer.plugin === undefined) {
+      return { detail: answer.refusal.detail ?? `the core refused to register it, code ${answer.refusal.code}` };
+    }
+    const plugin = { planned, handle: answer.plugin, entry };
+    this.#registered.push(plugin);
+    return { plugin };
+  }
+
+  async #activateRegistered(plugin: RunPlugin): Promise<HostOutcome> {
+    const started = alive(this.#host.activate([plugin.handle]));
+    if (started.refusal !== undefined) {
+      return this.#refused(plugin, started.refusal);
+    }
+    const planRefusal = started.plan.refusals.find((refused) => refused.plugin === plugin.handle);
+    if (planRefusal !== undefined) {
+      return this.#refused(plugin, planRefusal.refusal);
+    }
+    const [outcome] = await started.outcomes;
+    return outcome === undefined ? this.#refused(plugin, undefined) : this.#outcomeOf(plugin, outcome);
+  }
+
+  #refused(plugin: RunPlugin, refusal: Refusal | undefined): HostOutcome {
+    return { manifest: plugin.planned.manifest, state: HostPluginState.Refused, detail: detailOf(refusal?.detail) };
+  }
+
+  /** @implNote A plugin quarantined for what its activate threw keeps the reason in its ledger row, not its outcome. */
+  #outcomeOf(plugin: RunPlugin, outcome: ActivationOutcome): HostOutcome {
+    const manifest = plugin.planned.manifest;
+    if (outcome.state === "active") {
+      return { manifest, state: HostPluginState.Activated, detail: null };
+    }
+    if (outcome.state === "refused") {
+      return this.#refused(plugin, outcome.refusal);
+    }
+    const reason = outcome.refusal?.detail ?? this.#ledgerReason(plugin.handle);
+    return { manifest, state: HostPluginState.Failed, detail: detailOf(reason) };
+  }
+
+  #ledgerReason(handle: bigint): string | null {
+    const ledger = alive(this.#host.ledger());
+    return ledger.rows.find((row) => row.plugin === handle)?.refusal.detail ?? null;
+  }
+
+  /** The action `name` of the plugin whose manifest the plan names `manifest`, or why there is none to run. */
+  actionOf(manifest: string | undefined, name: string | undefined): PluginAction | string {
+    const plugin = this.#registered.find((registered) => registered.planned.manifest === manifest);
+    if (manifest === undefined || name === undefined) {
+      return "the plan names no action to run";
+    }
+    if (plugin === undefined || this.#outcomes.get(manifest)?.state !== HostPluginState.Activated) {
+      return `the plugin ${manifest} was not activated`;
+    }
+    const actions = plugin.entry.actions;
+    const action = actions !== undefined && Object.hasOwn(actions, name) ? actions[name] : undefined;
+    return typeof action === "function" ? action : `the plugin ${manifest} offers no action ${name}`;
+  }
+
+  /** Releases every plugin registered, the last first, each whatever became of the one before. */
+  async releaseEvery(): Promise<void> {
+    for (const plugin of [...this.#registered].reverse()) {
+      await this.#host.release(plugin.handle).catch((error: unknown) => this.#log.error(`${plugin.planned.manifest} could not be released.`, error));
+    }
+  }
+}

@@ -350,7 +350,7 @@ export class Host {
       unload();
       throw error;
     }
-    return { declaration, services: bound.services, definitions: bound.definitions, unload };
+    return { declaration, services: bound.services, definitions: bound.definitions, described: bound.described, unload };
   }
 
   #registerLibraryServices(bound: BoundLibrary, unregisters: (() => void)[]): void {

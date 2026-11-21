@@ -11,9 +11,14 @@ interface BuiltTarget {
 }
 
 interface NativeLibrary {
+  /** The CMake project, a path under `siblings/`. */
   sibling: string;
+  /** The build directory's name under `build/`, kept short since MSBuild's paths below it are long. */
+  buildName: string;
   targets: BuiltTarget[];
   configureDefinitions: string[];
+  /** Files of the project copied beside what it built, each from its path in the project to a destination. */
+  companions: { source: string; destination: string }[];
 }
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -21,18 +26,22 @@ const siblingsDirectory = join(repositoryRoot, "siblings");
 const buildDirectory = join(repositoryRoot, "build");
 const nativeDirectory = join(repositoryRoot, "native");
 const testLibraryDirectory = join(nativeDirectory, "test");
+const stubHostDirectory = join(testLibraryDirectory, "stub-host");
 
 const nativeLibraries: NativeLibrary[] = [
   {
     sibling: "core",
+    buildName: "core",
     targets: [
       { target: "weivel_core_shared", fileName: sharedLibraryFileName("weivel_core"), destination: nativeDirectory },
       { target: "echo", fileName: sharedLibraryFileName("echo"), destination: testLibraryDirectory },
     ],
     configureDefinitions: [],
+    companions: [],
   },
   {
     sibling: "standard",
+    buildName: "standard",
     targets: [
       { target: "weivel_standard_shared", fileName: sharedLibraryFileName("weivel_standard"), destination: nativeDirectory },
       {
@@ -43,6 +52,17 @@ const nativeLibraries: NativeLibrary[] = [
       { target: "layouts", fileName: executableFileName("layouts"), destination: testLibraryDirectory },
     ],
     configureDefinitions: [`-DWEIVEL_CORE_SOURCE_DIR=${join(siblingsDirectory, "core")}`],
+    companions: [],
+  },
+  {
+    sibling: join("conformance", "test", "stub-host"),
+    buildName: "sh",
+    targets: [{ target: "stub-host", fileName: sharedLibraryFileName("stub-host"), destination: stubHostDirectory }],
+    configureDefinitions: [
+      `-DWEIVEL_STANDARD_SOURCE_DIR=${join(siblingsDirectory, "standard")}`,
+      `-DWEIVEL_CORE_SOURCE_DIR=${join(siblingsDirectory, "core")}`,
+    ],
+    companions: [{ source: "library.json", destination: join(stubHostDirectory, "library.json") }],
   },
 ];
 
@@ -82,10 +102,11 @@ function findBuiltLibrary(libraryBuildDirectory: string, fileName: string): stri
 }
 
 function buildNativeLibrary(library: NativeLibrary): void {
-  const libraryBuildDirectory = join(buildDirectory, library.sibling);
+  const libraryBuildDirectory = join(buildDirectory, library.buildName);
+  const sourceDirectory = requireSibling(library.sibling);
   runCmake([
     "-S",
-    requireSibling(library.sibling),
+    sourceDirectory,
     "-B",
     libraryBuildDirectory,
     "-DCMAKE_BUILD_TYPE=Release",
@@ -96,9 +117,12 @@ function buildNativeLibrary(library: NativeLibrary): void {
   for (const built of library.targets) {
     copyFileSync(findBuiltLibrary(libraryBuildDirectory, built.fileName), join(built.destination, built.fileName));
   }
+  for (const companion of library.companions) {
+    copyFileSync(join(sourceDirectory, companion.source), companion.destination);
+  }
 }
 
-mkdirSync(testLibraryDirectory, { recursive: true });
+mkdirSync(stubHostDirectory, { recursive: true });
 for (const library of nativeLibraries) {
   buildNativeLibrary(library);
 }
