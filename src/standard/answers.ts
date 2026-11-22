@@ -82,6 +82,13 @@ export interface LibraryService {
   readonly description?: string;
 }
 
+/** A description a library publishes for plugins to implement under a capability, serving no definition of its own. */
+export interface LibraryContract {
+  readonly capability: string;
+  /** The exported symbol answering the description. */
+  readonly description: string;
+}
+
 /** A C library's declaration as the standard read it. */
 export interface LibraryDeclaration {
   readonly importName: string;
@@ -89,6 +96,8 @@ export interface LibraryDeclaration {
   /** The symbol that frees what the bytes functions answer; null when every service is a definition. */
   readonly release: string | null;
   readonly services: readonly LibraryService[];
+  /** The contracts it publishes, in the declaration's order; left out for a declaration publishing none. */
+  readonly contracts?: readonly LibraryContract[];
 }
 
 export function decodeStandardStruct(pointer: object, name: StandardStructName): DecodedFields {
@@ -204,6 +213,11 @@ export function readLibrary(fields: DecodedFields): LibraryDeclaration {
       Number(fields.service_count),
       "weivel_standard_library_service",
     ).map((service, index) => readLibraryService(service, descriptionAt(fields.descriptions as NativePointer, index))),
+    contracts: readFixedElements(
+      fields.contracts as NativePointer,
+      Number(fields.contract_count),
+      "weivel_standard_library_contract",
+    ).map((contract) => ({ capability: contract.capability as string, description: contract.description as string })),
   };
 }
 

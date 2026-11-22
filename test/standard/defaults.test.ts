@@ -152,8 +152,18 @@ describe("a library declaration", () => {
             ],
           },
         ],
+        contracts: [],
       },
     });
+  });
+
+  it("is read with the contracts it publishes, in their order", () => {
+    const contracts = [
+      { capability: "echo.shouting", description: "echo_shouting_description" },
+      { capability: "echo.whispering", description: "echo_whispering_description" },
+    ];
+
+    expect(standard.readLibrary(JSON.stringify({ ...declaration, contracts })).value?.contracts).toEqual(contracts);
   });
 
   it("is refused at the field the standard names", () => {
