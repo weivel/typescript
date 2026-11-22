@@ -11,6 +11,7 @@ export type {
   DiscoveryFailure,
   Discovery,
   LibraryFunction,
+  LibraryContract,
   LibraryService,
   LibraryDeclaration,
 } from "./answers.js";

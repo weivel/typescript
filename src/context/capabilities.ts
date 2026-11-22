@@ -1,6 +1,6 @@
 import { ReachKind, Status } from "../core/index.js";
 import type { Capabilities, CapabilityType, ImplementationListener } from "./model.js";
-import { failureOf } from "./refusal.js";
+import { ContractMismatchError, failureOf } from "./refusal.js";
 import { startWatching } from "./services.js";
 import { ensureAttached, type Attachment, type ContextState } from "./state.js";
 
@@ -24,8 +24,24 @@ function all(state: ContextState, plugin: bigint, id: string): unknown[] {
   return implementations;
 }
 
-/** Provides `object` as the plugin's implementation of `id`, throwing the core's refusal. */
+function offers(object: unknown, operation: string): boolean {
+  return typeof object === "object" && object !== null && typeof (object as Record<string, unknown>)[operation] === "function";
+}
+
+/** @throws ContractMismatchError naming the first operation of `id`'s contract that `object` does not offer. */
+function refuseUnlikeItsContract(state: ContextState, id: string, object: unknown): void {
+  const missing = state.contracts.get(id)?.find((operation) => !offers(object, operation));
+  if (missing !== undefined) {
+    throw new ContractMismatchError(id, missing);
+  }
+}
+
+/**
+ * Provides `object` as the plugin's implementation of `id`, throwing the core's refusal, or a ContractMismatchError
+ * before the core is asked when a loaded library publishes a contract for `id` that `object` does not fulfil.
+ */
 export function provideCapability(state: ContextState, plugin: bigint, id: string, object: unknown): void {
+  refuseUnlikeItsContract(state, id, object);
   const result = state.call(() => {
     const provided = state.core.provideCapability(plugin, id);
     if (provided.status === Status.Ok && provided.value !== undefined) {

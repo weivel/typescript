@@ -348,7 +348,8 @@ export class Host {
    * an object with one function per declared function, a definition that declares a description as the object its
    * description binds (`BoundDefinition`), once the host's `descriptionCheck` has passed it, and any other definition
    * as a LibraryDefinition carrying the very address its symbol answered, each definition registered awaiting
-   * releases.
+   * releases. Each contract the declaration publishes is published to the plugins' contexts until the unload, so a
+   * plugin's provide of its capability is checked against its description.
    *
    * An id `options.withheld` names is bound as any other and registered for no plugin, so only the caller reaches it,
    * through the answer.
@@ -360,9 +361,10 @@ export class Host {
    * beside another function or gives one context facts, or names bytes functions and no release; an id is declared
    * twice or is already registered, by another live library, a plugin or the host itself; the library file is
    * missing or lacks a symbol its declaration names; a definition answers NULL or a struct smaller than
-   * `2 * sizeof(void *)`; or a description is declared beside no definition, to a host given no `descriptionCheck`,
-   * answers NULL, is refused by the check or disagrees with this platform's layout: each the caller's mistake,
-   * reported to no sink, the binary closed again. OutOfMemoryError when the description check answers OUT_OF_MEMORY,
+   * `2 * sizeof(void *)`; a description is declared beside no definition, to a host given no `descriptionCheck`,
+   * answers NULL, is refused by the check or disagrees with this platform's layout; or a contract is published for a
+   * capability another live library publishes one for: each the caller's mistake, reported to no sink, the binary
+   * closed again. OutOfMemoryError when the description check answers OUT_OF_MEMORY,
    * the binary closed again. RefusalError when the core refuses one of its registrations, the load then undone as an
    * unload.
    */
@@ -388,6 +390,9 @@ export class Host {
     this.#libraryUnloads.add(unload);
     ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
     try {
+      for (const [capability, operations] of bound.contracts) {
+        unregisters.push(this.#contexts.publishContract(capability, operations));
+      }
       this.#registerLibraryServices(bound, unregisters, withheld);
     } catch (error) {
       unload();

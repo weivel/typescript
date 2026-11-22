@@ -6,8 +6,9 @@ import { FunctionKind } from "../standard/constants.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
 import { bindDescribed, type BoundDefinition } from "./description/definition.js";
 import { HandleHoldings } from "./description/handles.js";
+import { DescribedReturn } from "./description/layout.js";
 import type { CallTracking } from "./description/operations.js";
-import { readDescription } from "./description/reader.js";
+import { readDescription, type Description } from "./description/reader.js";
 import type { LibraryFunction, LibraryService } from "./model.js";
 
 type NativeFunction = (...parameters: unknown[]) => unknown;
@@ -213,6 +214,59 @@ function readDefinitions(importName: string, resolved: ReadonlyMap<string, Resol
 type DescriptionSymbol = () => object | null;
 
 /**
+ * The description `symbol` answers, once `check` has passed it.
+ *
+ * @param subject what declares the description, as an error names it.
+ * @throws Error, the caller's mistake, for no `check`, or a description that answers NULL or the check refuses;
+ * OutOfMemoryError for a check answering OUT_OF_MEMORY.
+ */
+function checkedDescription(
+  library: koffi.IKoffiLib,
+  importName: string,
+  symbol: string,
+  subject: string,
+  check: DescriptionCheck | undefined,
+): object {
+  if (check === undefined) {
+    throw new Error(`${importName}'s ${subject} declares a description, and the host was given no descriptionCheck.`);
+  }
+  const description = (library.func(symbol, "void *", []) as DescriptionSymbol)();
+  if (description === null) {
+    throw new Error(`${importName}'s description ${symbol} answered NULL.`);
+  }
+  const checked = check(description);
+  if (checked.status === Status.OutOfMemory) {
+    throw new OutOfMemoryError(`The check of ${importName}'s description ${symbol}`);
+  }
+  if (checked.status !== statusOk) {
+    const where = checked.refusal === undefined ? "" : ` at ${checked.refusal.path === "" ? "its root" : checked.refusal.path}: ${checked.refusal.detail}`;
+    throw new Error(`${importName}'s description ${symbol} was refused by the check, status ${checked.status}${where}.`);
+  }
+  return description;
+}
+
+/** The operations an implementation of a contract offers: every one answering a status, in the description's order, never a release. */
+function contractOperations(description: Description): readonly string[] {
+  return Object.freeze(description.operations.filter((operation) => operation.returns === DescribedReturn.Status).map((operation) => operation.name));
+}
+
+/**
+ * Reads every contract a declaration publishes, by capability, as the operations an implementation of it offers.
+ *
+ * @throws Error, the caller's mistake, for a contract whose description is not exported, answers NULL or is refused
+ * by the check, or declared to a host given no `check`; OutOfMemoryError for a check answering OUT_OF_MEMORY.
+ */
+function readContracts(library: koffi.IKoffiLib, declaration: LibraryDeclaration, check: DescriptionCheck | undefined): Map<string, readonly string[]> {
+  const contracts = new Map<string, readonly string[]>();
+  for (const contract of declaration.contracts ?? []) {
+    const subject = `contract ${contract.capability}`;
+    const description = checkedDescription(library, declaration.importName, contract.description, subject, check);
+    contracts.set(contract.capability, contractOperations(readDescription(description)));
+  }
+  return contracts;
+}
+
+/**
  * Binds every described definition from its description, after the check has passed it.
  *
  * @throws Error, the caller's mistake, for a description symbol that is not exported or answers NULL, one the check
@@ -230,21 +284,7 @@ function bindDescribedDefinitions(
     if (service.description === undefined) {
       continue;
     }
-    if (check === undefined) {
-      throw new Error(`${declaration.importName}'s service ${service.id} declares a description, and the host was given no descriptionCheck.`);
-    }
-    const description = (library.func(service.description, "void *", []) as DescriptionSymbol)();
-    if (description === null) {
-      throw new Error(`${declaration.importName}'s description ${service.description} answered NULL.`);
-    }
-    const checked = check(description);
-    if (checked.status === Status.OutOfMemory) {
-      throw new OutOfMemoryError(`The check of ${declaration.importName}'s description ${service.description}`);
-    }
-    if (checked.status !== statusOk) {
-      const where = checked.refusal === undefined ? "" : ` at ${checked.refusal.path === "" ? "its root" : checked.refusal.path}: ${checked.refusal.detail}`;
-      throw new Error(`${declaration.importName}'s description ${service.description} was refused by the check, status ${checked.status}${where}.`);
-    }
+    const description = checkedDescription(library, declaration.importName, service.description, `service ${service.id}`, check);
     bound.set(
       service.id,
       bindDescribed({
@@ -279,6 +319,8 @@ export interface BoundLibrary {
   readonly definitions: ReadonlyMap<string, LibraryDefinition>;
   /** Each definition service that declares a description, by id, as the object its description binds. */
   readonly described: ReadonlyMap<string, BoundDefinition>;
+  /** Each contract the library publishes, by capability, as the operations an implementation of it offers. */
+  readonly contracts: ReadonlyMap<string, readonly string[]>;
   /** Counts a definition service as registered, so the binary stays open until `released` is called for it. */
   awaitRelease(id: string): void;
   /** Says every holding of a definition service has ended since it was unregistered, or that it never was registered. */
@@ -365,11 +407,13 @@ function refuseTextsCutShort(path: string, declaration: LibraryDeclaration): voi
     optionalTextForC(service.description);
     service.functions.forEach((declared) => textForC(declared.symbol));
   });
+  declaration.contracts?.forEach((contract) => textForC(contract.description));
 }
 
 /**
  * Binds every bytes function of a declaration the layer accepted, calls each definition's symbol once, and binds each
- * definition that declares a description from it, once `check` has passed it.
+ * definition that declares a description from it, once `check` has passed it, and reads each contract it publishes
+ * from its description, checked the same way.
  *
  * @param onClosed called once the binary is closed.
  * @throws Error when the file is missing, does not export a symbol the declaration names, a definition answers NULL or
@@ -393,6 +437,7 @@ export function bindLibrary(
   let services: Map<string, LibraryService>;
   let definitions: Map<string, LibraryDefinition>;
   let described: Map<string, BoundDefinition>;
+  let contracts: Map<string, readonly string[]>;
   try {
     let resolved: Map<string, ResolvedDefinition>;
     try {
@@ -403,6 +448,7 @@ export function bindLibrary(
     }
     definitions = readDefinitions(declaration.importName, resolved);
     described = bindDescribedDefinitions(library, declaration, definitions, check, { holdings, state });
+    contracts = readContracts(library, declaration, check);
   } catch (error) {
     library.unload();
     throw error;
@@ -412,6 +458,7 @@ export function bindLibrary(
     services,
     definitions,
     described,
+    contracts,
     awaitRelease: (id) => closing.awaitRelease(id),
     released: (id) => closing.released(id),
     unload: () => closing.unload(),

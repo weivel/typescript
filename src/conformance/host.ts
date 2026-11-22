@@ -100,7 +100,14 @@ function layOut(given: HostGiven, directory: string, stubHostLibraryPath: string
     }
     const entry = `${stub.directory}/${entryFileName}`;
     if (realised.unreadableManifest !== true) {
-      writeFile(join(directory, stub.manifest), JSON.stringify(hostVectorManifest(stub.name, entryFileName, realised.consumes, Object.keys(realised.provides ?? {}))));
+      const manifest = hostVectorManifest(
+        stub.name,
+        entryFileName,
+        realised.consumes,
+        Object.keys(realised.provides ?? {}),
+        Object.keys(realised.implements ?? {}),
+      );
+      writeFile(join(directory, stub.manifest), JSON.stringify(manifest));
     }
     writeFile(join(directory, entry), hostVectorEntrySource(realised, directory, hostVectorBoundMillis));
     return { ...stub, entry };

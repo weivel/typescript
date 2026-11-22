@@ -99,7 +99,7 @@ describe("the declarations of the standard's headers", () => {
   const structs = headerStructs();
 
   it("declare every struct the headers name, and nothing else", () => {
-    expect(structs.size).toBe(39);
+    expect(structs.size).toBe(40);
     expect(Object.keys(declaredStructs).sort()).toEqual([...structs.keys()].sort());
   });
 

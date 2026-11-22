@@ -71,6 +71,7 @@ const weivel_standard_library_function = structOf({
   context: "uint32_t",
 });
 const weivel_standard_library_service = structOf({ id: text, functions: pointer, function_count: count });
+const weivel_standard_library_contract = structOf({ capability: text, description: text });
 const weivel_standard_library = structOf({
   ...sizeField,
   import_name: text,
@@ -80,6 +81,8 @@ const weivel_standard_library = structOf({
   service_count: count,
   storage: pointer,
   descriptions: pointer,
+  contracts: pointer,
+  contract_count: count,
 });
 const weivel_standard_mirror_list = structOf({
   ...sizeField,
@@ -195,6 +198,7 @@ export const standardStructs = {
   weivel_standard_discovery,
   weivel_standard_library_function,
   weivel_standard_library_service,
+  weivel_standard_library_contract,
   weivel_standard_library,
   weivel_standard_mirror_list,
   weivel_standard_service_refusal,
