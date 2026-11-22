@@ -135,3 +135,27 @@ describe("host/stop-answers-the-exit-code", () => {
 describe("host/tick-is-called-at-each-time-it-answered", () => {
   it("runs as the vector states", () => judge("host/tick-is-called-at-each-time-it-answered"), hostTestTimeout);
 });
+
+describe("host/contract/a-capability-no-loaded-library-publishes-is-provided-unchecked", () => {
+  it("runs as the vector states", () => judge("host/contract/a-capability-no-loaded-library-publishes-is-provided-unchecked"), hostTestTimeout);
+});
+
+describe("host/contract/an-implementation-lacking-next-is-refused-at-provide", () => {
+  it("runs as the vector states", () => judge("host/contract/an-implementation-lacking-next-is-refused-at-provide"), hostTestTimeout);
+});
+
+describe("host/contract/an-implementation-missing-an-operation-is-refused-at-provide", () => {
+  it("runs as the vector states", () => judge("host/contract/an-implementation-missing-an-operation-is-refused-at-provide"), hostTestTimeout);
+});
+
+describe("host/contract/an-implementation-offering-every-operation-is-accepted", () => {
+  it("runs as the vector states", () => judge("host/contract/an-implementation-offering-every-operation-is-accepted"), hostTestTimeout);
+});
+
+describe("host/contract/an-implementation-offering-more-than-the-contract-is-accepted", () => {
+  it("runs as the vector states", () => judge("host/contract/an-implementation-offering-more-than-the-contract-is-accepted"), hostTestTimeout);
+});
+
+describe("host/contract/the-first-missing-operation-the-description-lists-is-named", () => {
+  it("runs as the vector states", () => judge("host/contract/the-first-missing-operation-the-description-lists-is-named"), hostTestTimeout);
+});

@@ -118,6 +118,15 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
   operation keeps one answer block per answer and one refusal block, emptied before every call, and reads them through
   a view of their memory, so a scalar costs no call into koffi. The one hand layout is `description.h`'s, beside the
   standard module's layout of `value.h`, and both are checked against the standard's `layouts` program.
+- A library's `contracts`, read by the standard beside its services, are each checked by `descriptionCheck` and read
+  at the load as the operations of its description that answer a status, in its order; the releases, which answer
+  nothing, are not among them. Until the unload, `context.provide` of that capability throws a
+  `ContractMismatchError` (`code` `contract-mismatch`, `subject` the first of those operations the object does not
+  offer as a function) before the core is asked, so a refused implementation is never provided; an object offering
+  more, a release or an operation the description does not list, is accepted. A capability no loaded library
+  publishes a contract for is provided unchecked, and a second live library publishing one for the same capability
+  makes `loadLibrary` throw as the caller's mistake. The check runs on every provide, which is a call of activation
+  and never of a hot path: it adds about 300 ns to a provide of about 3.6 us, measured on Windows under Node 26.
 - A `BoundDefinition` is a frozen object with no prototype holding one async method per operation that answers a
   status, named as the operation; the releases are not methods, since the binding calls them. `boundDefinitionOf`
   answers the `{ library, pointer }` it stands for. A method takes one object keyed by its input parameters' names,

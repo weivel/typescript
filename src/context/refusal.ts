@@ -19,6 +19,20 @@ export class RefusalError extends Error implements Refusal {
   }
 }
 
+/** A provided implementation lacking `subject`, an operation of the contract a loaded library publishes for `capability`. */
+export class ContractMismatchError extends Error {
+  readonly code = "contract-mismatch";
+  readonly capability: string;
+  readonly subject: string;
+
+  constructor(capability: string, subject: string) {
+    super(`The implementation provided as ${capability} does not offer ${subject}, an operation of its contract.`);
+    this.name = "ContractMismatchError";
+    this.capability = capability;
+    this.subject = subject;
+  }
+}
+
 /**
  * What a call through a context answers once the core has forgotten its plugin: neither a success nor a refusal of
  * the core's, since the call never reached the core.

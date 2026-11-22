@@ -86,6 +86,8 @@ export class ContextState {
   readonly wants = new HandleTable<PendingWant>();
   readonly watches = new HandleTable<Watching>();
   readonly awaitingReleases = new HandleTable<AwaitingReleases>();
+  /** Each capability a loaded library publishes a contract for, as the operations an implementation of it offers. */
+  readonly contracts = new Map<string, readonly string[]>();
   /** Each revoked holding the core keeps until its holder releases it: the registrations, by holder. */
   readonly #revokedHoldings = new Map<bigint, Set<bigint>>();
   readonly plugins = new Map<bigint, PluginState>();

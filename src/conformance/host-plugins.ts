@@ -11,12 +11,14 @@ export interface HostVectorPlugin {
   readonly actions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Each service id its manifest provides, to that service's methods by name, each written as an action is. */
   readonly provides?: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>>;
+  /** Each capability id its manifest provides, to the operations its implementation offers, each written as an action is. */
+  readonly implements?: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>>;
 }
 
 /** The ids a plugin of a `host` vector consumes unless it carries `consumes`. */
 export const consumedServiceIds = ["weivel.config", "weivel.secrets", "weivel.paths", "weivel.log"] as const;
 
-const stepKinds = ["log", "logSetting", "set", "absent", "waitFor", "pause", "throw"] as const;
+const stepKinds = ["log", "logSetting", "set", "absent", "waitFor", "pause", "throw", "provide"] as const;
 const actionKinds = ["echo", "answer", "throw"] as const;
 const longestPauseMillis = 10_000;
 
@@ -29,6 +31,9 @@ function isStepOfItsKind(step: Readonly<Record<string, unknown>>): boolean {
   }
   if (kind === "waitFor") {
     return typeof step.waitFor === "string" && step.waitFor !== "";
+  }
+  if (kind === "provide") {
+    return typeof step.provide === "string" && step.provide !== "";
   }
   if (kind === "pause") {
     return Number.isInteger(step.pause) && (step.pause as number) >= 1 && (step.pause as number) <= longestPauseMillis;
@@ -57,7 +62,7 @@ function refuseUnknown(plugin: HostVectorPlugin): void {
       throw new Error(`${plugin.name}'s action ${name} ${JSON.stringify(action)} is of no kind this driver realises.`);
     }
   }
-  for (const [id, methods] of Object.entries(plugin.provides ?? {})) {
+  for (const [id, methods] of [...Object.entries(plugin.provides ?? {}), ...Object.entries(plugin.implements ?? {})]) {
     for (const [name, method] of Object.entries(methods)) {
       if (!isActionOfItsKind(method)) {
         throw new Error(`${plugin.name}'s method ${name} of ${id} ${JSON.stringify(method)} is of no kind this driver realises.`);
@@ -127,6 +132,16 @@ async function info(context, message) {
   await service(context, "weivel.log").write({ level: infoLevel, message });
 }
 
+async function provide(context, id) {
+  try {
+    context.provide(context.capability(id), methodsOf(implementations[id] ?? {}));
+  } catch (error) {
+    await info(context, "refused " + String(error?.code) + " " + String(error?.subject));
+    return;
+  }
+  await info(context, "provided " + id);
+}
+
 async function runStep(context, step) {
   if ("log" in step) {
     await info(context, step.log);
@@ -143,6 +158,8 @@ async function runStep(context, step) {
     await waitFor(step.waitFor);
   } else if ("pause" in step) {
     await sleep(step.pause);
+  } else if ("provide" in step) {
+    await provide(context, step.provide);
   } else {
     throw new Error(step.throw);
   }
@@ -205,23 +222,29 @@ export function hostVectorEntrySource(plugin: HostVectorPlugin, runDirectory: st
     `const steps = ${JSON.stringify(plugin.activate ?? [])};`,
     `const actions = ${JSON.stringify(plugin.actions ?? {})};`,
     `const provides = ${JSON.stringify(plugin.provides ?? {})};`,
+    `const implementations = ${JSON.stringify(plugin.implements ?? {})};`,
     entryRuntime,
   ].join("\n");
 }
 
 /**
  * The manifest of a `host` vector's plugin `name`, consuming `consumes`, every id the program may offer it by default,
- * and providing `provides`.
+ * providing the services `provides` and the capabilities `implemented`.
  */
 export function hostVectorManifest(
   name: string,
   entryFileName: string,
   consumes: readonly string[] = consumedServiceIds,
   provides: readonly string[] = [],
+  implemented: readonly string[] = [],
 ): Readonly<Record<string, NativeValue>> {
   const services: Record<string, NativeValue> = { consumes: [...consumes] };
   if (provides.length > 0) {
     services.provides = [...provides];
   }
-  return { api: 1, importName: name, entry: entryFileName, services };
+  const manifest: Record<string, NativeValue> = { api: 1, importName: name, entry: entryFileName, services };
+  if (implemented.length > 0) {
+    manifest.capabilities = { provides: [...implemented] };
+  }
+  return manifest;
 }

@@ -90,6 +90,20 @@ export class PluginContexts {
   }
 
   /**
+   * Publishes the contract a loaded library declares for `capability`, so a provide of it is checked against
+   * `operations`; the answer withdraws it.
+   *
+   * @throws Error when a contract for `capability` is already published.
+   */
+  publishContract(capability: string, operations: readonly string[]): () => void {
+    if (this.#state.contracts.has(capability)) {
+      throw new Error(`A contract for ${capability} is already published by a loaded library.`);
+    }
+    this.#state.contracts.set(capability, operations);
+    return () => this.#state.contracts.delete(capability);
+  }
+
+  /**
    * Registers a service the host itself supplies, under WEIVEL_HOST; the answer unregisters it. With `whenReleased`
    * it is registered awaiting releases, and `whenReleased` is called once every holding of it has ended since it was
    * unregistered.
