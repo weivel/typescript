@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createServer, connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import koffi from "koffi";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -59,26 +58,20 @@ async function settledWithinMicrotasks(promise: Promise<unknown>, turns: number)
 }
 
 /**
- * Runs `start` inside a socket's data callback, so it runs in the event loop's poll phase.
+ * Whether an immediate queued before `calls` calls of the walker's `wait`, each awaited before the next, fired before
+ * the last of them answered.
  *
- * @implNote A worker call answers through the loop's own I/O, which the poll phase that is running cannot reach again
- * before the check phase, so an immediate queued here runs before any answer the call posts; a call that ran on the
- * calling thread has already settled by then.
+ * @implNote Which of an immediate and one worker answer comes first is the runtime's order (Node answers in its poll
+ * phase, Bun ahead of its immediates), so the run is long enough for the loop to turn on either; calls answered on the
+ * calling thread settle within microtasks and leave the loop no turn at all.
  */
-function fromPollPhase<Answer>(start: () => Promise<Answer>): Promise<Answer> {
-  return new Promise((resolve, reject) => {
-    const server = createServer((socket) => {
-      socket.once("data", () => {
-        start().then(resolve, reject);
-        socket.end();
-        server.close();
-      });
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const client = connect((server.address() as AddressInfo).port, "127.0.0.1", () => client.end("go"));
-      client.on("error", reject);
-    });
-  });
+async function immediateFiresAmong(walker: BoundDefinition, calls: number): Promise<boolean> {
+  let fired = false;
+  setImmediate(() => (fired = true));
+  for (let call = 0; call < calls; call++) {
+    await walker.wait!({ ticks: call });
+  }
+  return fired;
 }
 
 /** How many blocks koffi allocated while `run` ran, and how many of those it freed again. */
@@ -130,17 +123,10 @@ describe("an operation its description marks blocking", () => {
     expect(await settledWithinMicrotasks(walker.wait!({ ticks: 1 }), 20)).toBe(false);
   });
 
-  it("leaves the event loop free while it runs: an immediate queued before the call fires before it answers", async () => {
+  it("leaves the event loop free while it runs: an immediate queued before a run of calls fires before the run has answered", async () => {
     const { walker } = loaded();
-    const order: string[] = [];
 
-    await fromPollPhase(async () => {
-      setImmediate(() => order.push("immediate"));
-      const call = walker.wait!({ ticks: 3 }).then((waited) => order.push(`answered ${String(waited)}`));
-      await call;
-    });
-
-    expect(order).toEqual(["immediate", "answered 3"]);
+    expect(await immediateFiresAmong(walker, 10)).toBe(true);
   });
 
   it("answers two overlapping calls each with its own answer", async () => {

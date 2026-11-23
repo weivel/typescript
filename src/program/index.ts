@@ -1,4 +1,4 @@
-export { runHost } from "./run.js";
+export { runHost, startHost } from "./run.js";
 export { main, terminateSignals } from "./main.js";
 export { declarationFileName } from "./libraries.js";
 export {
@@ -9,4 +9,5 @@ export {
   type PlannedLibrary,
   type PlannedPlugin,
   type RunHostOptions,
+  type RunningHost,
 } from "./model.js";

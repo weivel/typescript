@@ -174,6 +174,12 @@ export class PluginRun {
     return (actionArguments) => offered.call(object, actionArguments);
   }
 
+  /** The object the plugin whose manifest's `importName` is `importName` itself registered under `id`, or undefined. */
+  serviceOf(importName: string, id: string): unknown {
+    const plugin = this.#registered.find((registered) => this.#host.plugin(registered.handle)?.manifest.importName === importName);
+    return plugin === undefined ? undefined : this.#host.serviceRegisteredBy(plugin.handle, id);
+  }
+
   #activated(manifest: string): RunPlugin | undefined {
     const plugin = this.#registered.find((registered) => registered.planned.manifest === manifest);
     return plugin !== undefined && this.#outcomes.get(manifest)?.state === HostPluginState.Activated ? plugin : undefined;

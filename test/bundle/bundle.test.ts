@@ -94,7 +94,7 @@ describe("bundleProgram", () => {
   });
 
   it("leaves koffi a bare import, resolved from a node_modules at or above the bundle", async () => {
-    const bundled = await bundleProgram(temporaryDirectory());
+    const { commandLine: bundled } = await bundleProgram(temporaryDirectory());
 
     const ran = runWithoutArguments(bundled);
 

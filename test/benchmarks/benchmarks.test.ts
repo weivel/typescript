@@ -38,6 +38,11 @@ const budget = loadLanguageBudget(kitBudgetPath);
 const timeout = 120_000;
 /** Enough batches to tell a slowed path apart, or to count crossings, at a fraction of the gate's run time. */
 const briefSampling: Sampling = { warmupCalls: 1_000, callsPerBatch: 20, batches: 21 };
+/**
+ * @implNote Under Bun 1.4.4 two identical direct paths of one run differ by 25 to 57 percent (measured 2026-11-23 on
+ * Windows, ten runs), so the pair has no quiet baseline to judge the weivel path against there.
+ */
+const sameLanguagePairJudges = !("Bun" in globalThis);
 
 function report(name: string, summary: Summary): void {
   console.log(
@@ -132,7 +137,7 @@ function slowdownPast(bound: number, measured: FfiCallSummaries): number {
 }
 
 describe("a same-language service call through weivel", () => {
-  it("costs what the same call made directly costs, within the noise measured in the same run", { timeout }, () => {
+  it.runIf(sameLanguagePairJudges)("costs what the same call made directly costs, within the noise measured in the same run, under Node", { timeout }, () => {
     const pair = benchmarkSameLanguageCall(libraries);
     report("same-language-direct", pair.direct);
     report("same-language-direct-again", pair.directAgain);

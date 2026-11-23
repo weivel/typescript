@@ -19,6 +19,19 @@ export interface RunHostOptions {
   readonly entryExport?: string;
 }
 
+/** A host program `startHost` started in this process. */
+export interface RunningHost {
+  /** Settles with the code the run exits with once it has ended, by a stop request or by itself. */
+  readonly ended: Promise<number>;
+  /**
+   * The object the plugin whose manifest's `importName` is `plugin` itself registered under the service id `id` and
+   * still has registered, or undefined: a registration under the id by another plugin or the host is never answered.
+   */
+  service<Service>(plugin: string, id: string): Service | undefined;
+  /** Requests the run's stop and answers `ended`; every call after the first answers the same. */
+  stop(): Promise<number>;
+}
+
 /** Whether a text of the plan is set: neither NULL nor past the size the provider answered. */
 export function isSet(text: string | null | undefined): text is string {
   return text !== undefined && text !== null;

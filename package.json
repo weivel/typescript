@@ -55,7 +55,8 @@
   },
   "scripts": {
     "build": "node scripts/native.ts && tsc",
-    "test": "node scripts/native.ts && tsc -p tsconfig.test.json && vitest run"
+    "test": "node scripts/native.ts && tsc -p tsconfig.test.json && vitest run",
+    "test:bun": "npx --yes bun@1.4.4 --bun vitest run"
   },
   "dependencies": {
     "koffi": "2.16.3"

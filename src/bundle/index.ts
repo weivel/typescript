@@ -1,1 +1,1 @@
-export { bundlePlugin, bundleProgram, type BundleProgramOptions, type NativeLibraryPaths } from "./bundle.js";
+export { bundlePlugin, bundleProgram, type BundledProgram, type BundleProgramOptions, type NativeLibraryPaths } from "./bundle.js";
