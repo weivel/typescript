@@ -101,6 +101,7 @@ const weivel_standard_setting_value = structOf({
 const weivel_standard_setting = structOf({ key: text, value: weivel_standard_setting_value });
 const weivel_standard_settings = structOf({ ...sizeField, settings: pointer, count, storage: pointer });
 const weivel_standard_setting_answer = structOf({ ...sizeField, value: weivel_standard_setting_value, storage: pointer });
+const weivel_standard_settings_file = structOf({ ...sizeField, path: text, storage: pointer });
 /** A definition's operations are function pointers the provider fills; this layer lays them out and calls none. */
 const weivel_standard_config = structOf({
   ...sizeField,
@@ -111,6 +112,10 @@ const weivel_standard_config = structOf({
   release_settings: pointer,
   release_answer: pointer,
   release_refusal: pointer,
+  get_tree: pointer,
+  release_tree: pointer,
+  settings_file: pointer,
+  release_settings_file: pointer,
 });
 const weivel_standard_secret = structOf({ ...sizeField, bytes: pointer, length: count, storage: pointer });
 const weivel_standard_secrets = structOf({
@@ -206,6 +211,7 @@ export const standardStructs = {
   weivel_standard_setting,
   weivel_standard_settings,
   weivel_standard_setting_answer,
+  weivel_standard_settings_file,
   weivel_standard_config,
   weivel_standard_secret,
   weivel_standard_secrets,

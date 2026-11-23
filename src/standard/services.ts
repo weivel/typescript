@@ -6,6 +6,9 @@
  */
 export type SettingValue = string | number | boolean;
 
+/** A setting whole: a text, number or boolean, or a list or record of them, as a value tree holds it. */
+export type SettingTree = SettingValue | readonly SettingTree[] | { readonly [key: string]: SettingTree };
+
 /** Why a provider declined an operation, as services.h's `weivel_standard_service_refusal` carries it. */
 export class ServiceRefusal extends Error {
   readonly detail: string;
@@ -35,6 +38,10 @@ export interface Config {
   get(key: string): Promise<SettingValue | undefined>;
   /** Stores one setting, replacing any value it had, so `get` and `all` answer it from then on. */
   set(key: string, value: SettingValue): Promise<void>;
+  /** One setting whole, so a list or record `get` cannot answer is read as the host stores it; undefined when the key is neither stored nor defaulted. */
+  get_tree(key: string): Promise<SettingTree | undefined>;
+  /** The file `set` writes when given no other place, as an absolute path; undefined when the provider keeps the settings in no file. */
+  settings_file(): Promise<string | undefined>;
 }
 
 /**
@@ -72,7 +79,7 @@ type EveryOperationOf<Definition> = readonly (keyof Definition)[];
 
 /** Each definition's operations, by the names services.h gives them, its releases left out. */
 export const serviceOperations = {
-  config: ["all", "get", "set"],
+  config: ["all", "get", "set", "get_tree", "settings_file"],
   secrets: ["remove", "get", "set"],
   paths: ["cache", "config", "plugin"],
 } as const satisfies {
