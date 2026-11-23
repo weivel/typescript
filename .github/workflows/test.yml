@@ -20,3 +20,18 @@ jobs:
       node_test: npm test
     secrets:
       envPAT: ${{ secrets.PAT }}
+
+  bun:
+    uses: intisy/workflows/.github/workflows/test.yml@main
+    with:
+      toolchains: node cmake
+      runners: '["ubuntu-latest","windows-latest","macos-latest"]'
+      cmake_version: '4.4.4'
+      cmake_configure: ''
+      cmake_build: ''
+      cmake_test: ''
+      node_install: npm ci
+      node_build: npm run build
+      node_test: npm run test:bun
+    secrets:
+      envPAT: ${{ secrets.PAT }}
