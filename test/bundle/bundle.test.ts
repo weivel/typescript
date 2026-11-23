@@ -69,10 +69,18 @@ describe("bundlePlugin", () => {
   });
 });
 
+/**
+ * The runtime options that hold a bare import to the `node_modules` lookup Node makes.
+ *
+ * @implNote Bun installs a bare import from npm into its global cache when no `node_modules` lies at or above the
+ * importing file, unless `--no-install` is given, so without it a bundle with nothing above it still finds koffi.
+ */
+const resolvingFromNodeModulesAlone: readonly string[] = "Bun" in globalThis ? ["--no-install"] : [];
+
 /** Runs `program` with no arguments and answers its exit code and what it wrote to stderr. */
-function runWithoutArguments(program: string): { exit: number; standardError: string } {
+function runWithoutArguments(program: string, runtimeOptions: readonly string[] = []): { exit: number; standardError: string } {
   try {
-    execFileSync(process.execPath, [program], { stdio: ["ignore", "ignore", "pipe"] });
+    execFileSync(process.execPath, [...runtimeOptions, program], { stdio: ["ignore", "ignore", "pipe"] });
     return { exit: 0, standardError: "" };
   } catch (error) {
     const failed = error as { status: number; stderr: Buffer };
@@ -94,11 +102,15 @@ describe("bundleProgram", () => {
   });
 
   it("leaves koffi a bare import, resolved from a node_modules at or above the bundle", async () => {
-    const { commandLine: bundled } = await bundleProgram(temporaryDirectory());
+    const bundled = await bundleProgram(temporaryDirectory());
 
-    const ran = runWithoutArguments(bundled);
+    const ran = runWithoutArguments(bundled.commandLine, resolvingFromNodeModulesAlone);
 
-    expect(readFileSync(bundled, "utf8")).toMatch(/from\s*"koffi"/);
+    for (const file of [bundled.commandLine, bundled.inProcess]) {
+      const text = readFileSync(file, "utf8");
+      expect(text).toMatch(/from\s*"koffi"/);
+      expect(text).not.toContain("koffi.node");
+    }
     expect(ran.exit).not.toBe(0);
     expect(ran.standardError).toContain("Cannot find package 'koffi'");
   });
