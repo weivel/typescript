@@ -198,7 +198,12 @@ settles, since its state cannot be read sooner, so an `async` activate is verifi
 
 `program` runs any C library serving the standard's `weivel.host` (`weivel/host.h`): `runHost(options)` answers a
 promise of the exit code, and `node dist/program/bin.js <host library> <arguments...>` (the package's `weivel-host`)
-is the same run from a command line, SIGINT and SIGTERM, or SIGINT and SIGBREAK on Windows, its stop request. The
+is the same run from a command line, SIGINT and SIGTERM, or SIGINT and SIGBREAK on Windows, its stop request.
+`startHost(options)` is the same run hosted by a process that goes on doing its own work: it answers a `RunningHost`
+once `started` has been told, or once the run ended before that, whose `service(plugin, id)` answers the object the
+plugin of that `importName` itself registered under `id` and still has registered, whose `stop()` requests the stop
+and answers the exit code, every call the same one, and whose `ended` settles with that code however the run ends;
+`runHost` is `startHost` waiting for `ended`. The
 library's declaration is the `library.json` beside its binary. The program loads it, asks `start` for the plan, loads
 the plan's libraries and activates its plugins one at a time in the plan's order, each entry's export `default`
 unless `entryExport` names another, tells `started`, then ticks in a SERVE run or calls the named action in an
@@ -233,10 +238,11 @@ is the library's alone.
 loads it, so a consumer of `host` or `program` never installs it, and this repository pins it as a dev dependency for
 its own build and tests. `bundlePlugin(entry, outputDirectory)` bundles a plugin entry and what it imports into
 `<entry name>.mjs`; `bundleProgram(outputDirectory, options?)` bundles the command line into `weivel-host.mjs`, run as
-`node weivel-host.mjs <host library> <arguments...>`. koffi, a native addon, stays the bare import `koffi`, which Node
-resolves from a `node_modules/koffi` at or above the bundle. The core's and the standard's shared libraries are found
-at run time beside the bundle, under the file names CMake gives them on that platform, unless `nativeLibraries` gives
-two absolute paths instead. A directory holding the bundle, those two libraries and a `node_modules/koffi` therefore
+`node weivel-host.mjs <host library> <arguments...>`, and the program in process into `weivel-host-in-process.mjs`,
+which exports `startHost` alone and runs nothing on import. koffi, a native addon, stays the bare import `koffi`, which
+Node resolves from a `node_modules/koffi` at or above the bundle. The core's and the standard's shared libraries are
+found at run time beside the bundle, under the file names CMake gives them on that platform, unless `nativeLibraries`
+gives two absolute paths instead, or a caller of the in-process `startHost` names its own. A directory holding the bundle, those two libraries and a `node_modules/koffi` therefore
 runs wherever it is moved.
 
 The kit's host vectors run twice: in process through `runHost`, and as a child process of a bundle written to a
@@ -257,5 +263,11 @@ hand layouts are checked against, and the kit's `stub-host` into `native/test/st
 which the host vectors run. `npm run build` and `npm test` both run it first, so CMake and a C compiler are needed.
 
 Node runs the build scripts through its own type stripping, which needs Node 22.18 or later.
+
+The suite also runs under Bun 1.4.4, `npm run test:bun`, after `npm run build`. Two of its tests read the runtime:
+the same-language benchmark gate runs under Node alone, since under Bun two identical direct paths of one run differ
+by 25 to 57 percent and leave the pair nothing quiet to judge against; and a blocking call's test asserts that an
+immediate fires among a run of calls rather than before one answer, since Bun delivers a worker's answer ahead of its
+immediates where Node delivers it in its poll phase.
 
 The package is private and unpublished.

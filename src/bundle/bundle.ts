@@ -18,9 +18,16 @@ export interface BundleProgramOptions {
   readonly nativeLibraries?: "beside-the-bundle" | NativeLibraryPaths;
 }
 
+/** The two files `bundleProgram` writes: the command line, and the module exporting `startHost`. */
+export interface BundledProgram {
+  readonly commandLine: string;
+  readonly inProcess: string;
+}
+
 const nodeTarget = "node22";
 const programDirectory = join(import.meta.dirname, "..", "program");
-const programFileName = "weivel-host.mjs";
+const commandLineFileName = "weivel-host.mjs";
+const inProcessFileName = "weivel-host-in-process.mjs";
 
 const besideTheBundleSource = [
   `import { fileURLToPath } from "node:url";`,
@@ -29,13 +36,41 @@ const besideTheBundleSource = [
   `const nativeLibraries = { coreLibraryPath: besideTheBundle("weivel_core"), standardLibraryPath: besideTheBundle("weivel_standard") };`,
 ];
 
-/** The bundled program's entry: the command line, handed the native libraries it loads. */
-function programEntrySource(nativeLibraries: BundleProgramOptions["nativeLibraries"]): string {
-  const located =
-    nativeLibraries === undefined || nativeLibraries === "beside-the-bundle"
-      ? besideTheBundleSource
-      : [`const nativeLibraries = ${JSON.stringify({ coreLibraryPath: nativeLibraries.coreLibraryPath, standardLibraryPath: nativeLibraries.standardLibraryPath })};`];
-  return [`import { main } from "./main.js";`, ...located, `process.exitCode = await main(process.argv.slice(2), nativeLibraries);`].join("\n");
+/** The statements that declare `nativeLibraries`, the core's and the standard's shared libraries a bundle loads. */
+function nativeLibrariesSource(nativeLibraries: BundleProgramOptions["nativeLibraries"]): readonly string[] {
+  return nativeLibraries === undefined || nativeLibraries === "beside-the-bundle"
+    ? besideTheBundleSource
+    : [`const nativeLibraries = ${JSON.stringify({ coreLibraryPath: nativeLibraries.coreLibraryPath, standardLibraryPath: nativeLibraries.standardLibraryPath })};`];
+}
+
+/** The command line's entry, handed the native libraries it loads. */
+function commandLineEntrySource(nativeLibraries: BundleProgramOptions["nativeLibraries"]): string {
+  return [`import { main } from "./main.js";`, ...nativeLibrariesSource(nativeLibraries), `process.exitCode = await main(process.argv.slice(2), nativeLibraries);`].join("\n");
+}
+
+/** The in-process entry: `startHost`, each native library the caller leaves out the bundle's own, and nothing run. */
+function inProcessEntrySource(nativeLibraries: BundleProgramOptions["nativeLibraries"]): string {
+  return [
+    `import { startHost as startHostWith } from "./run.js";`,
+    ...nativeLibrariesSource(nativeLibraries),
+    `export function startHost(options) {`,
+    `  return startHostWith({ ...options, coreLibraryPath: options.coreLibraryPath ?? nativeLibraries.coreLibraryPath, standardLibraryPath: options.standardLibraryPath ?? nativeLibraries.standardLibraryPath });`,
+    `}`,
+  ].join("\n");
+}
+
+/** Bundles the program's entry `source` into `outputFile`, koffi left a bare import. */
+async function bundleProgramEntry(source: string, sourceFile: string, outputFile: string): Promise<void> {
+  await build({
+    stdin: { contents: source, resolveDir: programDirectory, sourcefile: sourceFile, loader: "ts" },
+    outfile: outputFile,
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: nodeTarget,
+    external: ["koffi"],
+    logLevel: "silent",
+  });
 }
 
 /**
@@ -52,27 +87,23 @@ export async function bundlePlugin(entry: string, outputDirectory: string): Prom
 }
 
 /**
- * Bundles the host program's command line into one ES module file in `outputDirectory`, `weivel-host.mjs`, and answers
- * its path; it runs as `node weivel-host.mjs <host library> <arguments...>`, as the package's `weivel-host` does.
+ * Bundles the host program into two ES module files in `outputDirectory` and answers their paths: the command line,
+ * `weivel-host.mjs`, run as `node weivel-host.mjs <host library> <arguments...>` as the package's `weivel-host` is, and
+ * `weivel-host-in-process.mjs`, which exports `startHost` alone and runs nothing on import, for a process that hosts
+ * the program itself.
  *
- * Everything but koffi is inside the file. koffi, a native addon that cannot be bundled, stays the bare import
+ * Everything but koffi is inside each file. koffi, a native addon that cannot be bundled, stays the bare import
  * `koffi`, which Node resolves from a `node_modules/koffi` in the bundle's directory or one above it. The core's and
- * the standard's shared libraries are found as `options.nativeLibraries` says, beside the bundle by default. So a
- * bundle beside those two libraries, under a `node_modules` holding koffi, runs wherever that directory is moved.
+ * the standard's shared libraries are found as `options.nativeLibraries` says, beside the bundle by default, unless a
+ * caller of `startHost` names its own. So a bundle beside those two libraries, under a `node_modules` holding koffi,
+ * runs wherever that directory is moved.
  *
  * @throws Error when esbuild cannot bundle the program.
  */
-export async function bundleProgram(outputDirectory: string, options: BundleProgramOptions = {}): Promise<string> {
-  const outputFile = join(outputDirectory, programFileName);
-  await build({
-    stdin: { contents: programEntrySource(options.nativeLibraries), resolveDir: programDirectory, sourcefile: "weivel-host.ts", loader: "ts" },
-    outfile: outputFile,
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    target: nodeTarget,
-    external: ["koffi"],
-    logLevel: "silent",
-  });
-  return outputFile;
+export async function bundleProgram(outputDirectory: string, options: BundleProgramOptions = {}): Promise<BundledProgram> {
+  const commandLine = join(outputDirectory, commandLineFileName);
+  const inProcess = join(outputDirectory, inProcessFileName);
+  await bundleProgramEntry(commandLineEntrySource(options.nativeLibraries), "weivel-host.ts", commandLine);
+  await bundleProgramEntry(inProcessEntrySource(options.nativeLibraries), "weivel-host-in-process.ts", inProcess);
+  return { commandLine, inProcess };
 }

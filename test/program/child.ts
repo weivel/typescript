@@ -85,6 +85,7 @@ async function bundleEveryEntry(directory: string): Promise<void> {
 /** A bundled program written outside this package, and how to remove it. */
 export interface RelocatedProgram {
   readonly program: string;
+  readonly inProcess: string;
   readonly directory: string;
   readonly remove: () => void;
 }
@@ -106,12 +107,12 @@ export async function bundleRelocatedProgram(withNativeLibraries = true): Promis
     copyFileSync(defaultCoreLibraryPath(), join(directory, sharedLibraryFileName("weivel_core")));
     copyFileSync(defaultStandardLibraryPath(), join(directory, sharedLibraryFileName("weivel_standard")));
   }
-  const program = await bundleProgram(directory);
+  const { commandLine: program, inProcess } = await bundleProgram(directory);
   const remove = (): void => {
     unlinkSync(koffiLink);
     rmSync(directory, { recursive: true, force: true });
   };
-  return { program, directory, remove };
+  return { program, inProcess, directory, remove };
 }
 
 /**
