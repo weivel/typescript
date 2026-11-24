@@ -2,9 +2,9 @@ How TypeScript reads the contract, module by module. `src/` holds the modules ev
 
 - [core.md](core.md) - `core`: a text holding a NUL, an event the wrapper could not copy whole, a malformed call, and where the native libraries load from
 - [timer.md](timer.md) - `timer`: the default scheduler, and a scheduler handed the time a wait ends at rather than a delay
-- [context.md](context.md) - `context`: wants and their withdrawal, when the clock is read, listeners that throw, a context's life, services and holdings awaited
+- [context.md](context.md) - `context`: wants and their withdrawal, when the clock is read, listeners that throw, a context's life, naming a service or capability (`context.service<T>(id)`), services and holdings awaited
 - [host.md](host.md) - `host`: a plugin's entry, and registration, activation, verification, release, destroy and services offered to one plugin
-- [libraries.md](libraries.md) - `host`: C libraries as host services, a definition with no description, contracts, letting go of a revoked definition, a bytes call's failure
+- [libraries.md](libraries.md) - `host`: C libraries as host services, a definition with no description, contracts, letting go of a revoked definition, a bytes call's failure, the whole call from a plugin
 - [descriptions.md](descriptions.md) - `host`: a definition bound from its description, its methods, what they take and answer, handles, threads, operations not offered
 - [benchmarks.md](benchmarks.md) - `benchmarks`: how the library-call, described-call and blocking-call rows sample
 - [program.md](program.md) - `program`: the host program, from the command line or in process, and what one run does

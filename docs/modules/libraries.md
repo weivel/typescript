@@ -5,6 +5,19 @@ definition with no description, the contracts a library publishes, how a revoked
 function's failure throws. A definition that declares a description is bound as [descriptions.md](descriptions.md) says.
 The code is in [src/host/](../source/src/host/README.md), mostly `libraries.ts`.
 
+A plugin reaches a definition service as it reaches any service, through [its context](context.md). For a definition
+bound from a description, the whole call is:
+
+```ts
+import type { BoundDefinition } from "@weivel/typescript/host";
+
+const files = context.services.get(context.service<BoundDefinition>("example.files"));
+const contents = await files?.read({ path: "notes.txt" });
+```
+
+`get` answers the bound object, `read` is the operation of that name, and its promise resolves with the operation's
+answer or rejects as [descriptions.md](descriptions.md) says.
+
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
   `registerHostService` throws for an id a live library declares. An id `loadLibrary`'s `withheld` names is bound and
   registered for no plugin, reached through the loaded library alone. A load the core refuses partway is undone as an
