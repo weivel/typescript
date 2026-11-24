@@ -38,6 +38,9 @@ bound object, and the operation's promise resolves with its answer, or `none`, o
   publishes a contract for is provided unchecked, and a second live library publishing one for the same capability
   makes `loadLibrary` throw as the caller's mistake. The check runs on every provide, which is a call of activation
   and never of a hot path: it adds about 300 ns to a provide of about 3.6 us, measured on Windows under Node 26.
+  Until the unload, `context.capabilities.enumsOf` answers the contract's enums, as
+  [descriptions.md](descriptions.md) says a bound definition's are answered, and undefined for a capability no loaded
+  library publishes a contract for.
 - A holder lets go of a revoked definition by calling the `release()` of the `revoked` event it was handed, once it
   has released everything the definition gave it; for any other revocation `release()` does nothing. A holding a
   watch made counts the same. The event object grants the release: whoever the plugin hands it to can end the

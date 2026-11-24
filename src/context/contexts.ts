@@ -5,7 +5,7 @@ import { createCapabilities, provideCapability } from "./capabilities.js";
 import { handleEvent } from "./event-handlers.js";
 import type { CapabilityType, Logger, PluginContext, PluginEventListener, RegisterOptions, ServiceType } from "./model.js";
 import { createServices, registerService } from "./services.js";
-import { ContextState, ensureAttached, type Attachment } from "./state.js";
+import { ContextState, ensureAttached, type Attachment, type PublishedContract } from "./state.js";
 
 export interface PluginContextsOptions {
   /** The time handed to the core with a want or a capacity answer; the timer's clock by default. */
@@ -91,15 +91,15 @@ export class PluginContexts {
 
   /**
    * Publishes the contract a loaded library declares for `capability`, so a provide of it is checked against
-   * `operations`; the answer withdraws it.
+   * its operations, and its enums are answered to `capabilities.enumsOf`; the answer withdraws it.
    *
    * @throws Error when a contract for `capability` is already published.
    */
-  publishContract(capability: string, operations: readonly string[]): () => void {
+  publishContract(capability: string, contract: PublishedContract): () => void {
     if (this.#state.contracts.has(capability)) {
       throw new Error(`A contract for ${capability} is already published by a loaded library.`);
     }
-    this.#state.contracts.set(capability, operations);
+    this.#state.contracts.set(capability, contract);
     return () => this.#state.contracts.delete(capability);
   }
 

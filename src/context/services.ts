@@ -1,6 +1,7 @@
 import { Choice, HandleCondition, PluginStatus, ReachKind, Status, type CallResult, type WantOptions as CoreWantOptions } from "../core/index.js";
 import type { CapacityProvider, RegisterOptions, ServiceListener, Services, ServiceType, Want, WantOptions } from "./model.js";
 import { DetachedError, failureOf } from "./refusal.js";
+import { describedEnumsOf } from "./described-enums.js";
 import { ensureAttached, objectFor, type Attachment, type ContextState } from "./state.js";
 
 function encodeWant(options: WantOptions, now: number): CoreWantOptions {
@@ -244,5 +245,6 @@ export function createServices(state: ContextState, attachment: Attachment): Ser
         listener as (implementation: unknown, change: string) => void,
       );
     },
+    enumsOf: describedEnumsOf,
   };
 }

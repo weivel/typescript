@@ -1,4 +1,5 @@
 import type { Manifest, ReachKind, Refusal } from "../core/index.js";
+import type { DescribedEnums } from "./described-enums.js";
 
 /** A service id paired, in the type system, with the object its provider registers under it. */
 export interface ServiceType<Service> {
@@ -83,6 +84,11 @@ export interface Services {
   want<Service>(type: ServiceType<Service>, options?: WantOptions): Want<Service>;
   /** Hears every later registration and removal the core reports for the id, until the answered function is called. */
   watch<Service>(type: ServiceType<Service>, listener: ServiceListener<Service>): () => void;
+  /**
+   * The enums of the description that bound `service`, a definition this plugin got, `weivel_status` among them;
+   * undefined for an object no description bound, as one a plugin registered.
+   */
+  enumsOf(service: unknown): DescribedEnums | undefined;
 }
 
 /** How a plugin sees the implementations of a capability: only those whose providers' activations were verified. */
@@ -91,6 +97,11 @@ export interface Capabilities {
   all<Implementation>(type: CapabilityType<Implementation>): Implementation[];
   /** Hears every implementation that joins or leaves from now on, until the answered function is called. */
   watch<Implementation>(type: CapabilityType<Implementation>, listener: ImplementationListener<Implementation>): () => void;
+  /**
+   * The enums of the contract a loaded library publishes for the capability, `weivel_status` among them; undefined
+   * while none is published.
+   */
+  enumsOf<Implementation>(type: CapabilityType<Implementation>): DescribedEnums | undefined;
 }
 
 /** Something this plugin held was withdrawn, so it must stop using it. */

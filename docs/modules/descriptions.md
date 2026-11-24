@@ -39,6 +39,15 @@ not offer. The code is in [src/host/description/](../source/src/host/description
   hold; a text holding a NUL is refused with an `EmbeddedNulError`. Structs nest at most 1000 levels below the one
   a call takes, `WEIVEL_STANDARD_VALUE_DEPTH_LIMIT` as for a value tree, and a deeper input is refused with a
   `TypeError` before the call.
+- A plugin reads the enums of a definition it got with `context.services.enumsOf(definition)`, never by copying their
+  numbers: each enum its description lists, by the name its header spells, holding its entries' numbers by the names
+  the header spells them, so `enumsOf(definition).example_kind.EXAMPLE_KIND_DONE` is a number. `weivel_status`
+  stands beside them, its entries as `core.h` spells them, since every operation answers one and a
+  `DescribedCallError` carries it, though no description lists it. The answer and each enum are frozen and have no
+  prototype, and a definition an answer carries answers its own description's. Since a plugin is bundled with its
+  own copy of this package, the enums are reached through its context, which the host's copy built, and never
+  through a function a plugin imports; an object no description bound, as one a plugin registered, answers
+  undefined.
 - A method resolves on OK with the answer copied into JavaScript values: a single answer parameter as its value, more
   than one as an object keyed by parameter name, none as `undefined`. A struct answers every member but its leading
   `size`, its counts, its context and storage, a NULL pointer, a NULL handle and a value of kind NONE; an integer of

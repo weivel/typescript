@@ -390,8 +390,8 @@ export class Host {
     this.#libraryUnloads.add(unload);
     ids.forEach((id) => this.#libraryIds.set(id, declaration.importName));
     try {
-      for (const [capability, operations] of bound.contracts) {
-        unregisters.push(this.#contexts.publishContract(capability, operations));
+      for (const [capability, contract] of bound.contracts) {
+        unregisters.push(this.#contexts.publishContract(capability, contract));
       }
       this.#registerLibraryServices(bound, unregisters, withheld);
     } catch (error) {

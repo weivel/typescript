@@ -3,10 +3,12 @@ import koffi from "koffi";
 import { Status } from "../core/constants.js";
 import { optionalTextForC, textForC } from "../core/text.js";
 import { FunctionKind } from "../standard/constants.js";
+import type { PublishedContract } from "../context/index.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
 import { bindDescribed, type BoundDefinition } from "./description/definition.js";
 import { HandleHoldings } from "./description/handles.js";
 import { DescribedReturn } from "./description/layout.js";
+import { enumsByName } from "./description/enums.js";
 import type { CallTracking } from "./description/operations.js";
 import { readDescription, type Description } from "./description/reader.js";
 import type { LibraryFunction, LibraryService } from "./model.js";
@@ -261,18 +263,23 @@ function contractOperations(description: Description): readonly string[] {
   return Object.freeze(description.operations.filter((operation) => operation.returns === DescribedReturn.Status).map((operation) => operation.name));
 }
 
+/** A contract's description as the contexts publish it: its operations and its enums. */
+function publishedContract(description: Description): PublishedContract {
+  return { operations: contractOperations(description), enums: enumsByName(description.enums) };
+}
+
 /**
- * Reads every contract a declaration publishes, by capability, as the operations an implementation of it offers.
+ * Reads every contract a declaration publishes, by capability.
  *
  * @throws Error, the caller's mistake, for a contract whose description is not exported, answers NULL or is refused
  * by the check, or declared to a host given no `check`; OutOfMemoryError for a check answering OUT_OF_MEMORY.
  */
-function readContracts(library: koffi.IKoffiLib, declaration: LibraryDeclaration, check: DescriptionCheck | undefined): Map<string, readonly string[]> {
-  const contracts = new Map<string, readonly string[]>();
+function readContracts(library: koffi.IKoffiLib, declaration: LibraryDeclaration, check: DescriptionCheck | undefined): Map<string, PublishedContract> {
+  const contracts = new Map<string, PublishedContract>();
   for (const contract of declaration.contracts ?? []) {
     const subject = `contract ${contract.capability}`;
     const description = checkedDescription(library, declaration.importName, contract.description, subject, check, null);
-    contracts.set(contract.capability, contractOperations(readDescription(description)));
+    contracts.set(contract.capability, publishedContract(readDescription(description)));
   }
   return contracts;
 }
@@ -332,8 +339,8 @@ export interface BoundLibrary {
   readonly definitions: ReadonlyMap<string, LibraryDefinition>;
   /** Each definition service that declares a description, by id, as the object its description binds. */
   readonly described: ReadonlyMap<string, BoundDefinition>;
-  /** Each contract the library publishes, by capability, as the operations an implementation of it offers. */
-  readonly contracts: ReadonlyMap<string, readonly string[]>;
+  /** Each contract the library publishes, by capability. */
+  readonly contracts: ReadonlyMap<string, PublishedContract>;
   /** Counts a definition service as registered, so the binary stays open until `released` is called for it. */
   awaitRelease(id: string): void;
   /** Says every holding of a definition service has ended since it was unregistered, or that it never was registered. */
@@ -450,7 +457,7 @@ export function bindLibrary(
   let services: Map<string, LibraryService>;
   let definitions: Map<string, LibraryDefinition>;
   let described: Map<string, BoundDefinition>;
-  let contracts: Map<string, readonly string[]>;
+  let contracts: Map<string, PublishedContract>;
   try {
     let resolved: Map<string, ResolvedDefinition>;
     try {

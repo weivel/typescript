@@ -2,6 +2,7 @@ import type { Core, CoreEvent, ReachKind } from "../core/index.js";
 import { HandleTable, HoldingTable } from "../handles/index.js";
 import type { Clock } from "../timer/index.js";
 import { DeferredEvents } from "./deferred-events.js";
+import type { DescribedEnums } from "./described-enums.js";
 import type { CapacityProvider, Logger, PluginEvent, PluginEventListener } from "./model.js";
 import { DetachedError } from "./refusal.js";
 
@@ -37,6 +38,13 @@ export interface Offered {
 /** What `plugin` reaches through an offered registration: its own object, where the host offers one per plugin. */
 export function objectFor(offered: Offered, plugin: bigint): unknown {
   return offered.offeredTo === undefined ? offered.object : offered.offeredTo.get(plugin);
+}
+
+/** A contract a loaded library publishes for a capability, read from its description. */
+export interface PublishedContract {
+  /** The operations an implementation of it offers. */
+  readonly operations: readonly string[];
+  readonly enums: DescribedEnums;
 }
 
 /** A registration made awaiting releases, kept until the core says every holding of it has ended. */
@@ -86,8 +94,8 @@ export class ContextState {
   readonly wants = new HandleTable<PendingWant>();
   readonly watches = new HandleTable<Watching>();
   readonly awaitingReleases = new HandleTable<AwaitingReleases>();
-  /** Each capability a loaded library publishes a contract for, as the operations an implementation of it offers. */
-  readonly contracts = new Map<string, readonly string[]>();
+  /** Each capability a loaded library publishes a contract for, by capability. */
+  readonly contracts = new Map<string, PublishedContract>();
   /** Each revoked holding the core keeps until its holder releases it: the registrations, by holder. */
   readonly #revokedHoldings = new Map<bigint, Set<bigint>>();
   readonly plugins = new Map<bigint, PluginState>();
