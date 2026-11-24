@@ -292,13 +292,12 @@ const standardSignatures = {
   weivel_standard_secrets_description: [pointer, []],
   weivel_standard_paths_description: [pointer, []],
   weivel_standard_log_description: [pointer, []],
-  weivel_standard_scopes_description: [pointer, []],
-  weivel_standard_host_description: [pointer, []],
   weivel_standard_sha256: ["void", [bytes, count, "uint8_t *"]],
   weivel_standard_sha256_hex: ["void", [bytes, count, "char *"]],
   weivel_standard_is_sha256_hex: ["int", [text]],
   weivel_standard_verify_download: [status, [bytes, count, text, pointerTo("weivel_standard_refusal")]],
   weivel_standard_description_check: [status, [pointer, pointerTo("weivel_standard_refusal")]],
+  weivel_standard_description_answers: [status, [pointer, pointer, pointerTo("weivel_standard_refusal")]],
 } as const satisfies Record<string, Signature>;
 
 export type StandardFunctionName = keyof typeof standardSignatures;

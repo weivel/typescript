@@ -32,6 +32,12 @@ describe("description/a-definition-declared-without-its-description-loads-as-bef
   });
 });
 
+describe("description/a-description-answering-another-definition-fails-the-load", () => {
+  it("refuses the load as the caller's mistake when a description answers another definition of the same layout, registering neither service", async () => {
+    await witnessed("description/a-description-answering-another-definition-fails-the-load");
+  });
+});
+
 describe("description/binding/a-broken-offset-description-fails-the-load", () => {
   it("refuses the load as the caller's mistake when an offset disagrees with koffi's layout, though the check passes it", async () => {
     await witnessed("description/binding/a-broken-offset-description-fails-the-load");

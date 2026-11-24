@@ -189,7 +189,7 @@ async function runToTheEnd(options: RunHostOptions, stopSignal: AbortSignal, sta
     host = Host.create({
       edgeSource: EdgeSource.Capabilities,
       ...(options.coreLibraryPath === undefined ? {} : { coreLibraryPath: options.coreLibraryPath }),
-      descriptionCheck: (description) => standard.checkDescription(description),
+      descriptionCheck: (description, definition) => standard.checkDescription(description, definition),
       log,
     });
     const hostLibrary = loadHostLibrary(host, standard, options.hostLibraryPath);

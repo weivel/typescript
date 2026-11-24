@@ -49,8 +49,10 @@ export interface HostOptions {
   /** Where an error thrown by code the layer calls goes; the wrapper's default by default. */
   readonly onListenerError?: ListenerErrorSink;
   /**
-   * Checks each description a library declares before the host binds it: the standard's
-   * `(description) => standard.checkDescription(description)`. A host given none refuses a library that declares one.
+   * Checks each description a library declares before the host binds it, and that a service's description answers
+   * the definition its symbol answered: the standard's
+   * `(description, definition) => standard.checkDescription(description, definition)`. A host given none refuses a
+   * library that declares one.
    */
   readonly descriptionCheck?: DescriptionCheck;
 }

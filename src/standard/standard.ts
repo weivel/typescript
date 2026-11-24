@@ -240,14 +240,22 @@ export class Standard {
   }
 
   /**
-   * Checks a description a library answered, as weivel_standard_description_check does, before anything reads it; a
-   * host is handed this as its `descriptionCheck`.
+   * Checks a description a library answered, as weivel_standard_description_check does, before anything reads it,
+   * and then, given the definition a service's symbol answered, that the description answers it, as
+   * weivel_standard_description_answers does; a host is handed this as its `descriptionCheck`.
+   *
+   * @param definition null for a contract's description, which answers no definition.
    */
-  checkDescription(description: object): StandardAnswer<undefined> {
-    return this.#withRefusal((refusal) => ({
-      status: this.#functions.weivel_standard_description_check(description, refusal) as Status,
-      value: undefined,
-    }));
+  checkDescription(description: object, definition: object | null): StandardAnswer<undefined> {
+    return this.#withRefusal((refusal) => ({ status: this.#checkAndCompare(description, definition, refusal), value: undefined }));
+  }
+
+  #checkAndCompare(description: object, definition: object | null, refusal: object): Status {
+    const checked = this.#functions.weivel_standard_description_check(description, refusal) as Status;
+    if (checked !== Status.Ok || definition === null) {
+      return checked;
+    }
+    return this.#functions.weivel_standard_description_answers(description, definition, refusal) as Status;
   }
 
   #manifestView(manifest: object): object {

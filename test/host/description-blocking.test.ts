@@ -32,7 +32,7 @@ interface Loaded {
 
 function loaded(): Loaded {
   const standard = realStandard();
-  const world = createHostWorld({}, { descriptionCheck: (description) => standard.checkDescription(description) });
+  const world = createHostWorld({}, { descriptionCheck: (description, definition) => standard.checkDescription(description, definition) });
   const library = alive(world.host.loadLibrary(declaration(), describedLibraryPath));
   const handles = registerDirectory(world, pluginDirectory([plugin({ importName: "holder", services: { consumes: [mirrorId, walkerId] } })]));
   const context = alive(world.host.open(handles.registered.get("holder")!));

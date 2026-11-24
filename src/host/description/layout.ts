@@ -59,6 +59,7 @@ const weivel_standard_description = structOf({
   blocking_count: count,
   definitions: pointer,
   definition_count: count,
+  answered_by: pointer,
 });
 
 /**

@@ -27,7 +27,7 @@ function bound(): Bound {
   const standard = realStandard();
   const read = standard.readLibrary(readFileSync(join(fixtureDirectory, "library.json"), "utf8"));
   const unmapped: string[] = [];
-  const library = bindLibrary(describedLibraryPath, read.value!, () => unmapped.push("unmapped"), (description) => standard.checkDescription(description));
+  const library = bindLibrary(describedLibraryPath, read.value!, () => unmapped.push("unmapped"), (description, definition) => standard.checkDescription(description, definition));
   const binary = koffi.load(describedLibraryPath);
   binaries.push(binary);
   const symbol = (name: string): object => (binary.func(name, "void *", []) as () => object)();

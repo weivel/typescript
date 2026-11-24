@@ -39,7 +39,7 @@ function declaration(file = "library.json"): LibraryDeclaration {
 
 function checkedWorld(): HostWorld {
   const standard = realStandard();
-  return createHostWorld({}, { descriptionCheck: (description) => standard.checkDescription(description) });
+  return createHostWorld({}, { descriptionCheck: (description, definition) => standard.checkDescription(description, definition) });
 }
 
 interface Loaded {
