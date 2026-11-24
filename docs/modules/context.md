@@ -22,7 +22,8 @@ is in [src/context/](../source/src/context/README.md).
   answering a type token, a `ServiceType<T>` or a `CapabilityType<T>`, that holds the id and pairs it with `T` in the
   type system only. `services.get`, `services.register`, `services.want` and `services.watch` take the `ServiceType`,
   and `capabilities.all`, `capabilities.watch` and `provide` the `CapabilityType`, never the id as a string:
-  `context.services.get(context.service<Files>("example.files"))` answers the provider's object typed as `Files`.
+  `context.services.get(context.service<Files>("example.files"))` answers the provider's object typed as `Files`,
+  where `Files` is the plugin's own type for that service.
 - `services.get` answers undefined only when nothing is registered under the id. A refused `get`, `services.ids`,
   `services.watch`, `capabilities.all` and `capabilities.watch` throw the core's `RefusalError`, or an `Error` naming
   the status alone where the core queued no refusal, as for a refusal of reach already reported once. A refusal of

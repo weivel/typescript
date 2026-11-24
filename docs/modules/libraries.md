@@ -15,8 +15,9 @@ const files = context.services.get(context.service<BoundDefinition>("example.fil
 const contents = await files?.read({ path: "notes.txt" });
 ```
 
-`get` answers the bound object, `read` is the operation of that name, and its promise resolves with the operation's
-answer or rejects as [descriptions.md](descriptions.md) says.
+where `example.files` and `read` stand for a definition service's id and one of its operations. `get` answers the
+bound object, and the operation's promise resolves with its answer, or `none`, or rejects as
+[descriptions.md](descriptions.md) says.
 
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
   `registerHostService` throws for an id a live library declares. An id `loadLibrary`'s `withheld` names is bound and
