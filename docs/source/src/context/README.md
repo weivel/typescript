@@ -4,8 +4,8 @@ The `context` module: one context per plugin, built once the core has opened it 
 - [capabilities.ts](../../../../src/context/capabilities.ts) - `capabilities`: providing an implementation, checked against its contract, and listing and watching the verified ones
 - [capacity.ts](../../../../src/context/capacity.ts) - answering the core's capacity questions with a registration's capacity provider
 - [contexts.ts](../../../../src/context/contexts.ts) - `PluginContexts`: every plugin's context on one core, the events routed to them, and services offered plugin by plugin
-- [described-enums.ts](../../../../src/context/described-enums.ts) - `DescribedEnums`, and the enums of the description that bound each definition
 - [deferred-events.ts](../../../../src/context/deferred-events.ts) - holding the core's events until the call that drained them has recorded its answer
+- [described-enums.ts](../../../../src/context/described-enums.ts) - `DescribedEnums`, and the enums of the description that bound each definition
 - [event-handlers.ts](../../../../src/context/event-handlers.ts) - what each core event does to the contexts: settled wants, watches, revocations and refusals
 - [index.ts](../../../../src/context/index.ts) - the module's exports
 - [model.ts](../../../../src/context/model.ts) - the types a plugin sees: service and capability keys, options, the logger and events
