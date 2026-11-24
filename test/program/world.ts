@@ -11,7 +11,7 @@ import { standardLibraryPath } from "../real-standard.ts";
 export const stubHostDirectory = join(import.meta.dirname, "..", "..", "native", "test", "stub-host");
 export const stubHostLibraryPath = join(stubHostDirectory, sharedLibraryFileName("stub-host"));
 
-/** A host vector's waits run up to LAYER.md's 30-second bound, so its test is given a little more. */
+/** A host vector's waits run up to the 30-second bound of the kit's `docs/vectors/layer/host.md`, so its test is given a little more. */
 export const hostTestTimeout = 35_000;
 
 const temporaryDirectories: string[] = [];
@@ -54,7 +54,7 @@ interface HostThen {
   readonly exitsNonZero?: boolean;
 }
 
-/** Runs the kit's `vector` against `stub-host` and judges its record and exit code as LAYER.md states. */
+/** Runs the kit's `vector` against `stub-host` and judges its record and exit code as the kit's `docs/vectors/layer/host.md` states. */
 export async function judgeHostVector(vector: LayerVector, run?: HostProgramRun): Promise<void> {
   const then = vector.then as unknown as HostThen;
 

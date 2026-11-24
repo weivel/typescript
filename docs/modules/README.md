@@ -1,0 +1,12 @@
+How TypeScript reads the contract, module by module. `src/` holds the modules every language implementation of weivel holds, in the order the core's `MODULES` list names them: `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance`, `benchmarks`, `program`, `bundle` and `testing`, of which it names four as optional: `standard`, the standard's defaults, `program`, the host program, `bundle`, its bundler, and `testing`, a helper for the tests of a program that hosts plugins. This package holds all eleven, and each is a subpath of the package, `@weivel/typescript/<module>`. What each module must do is the core's `docs/contract/`, one file per module, and is not repeated here; a file below holds only what this package adds, chooses or answers where the contract leaves it to the language. `handles`, `standard` and `conformance` have no file of their own: `handles` and `conformance` add nothing to the contract (how the suite runs the kit's host vectors is in [../building.md](../building.md)), and the `standard` module's one choice is how it feeds the host a plugin's entry, in [host.md](host.md). Where each module's code lives is in the source mirror, [../source/src/](../source/src/).
+
+- [core.md](core.md) - `core`: a text holding a NUL, an event the wrapper could not copy whole, a malformed call, and where the native libraries load from
+- [timer.md](timer.md) - `timer`: the default scheduler, and a scheduler handed the time a wait ends at rather than a delay
+- [context.md](context.md) - `context`: wants and their withdrawal, when the clock is read, listeners that throw, a context's life, services and holdings awaited
+- [host.md](host.md) - `host`: a plugin's entry, and registration, activation, verification, release, destroy and services offered to one plugin
+- [libraries.md](libraries.md) - `host`: C libraries as host services, a definition with no description, contracts, letting go of a revoked definition, a bytes call's failure
+- [descriptions.md](descriptions.md) - `host`: a definition bound from its description, its methods, what they take and answer, handles, threads, operations not offered
+- [benchmarks.md](benchmarks.md) - `benchmarks`: how the library-call, described-call and blocking-call rows sample
+- [program.md](program.md) - `program`: the host program, from the command line or in process, and what one run does
+- [bundle.md](bundle.md) - `bundle`: the bundler, its optional esbuild, and a bundle that runs wherever it is moved
+- [testing.md](testing.md) - `testing`: `scratchHome` and `freePort`

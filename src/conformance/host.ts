@@ -6,7 +6,7 @@ import { runHost } from "../program/index.js";
 import { hostVectorEntrySource, hostVectorManifest, type HostVectorPlugin } from "./host-plugins.js";
 import type { LayerVector } from "./vectors.js";
 
-/** The one bound LAYER.md sets on every wait of a `host` vector. */
+/** The one bound the kit's `docs/vectors/layer/host.md` sets on every wait of a `host` vector. */
 export const hostVectorBoundMillis = 30_000;
 
 const recordFileName = "record.txt";
@@ -156,7 +156,7 @@ async function withinTheBound(running: Promise<number>, what: string): Promise<n
 }
 
 /**
- * Sends the run its stop request and then writes `stop-sent`, as LAYER.md says.
+ * Sends the run its stop request and then writes `stop-sent`, as the kit's `docs/vectors/layer/host.md` says.
  *
  * @implNote An AbortSignal runs its listeners within `abort()`, so a run that takes the request in process has taken
  * it, and one that forwards it to a child has sent it, before the file is written.
@@ -196,8 +196,9 @@ async function drive(given: HostGiven, directory: string, run: HostProgramRun): 
 }
 
 /**
- * Runs a `host` vector as LAYER.md says: lays its plugins and `stub-host.json` out in a fresh directory, runs the
- * program over it, sends the stop request once the record holds `stopAfter`, and answers the record and the exit code.
+ * Runs a `host` vector as the kit's `docs/vectors/layer/host.md` says: lays its plugins and `stub-host.json` out in a
+ * fresh directory, runs the program over it, sends the stop request once the record holds `stopAfter`, and answers the
+ * record and the exit code.
  *
  * @throws Error for a vector of another op, a plugin or step this driver does not realise, or a wait past the bound.
  */

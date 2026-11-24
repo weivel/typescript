@@ -101,7 +101,7 @@ function scalarOf(read: BudgetLines, name: ScalarName): number {
 }
 
 /**
- * Reads a budget file as the kit's RUNNER.md lays it out.
+ * Reads a budget file as the kit's `docs/benchmarks.md` lays it out.
  *
  * @throws Error for a line the format does not define, a number that is not positive, or a missing margin.
  */
