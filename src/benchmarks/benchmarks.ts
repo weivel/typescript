@@ -535,7 +535,9 @@ function refuseUnlessReflected(reflected: Reflected | undefined, path: string): 
  */
 export async function benchmarkDescribedCall(options: DescribedBenchmarkOptions): Promise<DescribedCallSummaries> {
   const standard = loadStandard(options.standardLibraryPath);
-  const host = benchmarkHost(options, { descriptionCheck: (description, definition) => standard.checkDescription(description, definition) });
+  const host = benchmarkHost(options, {
+    descriptionCheck: (description, definition) => standard.checkDescription(description, definition),
+  });
   const bareLibrary = koffi.load(options.describedLibraryPath);
   let hand: HeldPath | undefined;
   try {
@@ -650,7 +652,9 @@ async function sampleBlockingPair(direct: MeasuredPath, awaited: AwaitedPath, sa
  */
 export async function benchmarkBlockingCall(options: DescribedBenchmarkOptions): Promise<FfiCallSummaries> {
   const standard = loadStandard(options.standardLibraryPath);
-  const host = benchmarkHost(options, { descriptionCheck: (description, definition) => standard.checkDescription(description, definition) });
+  const host = benchmarkHost(options, {
+    descriptionCheck: (description, definition) => standard.checkDescription(description, definition),
+  });
   const bareLibrary = koffi.load(options.describedLibraryPath);
   const waited = koffi.alloc("uint64_t", 1) as object;
   try {
