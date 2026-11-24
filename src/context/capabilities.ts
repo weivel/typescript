@@ -30,7 +30,7 @@ function offers(object: unknown, operation: string): boolean {
 
 /** @throws ContractMismatchError naming the first operation of `id`'s contract that `object` does not offer. */
 function refuseUnlikeItsContract(state: ContextState, id: string, object: unknown): void {
-  const missing = state.contracts.get(id)?.find((operation) => !offers(object, operation));
+  const missing = state.contracts.get(id)?.operations.find((operation) => !offers(object, operation));
   if (missing !== undefined) {
     throw new ContractMismatchError(id, missing);
   }
@@ -73,5 +73,6 @@ export function createCapabilities(state: ContextState, attachment: Attachment):
         listener as (implementation: unknown, change: string) => void,
       );
     },
+    enumsOf: <Implementation>(type: CapabilityType<Implementation>) => state.contracts.get(type.id)?.enums,
   };
 }

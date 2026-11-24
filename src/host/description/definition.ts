@@ -1,5 +1,7 @@
 import koffi from "koffi";
+import { rememberDescribedEnums, type DescribedEnums } from "../../context/described-enums.js";
 import { LibraryUnloadedError, type LibraryDefinition } from "../libraries.js";
+import { enumsByName } from "./enums.js";
 import { HandleHoldings } from "./handles.js";
 import { DescribedKind, DescribedReturn } from "./layout.js";
 import { DescribedLayouts, DescriptionLayoutError, type LaidOutType } from "./layouts.js";
@@ -138,6 +140,7 @@ const answerRelease = "release";
 class DescribedBinding {
   readonly layouts: DescribedLayouts;
   readonly blocking: readonly string[];
+  readonly enums: DescribedEnums;
   readonly #description: Description;
   readonly #calls: readonly OperationCall[];
   readonly #nested: ReadonlyMap<string, DescribedBinding>;
@@ -146,6 +149,7 @@ class DescribedBinding {
   constructor(description: Description) {
     this.#description = description;
     this.layouts = new DescribedLayouts(description);
+    this.enums = enumsByName(description.enums);
     this.#nested = new Map(description.definitions.map((nested) => [nested.definition, new DescribedBinding(nested)] as const));
     const blocking = new Set(description.blocking);
     const statusOperations = description.operations.filter((operation) => operation.returns === DescribedReturn.Status);
@@ -253,6 +257,7 @@ class DescribedBinding {
       });
     }
     blockingNames.set(bound, this.blocking);
+    rememberDescribedEnums(bound, this.enums);
     if (library !== undefined) {
       boundAddresses.set(bound, Object.freeze({ library, pointer }));
     }

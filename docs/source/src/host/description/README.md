@@ -3,6 +3,7 @@ Binding a definition from the description its library answers: the description r
 <!-- generated: source-children -->
 - [arena.ts](../../../../../src/host/description/arena.ts) - the native memory one call writes into, freed together once the call is done
 - [definition.ts](../../../../../src/host/description/definition.ts) - `bindDescribed`: the bound object of one method per operation, and the blocking operations it names
+- [enums.ts](../../../../../src/host/description/enums.ts) - a description's enums by name, `weivel_status` beside them
 - [handles.ts](../../../../../src/host/description/handles.ts) - a handle an operation answered, and the holdings released by `release()`, the unload or the carrying answer
 - [layout.ts](../../../../../src/host/description/layout.ts) - the hand layout of `description.h`: its structs, kinds, roles and returns
 - [layouts.ts](../../../../../src/host/description/layouts.ts) - each described struct built as a koffi struct and checked member by member against the description
