@@ -9,6 +9,7 @@ Tests of the `host` module against the real core, the standard and their test li
 - [description-carried-lifetime.test.ts](../../../../test/host/description-carried-lifetime.test.ts) - a definition an answer carried, once that answer is released
 - [description-cycle.test.ts](../../../../test/host/description-cycle.test.ts) - a struct pointing at itself, or through a cycle, in either order
 - [description-definitions.test.ts](../../../../test/host/description-definitions.test.ts) - a definition an answer carries, and one a host got some other way
+- [description-enums.test.ts](../../../../test/host/description-enums.test.ts) - the enums a bound definition and a published contract answer, by the names their headers spell
 - [description-limits.test.ts](../../../../test/host/description-limits.test.ts) - the depth limit, reached on any stack
 - [description-unload.test.ts](../../../../test/host/description-unload.test.ts) - unloading a library while a blocking call runs in it
 - [description.test.ts](../../../../test/host/description.test.ts) - a described definition loaded through the host and called
