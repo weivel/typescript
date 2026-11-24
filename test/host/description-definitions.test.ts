@@ -34,7 +34,7 @@ interface Loaded {
 
 function loaded(): Loaded {
   const standard = realStandard();
-  const world = createHostWorld({}, { descriptionCheck: (description) => standard.checkDescription(description) });
+  const world = createHostWorld({}, { descriptionCheck: (description, definition) => standard.checkDescription(description, definition) });
   const library = alive(world.host.loadLibrary(declaration(), describedLibraryPath));
   const handles = registerDirectory(world, pluginDirectory([plugin({ importName: "holder", services: { consumes: [mirrorId, walkerId] } })]));
   const context = alive(world.host.open(handles.registered.get("holder")!));
@@ -112,7 +112,7 @@ describe("binding a definition a host got some other way", () => {
     binaries.push(binary);
     const pointer = (binary.func("described_walker_definition", "void *", []) as () => object)();
     const description = (binary.func("described_walker_description", "void *", []) as () => object)();
-    expect(realStandard().checkDescription(description).status).toBe(0);
+    expect(realStandard().checkDescription(description, pointer).status).toBe(0);
 
     const walker = bindDefinition(pointer, description);
     const loan = (await walker.lend!()) as Loan;

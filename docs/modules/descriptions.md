@@ -7,9 +7,13 @@ not offer. The code is in [src/host/description/](../source/src/host/description
 - A definition service that declares a `description` is registered as its `BoundDefinition`, built from the description
   alone ([src/host/description/](../source/src/host/description/README.md)): no file of this package names a type of any
   library it binds. The host never loads the standard, so its caller hands it the standard's check as `descriptionCheck`
-  (`(description) => standard.checkDescription(description)`); a host given none refuses a library that declares a
-  description, and a check answering OUT_OF_MEMORY makes `loadLibrary` throw an `OutOfMemoryError`, never the caller's
-  mistake. At the load each description is checked, then read, and every struct it names is built as a koffi struct from
+  (`(description, definition) => standard.checkDescription(description, definition)`); a host given none refuses a
+  library that declares a description, and a check answering OUT_OF_MEMORY makes `loadLibrary` throw an
+  `OutOfMemoryError`, never the caller's mistake. The check is handed the definition the service's symbol answered,
+  and after weivel_standard_description_check passes the description it calls weivel_standard_description_answers, so
+  a description that answers another definition than the one the service serves refuses the load as the caller's
+  mistake, whatever its layout; a contract's description, which answers no definition, is handed none and only checked.
+  At the load each description is checked, then read, and every struct it names is built as a koffi struct from
   its members in order, each member's offset and size and the struct's size compared with what koffi computes, and a
   definition's operations laid among its members by offset; any difference, or a kind this binding does not know,
   refuses the load as the caller's mistake. Which kinds each role takes, the shape of a refusal and a release, and where

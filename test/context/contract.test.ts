@@ -22,7 +22,7 @@ function contractDeclaration(): LibraryDeclaration {
 
 function checkingWorld(): HostWorld {
   const standard = realStandard();
-  return createHostWorld({}, { descriptionCheck: (description) => standard.checkDescription(description) });
+  return createHostWorld({}, { descriptionCheck: (description, definition) => standard.checkDescription(description, definition) });
 }
 
 function loadContract(world: HostWorld): LoadedLibrary {

@@ -89,10 +89,12 @@ export interface DescriptionCheckAnswer {
 }
 
 /**
- * Checks a description before the host reads anything of it, as weivel_standard_description_check does: the host
- * never loads the standard itself, so its caller hands it the standard's check.
+ * Checks a description before the host reads anything of it, as weivel_standard_description_check does, and, given
+ * the definition a service's symbol answered, that the description answers that definition, as
+ * weivel_standard_description_answers does: the host never loads the standard itself, so its caller hands it the
+ * standard's check. `definition` is null for a contract's description, which answers no definition.
  */
-export type DescriptionCheck = (description: object) => DescriptionCheckAnswer;
+export type DescriptionCheck = (description: object, definition: object | null) => DescriptionCheckAnswer;
 
 function utf8TextOf(body: Uint8Array): string | undefined {
   try {
@@ -213,10 +215,17 @@ function readDefinitions(importName: string, resolved: ReadonlyMap<string, Resol
 
 type DescriptionSymbol = () => object | null;
 
+/** The definition a service's description must answer: what its symbol answered, and the symbol, as an error names it. */
+interface AnsweredDefinition {
+  readonly pointer: object;
+  readonly symbol: string;
+}
+
 /**
- * The description `symbol` answers, once `check` has passed it.
+ * The description `symbol` answers, once `check` has passed it and, for a service, found it answers `answered`.
  *
  * @param subject what declares the description, as an error names it.
+ * @param answered the service's definition, or null for a contract's description.
  * @throws Error, the caller's mistake, for no `check`, or a description that answers NULL or the check refuses;
  * OutOfMemoryError for a check answering OUT_OF_MEMORY.
  */
@@ -226,6 +235,7 @@ function checkedDescription(
   symbol: string,
   subject: string,
   check: DescriptionCheck | undefined,
+  answered: AnsweredDefinition | null,
 ): object {
   if (check === undefined) {
     throw new Error(`${importName}'s ${subject} declares a description, and the host was given no descriptionCheck.`);
@@ -234,13 +244,14 @@ function checkedDescription(
   if (description === null) {
     throw new Error(`${importName}'s description ${symbol} answered NULL.`);
   }
-  const checked = check(description);
+  const checked = check(description, answered?.pointer ?? null);
   if (checked.status === Status.OutOfMemory) {
     throw new OutOfMemoryError(`The check of ${importName}'s description ${symbol}`);
   }
   if (checked.status !== statusOk) {
     const where = checked.refusal === undefined ? "" : ` at ${checked.refusal.path === "" ? "its root" : checked.refusal.path}: ${checked.refusal.detail}`;
-    throw new Error(`${importName}'s description ${symbol} was refused by the check, status ${checked.status}${where}.`);
+    const describing = answered === null ? "" : ` for the definition ${answered.symbol}`;
+    throw new Error(`${importName}'s description ${symbol}, which its ${subject} declares${describing}, was refused by the check, status ${checked.status}${where}.`);
   }
   return description;
 }
@@ -260,7 +271,7 @@ function readContracts(library: koffi.IKoffiLib, declaration: LibraryDeclaration
   const contracts = new Map<string, readonly string[]>();
   for (const contract of declaration.contracts ?? []) {
     const subject = `contract ${contract.capability}`;
-    const description = checkedDescription(library, declaration.importName, contract.description, subject, check);
+    const description = checkedDescription(library, declaration.importName, contract.description, subject, check, null);
     contracts.set(contract.capability, contractOperations(readDescription(description)));
   }
   return contracts;
@@ -284,11 +295,13 @@ function bindDescribedDefinitions(
     if (service.description === undefined) {
       continue;
     }
-    const description = checkedDescription(library, declaration.importName, service.description, `service ${service.id}`, check);
+    const definition = definitions.get(service.id)!;
+    const answered = { pointer: definition.pointer, symbol: definitionSymbolOf(service.functions)! };
+    const description = checkedDescription(library, declaration.importName, service.description, `service ${service.id}`, check, answered);
     bound.set(
       service.id,
       bindDescribed({
-        definition: definitions.get(service.id)!,
+        definition,
         description: readDescription(description),
         holdings: binding.holdings,
         isOpen: () => binding.state.binaryOpen,

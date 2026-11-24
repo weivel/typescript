@@ -133,7 +133,7 @@ export class DriverWorld {
       pluginLog: (manifest: Manifest) => recordingLogger(manifest.importName, this.logs),
       onListenerError: (error) => void this.sunk.push(error),
       onTimerMove: (deadline) => void this.timerMoves.push([this.time.now(), deadline ?? null]),
-      descriptionCheck: (description) => loadStandard(options.standardLibraryPath).checkDescription(description),
+      descriptionCheck: (description, definition) => loadStandard(options.standardLibraryPath).checkDescription(description, definition),
     });
   }
 
