@@ -53,7 +53,7 @@ function inProcessEntrySource(nativeLibraries: BundleProgramOptions["nativeLibra
   return [
     `import { startHost as startHostWith } from "./run.js";`,
     ...nativeLibrariesSource(nativeLibraries),
-    `export function startHost(options) {`,
+    `export async function startHost(options) {`,
     `  return startHostWith({ ...options, coreLibraryPath: options.coreLibraryPath ?? nativeLibraries.coreLibraryPath, standardLibraryPath: options.standardLibraryPath ?? nativeLibraries.standardLibraryPath });`,
     `}`,
   ].join("\n");

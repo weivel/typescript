@@ -35,6 +35,22 @@ describe("the in-process bundle", () => {
     expect(probed).toEqual({ exit: 0, standardOutput: JSON.stringify({ exports: ["startHost"], exitCode: null }), standardError: "" });
   });
 
+  it("rejects, never throws, a start given no options", async () => {
+    const probed = await probeBesideTheBundles(
+      (inProcessFile) =>
+        `const { startHost } = await import(${JSON.stringify(inProcessFile)});\n` +
+        `let outcome;\n` +
+        `try {\n` +
+        `  outcome = await startHost(undefined).then(() => "resolved", () => "rejected");\n` +
+        `} catch {\n` +
+        `  outcome = "threw";\n` +
+        `}\n` +
+        `console.log(JSON.stringify({ outcome }));\n`,
+    );
+
+    expect(probed).toMatchObject({ exit: 0, standardOutput: JSON.stringify({ outcome: "rejected" }) });
+  });
+
   it("starts a host that loads the core and the standard beside the bundle", async () => {
     const probed = await probeBesideTheBundles(
       (inProcessFile) =>
