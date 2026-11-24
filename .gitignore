@@ -7,4 +7,4 @@ siblings/
 .idea/
 
 # Generated on the default branch by the readme job.
-README.md
+/README.md
