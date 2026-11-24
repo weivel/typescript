@@ -3,6 +3,7 @@
 How the `host` module loads a C library and offers its functions to plugins as host services: what a load refuses, a
 definition with no description, the contracts a library publishes, how a revoked definition is let go, and what a bytes
 function's failure throws. A definition that declares a description is bound as [descriptions.md](descriptions.md) says.
+The code is in [src/host/](../source/src/host/README.md), mostly `libraries.ts`.
 
 - `host.loadLibrary` throws, reporting to no sink, for an id declared twice or already registered; and
   `registerHostService` throws for an id a live library declares. An id `loadLibrary`'s `withheld` names is bound and

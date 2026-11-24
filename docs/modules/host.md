@@ -2,7 +2,7 @@
 
 How this package reads the core's `docs/contract/host.md` for a plugin's entry and its registration, activation, release
 and destroy. C libraries as host services are in [libraries.md](libraries.md), and the definitions bound from a
-description in [descriptions.md](descriptions.md).
+description in [descriptions.md](descriptions.md). The code is in [src/host/](../source/src/host/README.md).
 
 ## A plugin's entry
 

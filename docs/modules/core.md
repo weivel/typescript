@@ -2,7 +2,7 @@
 
 How this package reads the core's `docs/contract/core.md` and `docs/contract/cross-cutting.md`: what crosses into C,
 what an event the wrapper could not copy becomes, which failures reach the error sink, and where the native libraries
-are loaded from.
+are loaded from. The code is in [src/core/](../source/src/core/README.md).
 
 - A text the caller hands that crosses into C as a `const char *` (an id, every text of a manifest, a reason, an
   option, a path or a symbol) and holds a NUL is refused before the core or the standard is called: it throws, or for

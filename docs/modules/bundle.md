@@ -1,7 +1,7 @@
 # The `bundle` module: the bundler
 
 How this package reads the core's `docs/contract/bundle.md`. How the tests run a bundle is in
-[../building.md](../building.md).
+[../building.md](../building.md). The code is in [src/bundle/](../source/src/bundle/README.md).
 
 `bundle` writes one ES module file with esbuild, which is an optional peer dependency of this package: only `bundle`
 loads it, so a consumer of `host` or `program` never installs it, and this repository pins it as a dev dependency for

@@ -1,6 +1,7 @@
 # The `testing` module: the test helper
 
-How this package reads the core's `docs/contract/testing.md`.
+How this package reads the core's `docs/contract/testing.md`. The code is in
+[src/testing/](../source/src/testing/README.md).
 
 `@weivel/typescript/testing` is for the tests of a program that hosts plugins, and names nothing of any one project.
 `scratchHome(layout)` makes a fresh folder under the temporary directory, named by its real path, copies each of

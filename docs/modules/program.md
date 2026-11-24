@@ -1,6 +1,7 @@
 # The `program` module: the host program
 
-How this package reads the core's `docs/contract/program.md`, and how to run the host program.
+How this package reads the core's `docs/contract/program.md`, and how to run the host program. The code is in
+[src/program/](../source/src/program/README.md).
 
 `program` runs any C library serving the standard's `weivel.host` (`weivel/host.h`): `runHost(options)` answers a
 promise of the exit code, and `node dist/program/bin.js <host library> <arguments...>` (the package's `weivel-host`)

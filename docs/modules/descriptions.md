@@ -1,26 +1,26 @@
 # Definitions bound from a description
 
-How the `host` module binds a definition service from the description its library answers, so that no file of this
-package names a type of any library it binds: the load, the bound object's methods, what they take and answer, handles,
-which thread a call runs on, and an operation the provider does not offer.
+How the `host` module binds a definition service from the description its library answers: the load, the bound
+object's methods, what they take and answer, handles, which thread a call runs on, and an operation the provider does
+not offer. The code is in [src/host/description/](../source/src/host/description/README.md).
 
-- A definition service that declares a `description` is registered as its `BoundDefinition`, built from the
-  description alone (`src/host/description/`): no file of this package names a type of any library it binds. The
-  host never loads the standard, so its caller hands it the standard's check as `descriptionCheck`
+- A definition service that declares a `description` is registered as its `BoundDefinition`, built from the description
+  alone ([src/host/description/](../source/src/host/description/README.md)): no file of this package names a type of any
+  library it binds. The host never loads the standard, so its caller hands it the standard's check as `descriptionCheck`
   (`(description) => standard.checkDescription(description)`); a host given none refuses a library that declares a
-  description, and a check answering OUT_OF_MEMORY makes `loadLibrary` throw an `OutOfMemoryError`, never the
-  caller's mistake. At the load each description is checked, then read, and every struct it names is built as a koffi
-  struct from its members in order, each member's offset and size and the struct's size compared with what koffi
-  computes, and a definition's operations laid among its members by offset; any difference, or a kind this binding
-  does not know, refuses the load as the caller's mistake. Which kinds each role takes, the shape of a refusal and a
-  release, and where the context lies are the check's rules, which this binding does not repeat. The layouts and every
-  operation's prototype are built once there, never on a call. Beside each struct's layout the load builds the struct
-  koffi writes from a JavaScript value, its texts, arrays and the structs they reach typed, so a call hands koffi one
-  checked image per input and koffi writes it during the call; only a value tree, and a struct reached through a
-  cycle of two or more structs, which no koffi struct can name, are written into the call's own memory. Each
-  operation keeps one answer block per answer and one refusal block, emptied before every call, and reads them through
-  a view of their memory, so a scalar costs no call into koffi. The one hand layout is `description.h`'s, beside the
-  standard module's layout of `value.h`, and both are checked against the standard's `layouts` program.
+  description, and a check answering OUT_OF_MEMORY makes `loadLibrary` throw an `OutOfMemoryError`, never the caller's
+  mistake. At the load each description is checked, then read, and every struct it names is built as a koffi struct from
+  its members in order, each member's offset and size and the struct's size compared with what koffi computes, and a
+  definition's operations laid among its members by offset; any difference, or a kind this binding does not know,
+  refuses the load as the caller's mistake. Which kinds each role takes, the shape of a refusal and a release, and where
+  the context lies are the check's rules, which this binding does not repeat. The layouts and every operation's
+  prototype are built once there, never on a call. Beside each struct's layout the load builds the struct koffi writes
+  from a JavaScript value, its texts, arrays and the structs they reach typed, so a call hands koffi one checked image
+  per input and koffi writes it during the call; only a value tree, and a struct reached through a cycle of two or more
+  structs, which no koffi struct can name, are written into the call's own memory. Each operation keeps one answer block
+  per answer and one refusal block, emptied before every call, and reads them through a view of their memory, so a
+  scalar costs no call into koffi. The one hand layout is `description.h`'s, beside the standard module's layout of
+  `value.h`, and both are checked against the standard's `layouts` program.
 - A `BoundDefinition` is a frozen object with no prototype holding one async method per operation that answers a
   status, named as the operation; the releases are not methods, since the binding calls them. `boundDefinitionOf`
   answers the `{ library, pointer }` it stands for. A method takes one object keyed by its input parameters' names,
@@ -50,8 +50,9 @@ which thread a call runs on, and an operation the provider does not offer.
   after the unload, does nothing, and a released handle handed as an input is refused with a `TypeError`. The unload
   releases every handle of the library still held, while the binary is still open.
 - An operation its description does not mark blocking runs on the calling thread when the method is called; the
-  promise is the method's shape, not a worker. An operation it marks blocking runs on koffi's worker thread, so the
-  event loop stays free while the C function waits, and its blocks are allocated per call, since such calls may
+  promise is the method's shape, not a worker. An operation it marks blocking (its `blocking` list, as the
+  standard's `docs/descriptions.md` states) runs on koffi's worker thread, so the event loop stays free while the C
+  function waits, and its blocks are allocated per call, since such calls may
   overlap; `blockingOperationsOf(bound)` names those operations. A holding outlives the unload, so a bound method
   stays callable until the binary closes, and rejects with a `LibraryUnloadedError` from then on; a blocking call
   still running then keeps the binary mapped until it returns. An operation named `then` refuses the load, since it

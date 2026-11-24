@@ -1,7 +1,8 @@
 # The `context` module
 
 How this package reads the core's `docs/contract/context.md`: wants and their withdrawal, the clock, listeners that
-throw, a context's life, and services as a plugin reaches them.
+throw, a context's life, and services as a plugin reaches them. The code is in
+[src/context/](../source/src/context/README.md).
 
 - A want answers a promise with a `withdraw()`: it withdraws a want the core still holds waiting, which then never
   settles, and answers `true`; for a want that has settled already, its settlement still delivered, or one withdrawn

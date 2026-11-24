@@ -1,7 +1,7 @@
 # The `timer` module
 
 How this package reads the core's `docs/contract/timer.md`: the scheduler a host arms by default, and why a scheduler is
-handed a time rather than a delay.
+handed a time rather than a delay. The code is in [src/timer/](../source/src/timer/README.md).
 
 - A host given no `scheduler` arms `setTimeout`, through `createSystemScheduler`.
 - A `Scheduler` is handed the time a wait ends at, on the clock's scale, not a delay, so the timer reads the clock

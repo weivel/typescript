@@ -1,4 +1,4 @@
-The benchmark gates. The same-language pair is judged under Node alone, as [building.md](../../../building.md) says why.
+The benchmark gates. The same-language pair is judged under Node alone, as [building.md](../../../building.md) explains.
 
 <!-- generated: source-children -->
 - [benchmarks.test.ts](../../../../test/benchmarks/benchmarks.test.ts) - every benchmark judged against the kit's budget, and each gate proven to fail on a slowed path

@@ -1,7 +1,9 @@
 # Building and testing
 
 How to build this package and run its tests: the siblings it builds against, the native libraries it builds from them,
-the runtimes it runs under, and how the host vectors run.
+the runtimes it runs under, and how the host vectors run. The build script is in [scripts/](source/scripts/README.md),
+the suite in [test/](source/test/README.md), and the child run's helpers in
+[test/program/](source/test/program/README.md).
 
 ## Siblings and native libraries
 

@@ -1,7 +1,8 @@
 # The `benchmarks` module
 
 How this package samples the rows of the core's `docs/contract/benchmarks.md` that reach C libraries; the gates and
-their budgets are the conformance kit's `docs/benchmarks.md`, read from its `benchmarks/typescript.txt`.
+their budgets are the conformance kit's `docs/benchmarks.md`, read from its `benchmarks/typescript.txt`. The code is in
+[src/benchmarks/](../source/src/benchmarks/README.md).
 
 - The definition row of the `library-call` benchmark samples in shorter rounds than the same-language pair: 100000
   warm-up calls, then 201 rounds of 200 calls per path, against the pair's 2000000 warm-up calls and 301 rounds of
