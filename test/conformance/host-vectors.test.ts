@@ -3,7 +3,7 @@ import { readLayerVector } from "../../src/conformance/index.ts";
 import { hostTestTimeout, judgeHostVector } from "../program/world.ts";
 import { layerVectorDirectory } from "./kit.ts";
 
-/** Runs the kit's vector in process against `stub-host` and judges it as LAYER.md states. */
+/** Runs the kit's vector in process against `stub-host` and judges it as the kit's `docs/vectors/layer/host.md` states. */
 function judge(id: string): Promise<void> {
   return judgeHostVector(readLayerVector(layerVectorDirectory, id));
 }

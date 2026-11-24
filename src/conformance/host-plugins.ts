@@ -72,8 +72,9 @@ function refuseUnknown(plugin: HostVectorPlugin): void {
 }
 
 /**
- * The interpreter every generated entry carries: it realises LAYER.md's steps through the services the program offers
- * the plugin, each the definition `weivel.scope` answered, bound by its description.
+ * The interpreter every generated entry carries: it realises the steps of the kit's `docs/vectors/layer/host.md`
+ * through the services the program offers the plugin, each the definition `weivel.scope` answered, bound by its
+ * description.
  */
 const entryRuntime = String.raw`
 import { existsSync } from "node:fs";
