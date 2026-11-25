@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-const LIBRARY_DECLARATION = "library.json";
+export const LIBRARY_DECLARATION = "library.json";
 
 export type ScratchFile =
   | { readonly path: string; readonly content: unknown }
@@ -44,13 +44,18 @@ function placeFile(file: ScratchFile): void {
   writeFileSync(file.path, typeof file.content === "string" ? file.content : JSON.stringify(file.content));
 }
 
+/** The name of the one binary in a library's folder: its first file that is not the declaration. */
+export function libraryBinaryName(directory: string): string {
+  const binaryName = readdirSync(directory).find((fileName) => fileName !== LIBRARY_DECLARATION);
+  if (binaryName === undefined) throw new Error(`${directory} holds no binary beside ${LIBRARY_DECLARATION}`);
+  return binaryName;
+}
+
 function placeLibrary(base: string, name: string, source: string): PlacedLibrary {
-  const names = readdirSync(source);
-  const binaryName = names.find((fileName) => fileName !== LIBRARY_DECLARATION);
-  if (binaryName === undefined) throw new Error(`${source} holds no binary beside ${LIBRARY_DECLARATION}`);
+  const binaryName = libraryBinaryName(source);
   const directory = join(base, "libraries", name);
   ensuredDirectory(directory);
-  for (const fileName of names) copyFileSync(join(source, fileName), join(directory, fileName));
+  for (const fileName of readdirSync(source)) copyFileSync(join(source, fileName), join(directory, fileName));
   return { directory, binary: join(directory, binaryName) };
 }
 
@@ -59,10 +64,10 @@ function placeLibraries(base: string, sources: Readonly<Record<string, string>>)
 }
 
 /**
- * Sets every variable and answers the function that puts them back.
+ * Sets every variable in the process and answers the function that puts each back as it was.
  * @implNote A variable that was unset is deleted on restore: assigning `undefined` to `process.env` stores the text "undefined".
  */
-function setEnvironment(variables: Readonly<Record<string, string>>): () => void {
+export function setVariables(variables: Readonly<Record<string, string>>): () => void {
   const saved = Object.keys(variables).map((name) => [name, process.env[name]] as const);
   Object.assign(process.env, variables);
   return () => {
@@ -95,7 +100,7 @@ export function scratchHome(layout: ScratchLayout): ScratchHome {
     rmSync(base, { recursive: true, force: true });
   };
   try {
-    restoreEnvironment = setEnvironment(layout.environment(base));
+    restoreEnvironment = setVariables(layout.environment(base));
     const libraries = placeLibraries(base, layout.libraries);
     layout.files(base, libraries).forEach(placeFile);
     return { base, libraries, remove };

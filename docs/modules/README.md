@@ -9,4 +9,4 @@ How TypeScript reads the contract, module by module. `src/` holds the modules ev
 - [benchmarks.md](benchmarks.md) - `benchmarks`: how the library-call, described-call and blocking-call rows sample
 - [program.md](program.md) - `program`: the host program, from the command line or in process, and what one run does
 - [bundle.md](bundle.md) - `bundle`: the bundler, its optional esbuild, and a bundle that runs wherever it is moved
-- [testing.md](testing.md) - `testing`: `scratchHome` and `freePort`
+- [testing.md](testing.md) - `testing`: `scratchHome`, `setVariables`, `describedLibrary` and `freePort`
