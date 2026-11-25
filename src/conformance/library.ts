@@ -1,7 +1,7 @@
 import koffi from "koffi";
 import { RefusalError, type PluginContext } from "../context/index.js";
 import { OutOfMemoryError, type LibraryDefinition, type LibraryService, type LoadedLibrary } from "../host/index.js";
-import type { LibraryDeclaration } from "../standard/answers.js";
+import type { LibraryContract, LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
 import { refuseUnknownKeys, type Observer } from "./expectations.js";
 import type { LayerVector } from "./vectors.js";
@@ -17,7 +17,8 @@ interface GivenDeclaration {
   readonly importName: string;
   readonly version: string;
   readonly release?: string;
-  readonly services: readonly { readonly id: string; readonly functions: readonly GivenFunction[] }[];
+  readonly services?: readonly { readonly id: string; readonly functions: readonly GivenFunction[] }[];
+  readonly contracts?: readonly LibraryContract[];
 }
 
 type Step =
@@ -122,7 +123,7 @@ function declarationOf(given: GivenDeclaration | undefined): LibraryDeclaration 
     importName: given.importName,
     version: given.version,
     release: given.release ?? null,
-    services: given.services.map((service) => ({
+    services: (given.services ?? []).map((service) => ({
       id: service.id,
       functions: service.functions.map((declared) => {
         const kind = kinds[declared.kind];
@@ -132,6 +133,7 @@ function declarationOf(given: GivenDeclaration | undefined): LibraryDeclaration 
         return { name: declared.name, symbol: declared.symbol, kind, context: 0 };
       }),
     })),
+    ...(given.contracts === undefined ? {} : { contracts: given.contracts }),
   };
 }
 

@@ -253,3 +253,12 @@ describe("library/a-forgotten-holder-ends-its-late-holding", () => {
     expect(seen.observed).toEqual(vector.then);
   });
 });
+describe("library/a-declaration-of-neither-a-service-nor-a-contract-fails-the-load", () => {
+  it("refuses a declaration that declares nothing as the caller's mistake, and reports nothing", async () => {
+    const { vector, witness: seen } = await witness("library/a-declaration-of-neither-a-service-nor-a-contract-fails-the-load");
+
+    expect(Object.keys(seen.observed)).toEqual(Object.keys(vector.then));
+    expect(seen.observed).toEqual(vector.then);
+  });
+});
+
