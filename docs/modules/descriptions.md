@@ -43,11 +43,16 @@ not offer. The code is in [src/host/description/](../source/src/host/description
   numbers: each enum its description lists, by the name its header spells, holding its entries' numbers by the names
   the header spells them, so `enumsOf(definition).example_kind.EXAMPLE_KIND_DONE` is a number. `weivel_status`
   stands beside them, its entries as `core.h` spells them, since every operation answers one and a
-  `DescribedCallError` carries it, though no description lists it. The answer and each enum are frozen and have no
-  prototype, and a definition an answer carries answers its own description's. Since a plugin is bundled with its
-  own copy of this package, the enums are reached through its context, which the host's copy built, and never
-  through a function a plugin imports; an object no description bound, as one a plugin registered, answers
-  undefined.
+  `DescribedCallError` carries it, though a description need not list it, a role fixing it; a description that lists
+  it keeps its own, and one listing a `weivel_status` that is not `core.h`'s refuses the load as the caller's mistake.
+  The answer and each enum are frozen and have no prototype, and a definition an answer carries answers its own
+  description's. Since a plugin is bundled with its own copy of this package, the enums are reached through its
+  context, which the host's copy built, and never through a function a plugin imports; an object no description
+  bound, as one a plugin registered, answers undefined.
+- A plugin reads them through `context.requireEnums(enums, names, of)`, `names` the entries it reads of each enum by
+  name, which answers exactly those, typed by `names`, and throws a `TypeError` naming the first enum or entry the
+  description lacks, so a name it does not carry stops the activation rather than reading as undefined in every
+  comparison.
 - A method resolves on OK with the answer copied into JavaScript values: a single answer parameter as its value, more
   than one as an object keyed by parameter name, none as `undefined`. A struct answers every member but its leading
   `size`, its counts, its context and storage, a NULL pointer, a NULL handle and a value of kind NONE; an integer of

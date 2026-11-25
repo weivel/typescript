@@ -2,6 +2,7 @@ import type { Core, CoreEvent, EventDispatcher, Manifest } from "../core/index.j
 import { HOST } from "../core/index.js";
 import { systemClock, type Clock } from "../timer/index.js";
 import { createCapabilities, provideCapability } from "./capabilities.js";
+import { requireEnums } from "./described-enums.js";
 import { handleEvent } from "./event-handlers.js";
 import type { CapabilityType, Logger, PluginContext, PluginEventListener, RegisterOptions, ServiceType } from "./model.js";
 import { createServices, registerService } from "./services.js";
@@ -84,6 +85,7 @@ export class PluginContexts {
         ensureAttached(attachment);
         provideCapability(this.#state, plugin, type.id, implementation);
       },
+      requireEnums,
       service: <Service>(id: string): ServiceType<Service> => ({ id }),
       services: createServices(this.#state, attachment),
     };

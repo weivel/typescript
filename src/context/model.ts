@@ -1,5 +1,5 @@
 import type { Manifest, ReachKind, Refusal } from "../core/index.js";
-import type { DescribedEnums } from "./described-enums.js";
+import type { DescribedEnums, EnumNames, RequiredEnums } from "./described-enums.js";
 
 /** A service id paired, in the type system, with the object its provider registers under it. */
 export interface ServiceType<Service> {
@@ -182,6 +182,13 @@ export interface PluginContext {
    * @throws RefusalError when the core refuses it.
    */
   provide<Implementation>(type: CapabilityType<Implementation>, implementation: Implementation): void;
+  /**
+   * The enums and entries `names` asks for, read from what `enumsOf` answered, so a name the description lacks is
+   * refused here rather than read as undefined.
+   *
+   * @throws TypeError naming the first enum or entry missing, `of` naming whose enums they are.
+   */
+  requireEnums<const Names extends EnumNames>(enums: DescribedEnums | undefined, names: Names, of: string): RequiredEnums<Names>;
   service<Service>(id: string): ServiceType<Service>;
   readonly services: Services;
 }

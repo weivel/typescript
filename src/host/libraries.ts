@@ -3,7 +3,7 @@ import koffi from "koffi";
 import { Status } from "../core/constants.js";
 import { optionalTextForC, textForC } from "../core/text.js";
 import { FunctionKind } from "../standard/constants.js";
-import type { PublishedContract } from "../context/index.js";
+import type { PublishedContract } from "../context/state.js";
 import type { LibraryDeclaration, LibraryFunction as DeclaredFunction } from "../standard/index.js";
 import { bindDescribed, type BoundDefinition } from "./description/definition.js";
 import { HandleHoldings } from "./description/handles.js";
@@ -265,7 +265,7 @@ function contractOperations(description: Description): readonly string[] {
 
 /** A contract's description as the contexts publish it: its operations and its enums. */
 function publishedContract(description: Description): PublishedContract {
-  return { operations: contractOperations(description), enums: enumsByName(description.enums) };
+  return { operations: contractOperations(description), enums: enumsByName(description) };
 }
 
 /**
