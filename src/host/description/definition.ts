@@ -149,7 +149,7 @@ class DescribedBinding {
   constructor(description: Description) {
     this.#description = description;
     this.layouts = new DescribedLayouts(description);
-    this.enums = enumsByName(description.enums);
+    this.enums = enumsByName(description);
     this.#nested = new Map(description.definitions.map((nested) => [nested.definition, new DescribedBinding(nested)] as const));
     const blocking = new Set(description.blocking);
     const statusOperations = description.operations.filter((operation) => operation.returns === DescribedReturn.Status);

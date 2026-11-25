@@ -26,8 +26,9 @@ is in [src/context/](../source/src/context/README.md).
   where `Files` is the plugin's own type for that service.
 - `services.enumsOf(service)` answers the enums of the description that bound a definition the plugin got, and
   `capabilities.enumsOf(type)` those of the contract a loaded library publishes for the capability, as
-  [descriptions.md](descriptions.md) and [libraries.md](libraries.md) state; neither reaches the core, so neither
-  throws for a detached context.
+  [descriptions.md](descriptions.md) and [libraries.md](libraries.md) state. Neither reaches the core, so both answer
+  after the context is detached, and `capabilities.enumsOf` answers for any capability, whether or not the manifest
+  names it: enums are a description's facts, not something the core grants.
 - `services.get` answers undefined only when nothing is registered under the id. A refused `get`, `services.ids`,
   `services.watch`, `capabilities.all` and `capabilities.watch` throw the core's `RefusalError`, or an `Error` naming
   the status alone where the core queued no refusal, as for a refusal of reach already reported once. A refusal of

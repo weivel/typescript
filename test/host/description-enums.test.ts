@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PluginContext } from "../../src/context/index.ts";
 import type { BoundDefinition, LoadedLibrary } from "../../src/host/index.ts";
+import { enumsByName } from "../../src/host/description/enums.ts";
+import type { DescribedEnum, Description } from "../../src/host/description/reader.ts";
 import type { LibraryDeclaration } from "../../src/standard/index.ts";
 import { realStandard } from "../real-standard.ts";
 import { alive, createHostWorld, describedLibraryPath, plugin, pluginDirectory, registerDirectory } from "./world.ts";
@@ -85,5 +87,48 @@ describe("the enums of a published contract", () => {
     library.unload();
 
     expect(context.capabilities.enumsOf(capability)).toBeUndefined();
+  });
+});
+
+describe("an enum the plugin requires", () => {
+  it("is answered with exactly the entries it names", () => {
+    const { context } = loaded();
+    const enums = context.services.enumsOf(serviceOf(context, mirrorId));
+
+    const required = context.requireEnums(enums, { described_tier: ["DESCRIBED_TIER_HIGH"] }, mirrorId);
+
+    expect({ ...required.described_tier }).toEqual({ DESCRIBED_TIER_HIGH: 7 });
+    expect(Object.keys(required)).toEqual(["described_tier"]);
+    expect(Object.isFrozen(required.described_tier)).toBe(true);
+  });
+
+  it("is refused, naming the first enum or entry the description lacks", () => {
+    const { context } = loaded();
+    const enums = context.services.enumsOf(serviceOf(context, mirrorId));
+
+    expect(() => context.requireEnums(enums, { described_hue: ["DESCRIBED_HUE_RED"] }, mirrorId)).toThrow(`The description of ${mirrorId} lists no enum described_hue.`);
+    expect(() => context.requireEnums(enums, { described_tier: ["DESCRIBED_TIER_LOW", "DESCRIBED_TIER_MIDDLE"] }, mirrorId)).toThrow(
+      `The enum described_tier of ${mirrorId} has no entry DESCRIBED_TIER_MIDDLE.`,
+    );
+    expect(() => context.requireEnums(undefined, { described_tier: [] }, mirrorId)).toThrow(`${mirrorId} carries no described enums.`);
+  });
+});
+
+function describing(enums: readonly DescribedEnum[]): Description {
+  return { definition: "listing", types: [], enums, operations: [], blocking: [], definitions: [] };
+}
+
+describe("a description that lists weivel_status itself", () => {
+  const listed = (outOfMemory: number): DescribedEnum => ({
+    name: "weivel_status",
+    entries: Object.entries({ ...status, WEIVEL_STATUS_OUT_OF_MEMORY: outOfMemory }).map(([name, number]) => ({ name, number })),
+  });
+
+  it("keeps the one it lists when it is core.h's", () => {
+    expect({ ...enumsByName(describing([listed(4)])).weivel_status }).toEqual(status);
+  });
+
+  it("is refused when the one it lists is not core.h's", () => {
+    expect(() => enumsByName(describing([listed(9)]))).toThrow("The description of listing cannot be bound: it lists a weivel_status that is not core.h's.");
   });
 });
