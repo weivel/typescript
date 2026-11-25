@@ -129,6 +129,28 @@ describe("a provide of a capability no loaded library publishes a contract for",
 });
 
 describe("a library publishing a contract", () => {
+  it("publishes it with no service, read by the standard, registering nothing", () => {
+    const world = checkingWorld();
+    const contractsAlone = JSON.parse(readFileSync(join(stubHostDirectory, "library-declares-a-contract.json"), "utf8"));
+    delete contractsAlone.services;
+    const read = realStandard().readLibrary(JSON.stringify(contractsAlone));
+
+    const library = alive(world.host.loadLibrary(read.value!, stubHostLibraryPath));
+    const context = providerContext(world);
+
+    expect(read.value?.services).toEqual([]);
+    expect([library.services.size, library.definitions.size, library.described.size]).toEqual([0, 0, 0]);
+    expect(mismatchOf(() => context.provide(context.capability(tally), implementation("run"))).subject).toBe("count");
+  });
+
+  it("is refused by the standard's read and by the host when it declares neither a service nor a contract", () => {
+    const world = checkingWorld();
+    const neither: LibraryDeclaration = { ...contractDeclaration(), services: [], contracts: [] };
+
+    expect(realStandard().readLibrary(JSON.stringify({ importName: "neither", version: "1.0.0" })).value).toBeUndefined();
+    expect(() => world.host.loadLibrary(neither, stubHostLibraryPath)).toThrow("declares neither a service nor a contract");
+  });
+
   it("is refused at the load while another live library publishes one for the same capability", () => {
     const world = checkingWorld();
     loadContract(world);

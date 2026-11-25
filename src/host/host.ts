@@ -61,10 +61,14 @@ interface PluginRecord {
 const boundKinds: readonly number[] = [FunctionKind.Bytes, FunctionKind.Definition];
 
 /**
- * Refuses, as the caller's mistake, a declaration the standard's reader would refuse: a kind of neither bytes nor
- * definition, a definition beside another function or with context facts, or bytes functions with no release.
+ * Refuses, as the caller's mistake, a declaration the standard's reader would refuse: one of neither a service nor a
+ * contract, a kind of neither bytes nor definition, a definition beside another function or with context facts, or
+ * bytes functions with no release.
  */
 function refuseMisdeclared(declaration: LibraryDeclaration): void {
+  if (declaration.services.length === 0 && (declaration.contracts ?? []).length === 0) {
+    throw new Error(`${declaration.importName} declares neither a service nor a contract.`);
+  }
   for (const service of declaration.services) {
     const unbound = service.functions.find((declared) => !boundKinds.includes(declared.kind));
     if (unbound !== undefined) {
@@ -357,16 +361,15 @@ export class Host {
    * Unloading unregisters every service at once and refuses every later bytes call; the binary is closed once every
    * definition service has had every holding of it released, or once the host is destroyed.
    *
-   * @throws Error when a declaration the caller built names a kind other than bytes or definition, sets a definition
-   * beside another function or gives one context facts, or names bytes functions and no release; an id is declared
-   * twice or is already registered, by another live library, a plugin or the host itself; the library file is
-   * missing or lacks a symbol its declaration names; a definition answers NULL or a struct smaller than
-   * `2 * sizeof(void *)`; a description is declared beside no definition, to a host given no `descriptionCheck`,
-   * answers NULL, is refused by the check or disagrees with this platform's layout; or a contract is published for a
-   * capability another live library publishes one for: each the caller's mistake, reported to no sink, the binary
-   * closed again. OutOfMemoryError when the description check answers OUT_OF_MEMORY,
-   * the binary closed again. RefusalError when the core refuses one of its registrations, the load then undone as an
-   * unload.
+   * @throws Error when a declaration the caller built declares neither a service nor a contract, names a kind other
+   * than bytes or definition, sets a definition beside another function or gives one context facts, or names bytes
+   * functions and no release; an id is declared twice or is already registered, by another live library, a plugin or
+   * the host itself; the library file is missing or lacks a symbol its declaration names; a definition answers NULL or
+   * a struct smaller than `2 * sizeof(void *)`; a description is declared beside no definition, to a host given no
+   * `descriptionCheck`, answers NULL, is refused by the check or disagrees with this platform's layout; or a contract
+   * is published for a capability another live library publishes one for: each the caller's mistake, reported to no
+   * sink, the binary closed again. OutOfMemoryError when the description check answers OUT_OF_MEMORY, the binary closed
+   * again. RefusalError when the core refuses one of its registrations, the load then undone as an unload.
    */
   loadLibrary(declaration: LibraryDeclaration, libraryPath: string, options: LoadLibraryOptions = {}): LoadedLibrary | HostDestroyed {
     if (this.#destroyed) {
