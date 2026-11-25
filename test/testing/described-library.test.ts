@@ -40,6 +40,13 @@ describe("describedLibrary", () => {
     }
   });
 
+  it("refuses a call through a bound service once closed", async () => {
+    const library = describedLibrary(libraryFolder(readFileSync(join(fixtureDirectory, "library.json"), "utf8")), { coreLibraryPath });
+    const mirror = library.described.get("described-mirror")!;
+    await library.close();
+    await expect(mirror.reflect!({ sample: { label: "late" } })).rejects.toThrow("has been unloaded");
+  });
+
   it("names the declaration the standard refuses", () => {
     const directory = libraryFolder("{}");
     expect(() => describedLibrary(directory, { coreLibraryPath })).toThrow(join(directory, "library.json"));
