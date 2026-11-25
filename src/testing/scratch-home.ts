@@ -64,7 +64,9 @@ function placeLibraries(base: string, sources: Readonly<Record<string, string>>)
 }
 
 /**
- * Sets every variable in the process and answers the function that puts each back as it was.
+ * Sets every variable in the process and answers the function that puts each back as it was. Run restores in the
+ * reverse order of their sets: each puts back what it saw before its own set, so restoring an earlier set before a
+ * later one leaves the earlier set's values behind.
  * @implNote A variable that was unset is deleted on restore: assigning `undefined` to `process.env` stores the text "undefined".
  */
 export function setVariables(variables: Readonly<Record<string, string>>): () => void {
