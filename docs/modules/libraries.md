@@ -29,14 +29,16 @@ bound object, and the operation's promise resolves with its answer, or `none`, o
   `loadLibrary` throw, as the caller's mistake, before anything is registered.
   `LoadedLibrary.definitions` hands its caller the same raw addresses, and that caller holds no registration of
   them, so its use keeps nothing open: each address dies with the binary.
-- A library's `contracts`, read by the standard beside its services, are each checked by `descriptionCheck` and read
+- A library's `contracts`, read by the standard beside its services or in place of them, since a library may publish
+  contracts alone and declare no service, are each checked by `descriptionCheck` and read
   at the load as the operations of its description that answer a status, in its order; the releases, which answer
   nothing, are not among them. Until the unload, `context.provide` of that capability throws a
   `ContractMismatchError` (`code` `contract-mismatch`, `subject` the first of those operations the object does not
   offer as a function) before the core is asked, so a refused implementation is never provided; an object offering
   more, a release or an operation the description does not list, is accepted. A capability no loaded library
   publishes a contract for is provided unchecked, and a second live library publishing one for the same capability
-  makes `loadLibrary` throw as the caller's mistake. The check runs on every provide, which is a call of activation
+  makes `loadLibrary` throw as the caller's mistake, as does a declaration of neither a service nor a contract, which
+  the standard's reader refuses too. The check runs on every provide, which is a call of activation
   and never of a hot path: it adds about 300 ns to a provide of about 3.6 us, measured on Windows under Node 26.
   Until the unload, `context.capabilities.enumsOf` answers the contract's enums, as
   [descriptions.md](descriptions.md) says a bound definition's are answered, and undefined for a capability no loaded
