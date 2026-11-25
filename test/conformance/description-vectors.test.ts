@@ -32,6 +32,12 @@ describe("description/a-definition-declared-without-its-description-loads-as-bef
   });
 });
 
+describe("description/a-library-publishing-only-contracts-loads-and-registers-nothing", () => {
+  it("loads and unloads a library that declares no service and publishes a checked contract, reporting nothing", async () => {
+    await witnessed("description/a-library-publishing-only-contracts-loads-and-registers-nothing");
+  });
+});
+
 describe("description/a-description-answering-another-definition-fails-the-load", () => {
   it("refuses the load as the caller's mistake when a description answers another definition of the same layout, registering neither service", async () => {
     await witnessed("description/a-description-answering-another-definition-fails-the-load");

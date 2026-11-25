@@ -5,7 +5,7 @@ import { EmbeddedNulError } from "../core/text.js";
 import { blockingOperationsOf, boundDefinitionOf, DescribedCallError, none, OperationNotOfferedError, OutOfMemoryError, type DescribedHandle, type LoadedLibrary } from "../host/index.js";
 import { DescribedKind, DescribedRole } from "../host/description/layout.js";
 import { readDescription, type Description, type DescribedType } from "../host/description/reader.js";
-import type { LibraryDeclaration } from "../standard/answers.js";
+import type { LibraryContract, LibraryDeclaration } from "../standard/answers.js";
 import { FunctionKind } from "../standard/constants.js";
 import { refuseUnknownKeys, type Observer } from "./expectations.js";
 import type { LayerVector } from "./vectors.js";
@@ -20,7 +20,8 @@ interface GivenService {
 interface GivenDeclaration {
   readonly importName: string;
   readonly version: string;
-  readonly services: readonly GivenService[];
+  readonly services?: readonly GivenService[];
+  readonly contracts?: readonly LibraryContract[];
 }
 
 type Step =
@@ -78,7 +79,7 @@ function declarationOf(given: GivenDeclaration): LibraryDeclaration {
     importName: given.importName,
     version: given.version,
     release: null,
-    services: given.services.map((service) => ({
+    services: (given.services ?? []).map((service) => ({
       id: service.id,
       functions: service.functions.map((declared) => {
         if (declared.kind !== "definition") {
@@ -88,6 +89,7 @@ function declarationOf(given: GivenDeclaration): LibraryDeclaration {
       }),
       ...(service.description === undefined ? {} : { description: service.description }),
     })),
+    ...(given.contracts === undefined ? {} : { contracts: given.contracts }),
   };
 }
 
