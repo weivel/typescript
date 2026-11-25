@@ -13,3 +13,5 @@ Node resolves from a `node_modules/koffi` at or above the bundle. The core's and
 found at run time beside the bundle, under the file names CMake gives them on that platform, unless `nativeLibraries`
 gives two absolute paths instead, or a caller of the in-process `startHost` names its own. A directory holding the bundle, those two libraries and a `node_modules/koffi` therefore
 runs wherever it is moved.
+
+The package's `weivel-bundle` command runs both: `weivel-bundle program <output directory> [--core <path> --standard <path>]` writes the two program files and `weivel-bundle plugin <entry> <output directory>` the plugin's one, each path printed on a line of its own. `--core` and `--standard` come together or not at all. It exits 0, 2 with the usage line on a misuse, or 1 with the error when bundling fails.

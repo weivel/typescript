@@ -55,7 +55,8 @@
     }
   },
   "bin": {
-    "weivel-host": "dist/program/bin.js"
+    "weivel-host": "dist/program/bin.js",
+    "weivel-bundle": "dist/bundle/bin.js"
   },
   "scripts": {
     "build": "node scripts/native.ts && tsc",
