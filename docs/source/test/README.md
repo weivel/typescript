@@ -13,6 +13,6 @@ The suite vitest runs, one folder per module, plus the conformance kit's vectors
 - [real-core.ts](../../../test/real-core.ts) - a core from `native/`, every event it dispatches recorded
 - [real-standard.ts](../../../test/real-standard.ts) - the standard from `native/`, and a fresh directory of files for it to read
 - [standard/](standard/) - the standard module: declarations against its layouts, defaults, entries, manifests and services
-- [testing/](testing/) - `scratchHome` and `freePort`
+- [testing/](testing/) - `scratchHome`, `setVariables`, `describedLibrary` and `freePort`
 - [timer/](timer/) - the core timer: arming, re-arming and the scheduler
 <!-- end generated -->
