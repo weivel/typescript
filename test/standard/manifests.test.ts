@@ -76,7 +76,12 @@ describe("loading a manifest", () => {
     const missing = standard.loadManifest(JSON.stringify({ importName: "clock", api: 1 }));
     const spaced = standard.loadManifest(manifestText("clock", { language: "Type Script" }));
 
-    expect(missing).toMatchObject({ status: Status.Refused, value: undefined, language: undefined, paths: ["language"] });
+    expect(missing).toMatchObject({
+      status: Status.Refused,
+      value: undefined,
+      language: undefined,
+      paths: ["language"],
+    });
     expect(missing.refusal?.code).toBe(StandardRefusalCode.MissingField);
     expect(spaced).toMatchObject({ status: Status.Refused, language: undefined, paths: ["language"] });
     expect(spaced.refusal?.code).toBe(StandardRefusalCode.InvalidValue);
@@ -166,7 +171,13 @@ describe("discovering a directory", () => {
       entryPresent: false,
     });
     expect(ten).toMatchObject({ identityId: "forge:10", entryPath: `${directory}/ten.js`, entryPresent: true });
-    expect(alone).toMatchObject({ identityPath: null, identityId: null, identity: null, entryPath: null, language: "c" });
+    expect(alone).toMatchObject({
+      identityPath: null,
+      identityId: null,
+      identity: null,
+      entryPath: null,
+      language: "c",
+    });
     expect(ten!.language).toBe("typescript");
   });
 

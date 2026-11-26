@@ -157,7 +157,10 @@ export class Standard {
     return this.#withStruct("weivel_standard_discovery", "weivel_standard_discovery_release", (discovery) => {
       const status = this.#functions.weivel_standard_discover(encodedDirectory, encodedOptions, discovery) as Status;
       const fields = decodeStandardStruct(discovery, "weivel_standard_discovery");
-      const reader = { view: (manifest: object) => this.#manifestView(manifest), language: (manifest: object) => this.#manifestLanguage(manifest) };
+      const reader = {
+        view: (manifest: object) => this.#manifestView(manifest),
+        language: (manifest: object) => this.#manifestLanguage(manifest),
+      };
       const found = status === Status.Ok ? readDiscovery(fields, reader) : undefined;
       return answer(status, found, readStandardRefusal(fields.refusal as Record<string, unknown>));
     });

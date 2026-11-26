@@ -27,7 +27,10 @@ export interface StandardAnswer<Value> {
 /** A loaded manifest's answer: beside the refusal, every field validation found wrong, in the standard's order. */
 export interface ManifestAnswer extends StandardAnswer<Manifest> {
   readonly paths: readonly string[];
-  /** The weivel implementation the manifest says loads the plugin, kept beside it since the core's manifest has no place for it; set on OK. */
+  /**
+   * The weivel implementation the manifest says loads the plugin, kept beside it since the core's manifest has no
+   * place for it; set on OK.
+   */
   readonly language: string | undefined;
 }
 

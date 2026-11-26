@@ -243,7 +243,13 @@ export function hostVectorManifest(
   if (provides.length > 0) {
     services.provides = [...provides];
   }
-  const manifest: Record<string, NativeValue> = { api: 1, importName: name, language: "typescript", entry: entryFileName, services };
+  const manifest: Record<string, NativeValue> = {
+    api: 1,
+    importName: name,
+    language: "typescript",
+    entry: entryFileName,
+    services,
+  };
   if (implemented.length > 0) {
     manifest.capabilities = { provides: [...implemented] };
   }

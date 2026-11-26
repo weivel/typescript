@@ -87,7 +87,8 @@ export function pluginDirectory(plugins: readonly WrittenPlugin[]): string {
   temporaryDirectories.push(directory);
   for (const written of plugins) {
     const name = written.manifest.importName;
-    writeFileSync(join(directory, `${name}.json`), JSON.stringify({ api: 1, language: "typescript", ...written.manifest }));
+    const manifest = { api: 1, language: "typescript", ...written.manifest };
+    writeFileSync(join(directory, `${name}.json`), JSON.stringify(manifest));
     if (written.entrySource !== undefined && typeof written.manifest.entry === "string") {
       writeFileSync(join(directory, written.manifest.entry), written.entrySource);
     }

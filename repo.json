@@ -14,12 +14,12 @@
     {
       "id": "github:1456093642",
       "importName": "standard",
-      "commit": "302bbd095a974d826ce005d26436072c7e1c5376"
+      "commit": "c94bdf2b6e8dd1ba4930a584fafb2e14a2c43145"
     },
     {
       "id": "github:1426141679",
       "importName": "conformance",
-      "commit": "329c9c470f5906ca5e110b074b39568239eb1168"
+      "commit": "26f107cb225de17c7f8c87c840e70a6d3a807f56"
     }
   ]
 }
