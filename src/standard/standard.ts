@@ -138,9 +138,11 @@ export class Standard {
         ) as Status;
         const fields = decodeStandardStruct(validation, "weivel_standard_validation");
         const manifest = status === Status.Ok ? copyManifestView(this.#manifestView(loaded[0] as object)) : undefined;
+        const language = status === Status.Ok ? (this.#manifestLanguage(loaded[0] as object) ?? undefined) : undefined;
         return {
           ...answer(status, manifest, readStandardRefusal(fields.refusal as Record<string, unknown>)),
           paths: readStrings(fields.paths as DecodedList),
+          language,
         };
       } finally {
         this.#functions.weivel_standard_manifest_release(loaded[0]);
@@ -155,7 +157,8 @@ export class Standard {
     return this.#withStruct("weivel_standard_discovery", "weivel_standard_discovery_release", (discovery) => {
       const status = this.#functions.weivel_standard_discover(encodedDirectory, encodedOptions, discovery) as Status;
       const fields = decodeStandardStruct(discovery, "weivel_standard_discovery");
-      const found = status === Status.Ok ? readDiscovery(fields, (manifest) => this.#manifestView(manifest)) : undefined;
+      const reader = { view: (manifest: object) => this.#manifestView(manifest), language: (manifest: object) => this.#manifestLanguage(manifest) };
+      const found = status === Status.Ok ? readDiscovery(fields, reader) : undefined;
       return answer(status, found, readStandardRefusal(fields.refusal as Record<string, unknown>));
     });
   }
@@ -260,6 +263,10 @@ export class Standard {
 
   #manifestView(manifest: object): object {
     return this.#functions.weivel_standard_manifest_view(manifest) as object;
+  }
+
+  #manifestLanguage(manifest: object): string | null {
+    return this.#functions.weivel_standard_manifest_language(manifest) as string | null;
   }
 
   #withStruct<Value>(name: StandardStructName, release: keyof StandardFunctions, use: (pointer: object) => Value): Value {
