@@ -10,6 +10,7 @@ const standard = realStandard();
 const fullManifest = {
   importName: "clock",
   api: 2,
+  language: "typescript",
   entry: "clock.js",
   targets: ["node"],
   capabilities: { provides: ["clock.tick"], consumes: ["clock.tock"] },
@@ -21,7 +22,7 @@ const fullManifest = {
 };
 
 function manifestText(importName: string, extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ importName, api: 1, ...extra });
+  return JSON.stringify({ importName, api: 1, language: "typescript", ...extra });
 }
 
 function identityText(id: string, name: string): string {
@@ -35,6 +36,7 @@ describe("loading a manifest", () => {
     expect(loaded.status).toBe(Status.Ok);
     expect(loaded.refusal).toBeUndefined();
     expect(loaded.paths).toEqual([]);
+    expect(loaded.language).toBe("typescript");
     expect(loaded.value).toEqual({
       importName: "clock",
       api: 2,
@@ -60,6 +62,29 @@ describe("loading a manifest", () => {
       permissions: ["time"],
       identity: undefined,
     });
+  });
+
+  it("answers the language the manifest names beside the manifest, which carries no language of its own", () => {
+    const loaded = standard.loadManifest(manifestText("clock", { language: "rust" }));
+
+    expect(loaded.status).toBe(Status.Ok);
+    expect(loaded.language).toBe("rust");
+    expect(loaded.value).not.toHaveProperty("language");
+  });
+
+  it("refuses a manifest that names no language, or one outside the grammar, at its path", () => {
+    const missing = standard.loadManifest(JSON.stringify({ importName: "clock", api: 1 }));
+    const spaced = standard.loadManifest(manifestText("clock", { language: "Type Script" }));
+
+    expect(missing).toMatchObject({
+      status: Status.Refused,
+      value: undefined,
+      language: undefined,
+      paths: ["language"],
+    });
+    expect(missing.refusal?.code).toBe(StandardRefusalCode.MissingField);
+    expect(spaced).toMatchObject({ status: Status.Refused, language: undefined, paths: ["language"] });
+    expect(spaced.refusal?.code).toBe(StandardRefusalCode.InvalidValue);
   });
 
   it("validates before it reads, refusing what the reader alone would convert", () => {
@@ -121,7 +146,7 @@ describe("discovering a directory", () => {
       "ten_identity.json": identityText("forge:10", "ten-repository"),
       "nine.json": manifestText("nine", { entry: "missing.js" }),
       "nine_identity.json": identityText("forge:9/tools", "nine-repository"),
-      "alone.json": manifestText("alone"),
+      "alone.json": manifestText("alone", { language: "c" }),
       "broken.json": "{",
       "misnamed.json": manifestText("other"),
       "notes.txt": "not a manifest",
@@ -146,7 +171,14 @@ describe("discovering a directory", () => {
       entryPresent: false,
     });
     expect(ten).toMatchObject({ identityId: "forge:10", entryPath: `${directory}/ten.js`, entryPresent: true });
-    expect(alone).toMatchObject({ identityPath: null, identityId: null, identity: null, entryPath: null });
+    expect(alone).toMatchObject({
+      identityPath: null,
+      identityId: null,
+      identity: null,
+      entryPath: null,
+      language: "c",
+    });
+    expect(ten!.language).toBe("typescript");
   });
 
   it("answers every file it could not take a plugin from, in file name order, with the standard's refusal", () => {

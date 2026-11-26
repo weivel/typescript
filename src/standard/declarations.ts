@@ -249,6 +249,7 @@ type Signature = [result: TypeSpec, parameters: TypeSpec[]];
 const standardSignatures = {
   weivel_standard_refusal_release: ["void", [pointerTo("weivel_standard_refusal")]],
   weivel_standard_manifest_view: [pointer, [pointer]],
+  weivel_standard_manifest_language: [text, [pointer]],
   weivel_standard_manifest_release: ["void", [pointer]],
   weivel_standard_validation_release: ["void", [pointerTo("weivel_standard_validation")]],
   weivel_standard_load_manifest: [

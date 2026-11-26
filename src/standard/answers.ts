@@ -27,6 +27,11 @@ export interface StandardAnswer<Value> {
 /** A loaded manifest's answer: beside the refusal, every field validation found wrong, in the standard's order. */
 export interface ManifestAnswer extends StandardAnswer<Manifest> {
   readonly paths: readonly string[];
+  /**
+   * The weivel implementation the manifest says loads the plugin, kept beside it since the core's manifest has no
+   * place for it; set on OK.
+   */
+  readonly language: string | undefined;
 }
 
 export interface ValidationOptions {
@@ -47,6 +52,8 @@ export interface Identity {
 export interface DiscoveredPlugin {
   /** The manifest as the standard loaded it, with no identity: the identity file's id is the host's to set. */
   readonly manifest: Manifest;
+  /** The weivel implementation the manifest says loads the plugin. */
+  readonly language: string;
   readonly manifestPath: string;
   readonly identityPath: string | null;
   readonly identityId: string | null;
@@ -145,10 +152,17 @@ export function readIdentity(fields: DecodedFields): Identity {
   };
 }
 
-function readDiscoveredPlugin(fields: DecodedFields, manifestView: (manifest: object) => object): DiscoveredPlugin {
+/** What this layer reads of a weivel_standard_manifest the standard answered. */
+export interface ManifestReader {
+  view(manifest: object): object;
+  language(manifest: object): string | null;
+}
+
+function readDiscoveredPlugin(fields: DecodedFields, reader: ManifestReader): DiscoveredPlugin {
   const identityPath = fields.identity_path as string | null;
   return {
-    manifest: copyManifestView(manifestView(fields.manifest as object)),
+    manifest: copyManifestView(reader.view(fields.manifest as object)),
+    language: reader.language(fields.manifest as object)!,
     manifestPath: fields.manifest_path as string,
     identityPath,
     identityId: fields.identity_id as string | null,
@@ -163,13 +177,13 @@ function readDiscoveryFailure(fields: DecodedFields): DiscoveryFailure {
   return { file: fields.file as string, refusal: readStandardRefusal(fields.refusal as DecodedFields)! };
 }
 
-export function readDiscovery(fields: DecodedFields, manifestView: (manifest: object) => object): Discovery {
+export function readDiscovery(fields: DecodedFields, reader: ManifestReader): Discovery {
   return {
     plugins: readFixedElements(
       fields.plugins as NativePointer,
       Number(fields.plugin_count),
       "weivel_standard_discovered_plugin",
-    ).map((plugin) => readDiscoveredPlugin(plugin, manifestView)),
+    ).map((plugin) => readDiscoveredPlugin(plugin, reader)),
     failures: readFixedElements(
       fields.failures as NativePointer,
       Number(fields.failure_count),
