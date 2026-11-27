@@ -116,12 +116,12 @@ describe("plugins the standard discovers", () => {
 
   it("carry the identity file's id in the manifest the host registers", () => {
     const world = createHostWorld();
-    const directory = pluginDirectory([{ ...plugin({ importName: "first" }), identity: { id: "forge:7", name: "first-repository" } }]);
+    const directory = pluginDirectory([{ ...plugin({ importName: "first" }), identity: { id: "git:4b825dc642cb6eb9a060e54bf8d69288fbee4904", name: "first-repository" } }]);
 
     const registration = registerDirectory(world, directory);
 
-    expect(world.host.plugin(registration.registered.get("first")!)?.manifest.identity).toBe("forge:7");
-    expect(hostInternals(world.host).core.ledgerEntry(registration.registered.get("first")!).value?.identity).toBe("forge:7");
+    expect(world.host.plugin(registration.registered.get("first")!)?.manifest.identity).toBe("git:4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+    expect(hostInternals(world.host).core.ledgerEntry(registration.registered.get("first")!).value?.identity).toBe("git:4b825dc642cb6eb9a060e54bf8d69288fbee4904");
   });
 
   it("are refused by the core as data when a plugin of the name is registered already", () => {

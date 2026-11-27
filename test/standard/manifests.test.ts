@@ -16,7 +16,7 @@ const fullManifest = {
   capabilities: { provides: ["clock.tick"], consumes: ["clock.tock"] },
   services: {
     provides: ["clock:now", { id: "clock:zone", attributes: { latency: 3.5 } }],
-    consumes: ["calendar:day", { id: "calendar:week", provider: "forge:42", degradable: true, constraints: { latency: 9 } }],
+    consumes: ["calendar:day", { id: "calendar:week", provider: "git:4b825dc642cb6eb9a060e54bf8d69288fbee4904", degradable: true, constraints: { latency: 9 } }],
   },
   permissions: ["time"],
 };
@@ -52,7 +52,7 @@ describe("loading a manifest", () => {
           { id: "calendar:day", provider: undefined, optional: Choice.Default, degradable: Choice.Default, constraints: [] },
           {
             id: "calendar:week",
-            provider: "forge:42",
+            provider: "git:4b825dc642cb6eb9a060e54bf8d69288fbee4904",
             optional: Choice.Default,
             degradable: Choice.Yes,
             constraints: [{ name: "latency", value: 9 }],
@@ -143,9 +143,9 @@ describe("discovering a directory", () => {
     return directoryWith({
       "ten.json": manifestText("ten", { entry: "ten.js" }),
       "ten.js": "",
-      "ten_identity.json": identityText("forge:10", "ten-repository"),
+      "ten_identity.json": identityText("git:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "ten-repository"),
       "nine.json": manifestText("nine", { entry: "missing.js" }),
-      "nine_identity.json": identityText("forge:9/tools", "nine-repository"),
+      "nine_identity.json": identityText("git:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tools", "nine-repository"),
       "alone.json": manifestText("alone", { language: "c" }),
       "broken.json": "{",
       "misnamed.json": manifestText("other"),
@@ -164,13 +164,13 @@ describe("discovering a directory", () => {
     expect(nine).toMatchObject({
       manifestPath: `${directory}/nine.json`,
       identityPath: `${directory}/nine_identity.json`,
-      identityId: "forge:9/tools",
+      identityId: "git:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tools",
       repositoryName: "nine-repository",
-      identity: { kind: IdentityKind.Forge, forge: "forge", host: null, number: 9n, segments: ["tools"] },
+      identity: { kind: IdentityKind.Git, name: null, commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", segments: ["tools"] },
       entryPath: `${directory}/missing.js`,
       entryPresent: false,
     });
-    expect(ten).toMatchObject({ identityId: "forge:10", entryPath: `${directory}/ten.js`, entryPresent: true });
+    expect(ten).toMatchObject({ identityId: "git:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", entryPath: `${directory}/ten.js`, entryPresent: true });
     expect(alone).toMatchObject({
       identityPath: null,
       identityId: null,
@@ -199,9 +199,9 @@ describe("discovering a directory", () => {
     const manifest = identifiedManifest(nine);
     const registered = core.registerManifest(manifest);
 
-    expect(manifest.identity).toBe("forge:9/tools");
+    expect(manifest.identity).toBe("git:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tools");
     expect(nine.manifest.identity).toBeUndefined();
-    expect(core.ledgerEntry(registered.value!).value?.identity).toBe("forge:9/tools");
+    expect(core.ledgerEntry(registered.value!).value?.identity).toBe("git:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tools");
   });
 
   it("passes the host's well-known services to every manifest it loads", () => {

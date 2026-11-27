@@ -39,13 +39,11 @@ export interface ValidationOptions {
   readonly wellKnownServices?: readonly string[];
 }
 
-/** A repository identity taken apart; the fields a kind does not use are null, and `number` is 0n for a local one. */
+/** A repository identity taken apart: a local one's `name` or a git one's root `commit` in hex, the other null. */
 export interface Identity {
   readonly kind: IdentityKind;
   readonly name: string | null;
-  readonly forge: string | null;
-  readonly host: string | null;
-  readonly number: bigint;
+  readonly commit: string | null;
   readonly segments: readonly string[];
 }
 
@@ -145,9 +143,7 @@ export function readIdentity(fields: DecodedFields): Identity {
   return {
     kind: fields.kind as IdentityKind,
     name: readBytesAsText(fields.name as NativePointer, Number(fields.name_length)),
-    forge: fields.forge as string | null,
-    host: fields.host as string | null,
-    number: BigInt(fields.number as number | bigint),
+    commit: fields.commit as string | null,
     segments: readStrings({ items: fields.segments as NativePointer, count: Number(fields.segment_count) } as DecodedList),
   };
 }

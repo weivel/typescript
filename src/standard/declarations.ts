@@ -33,17 +33,15 @@ const weivel_standard_validation = structOf({
   refusal: weivel_standard_refusal,
   storage: pointer,
 });
-/** `name` is read by `name_length`, since a local name may itself hold a NUL. */
 const weivel_standard_identity = structOf({
   ...sizeField,
   kind: "uint32_t",
   name: pointer,
   name_length: count,
-  forge: text,
-  host: text,
-  number: "uint64_t",
   segments: koffi.pointer(text),
   segment_count: count,
+  commit: text,
+  commit_length: count,
 });
 const weivel_standard_discovered_plugin = structOf({
   manifest: pointer,

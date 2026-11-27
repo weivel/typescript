@@ -20,7 +20,7 @@ export type StandardRefusalCode = ValueOf<typeof StandardRefusalCode> | number;
 
 export const IdentityKind = {
   Local: 0,
-  Forge: 1,
+  Git: 1,
 } as const;
 export type IdentityKind = ValueOf<typeof IdentityKind> | number;
 

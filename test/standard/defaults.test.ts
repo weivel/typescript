@@ -20,46 +20,47 @@ describe("the standard's service ids", () => {
 });
 
 describe("identities", () => {
+  const root = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+  const longRoot = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
   it("are taken apart as the standard takes them", () => {
-    expect(standard.parseIdentity("gitea@git.example.com:0123/a/b")).toEqual({
+    expect(standard.parseIdentity(`git:${root}/a/b`)).toEqual({
       status: Status.Ok,
       refusal: undefined,
-      value: { kind: IdentityKind.Forge, name: null, forge: "gitea", host: "git.example.com", number: 123n, segments: ["a", "b"] },
+      value: { kind: IdentityKind.Git, name: null, commit: root, segments: ["a", "b"] },
     });
+    expect(standard.parseIdentity(`git:${longRoot}`).value).toMatchObject({ kind: IdentityKind.Git, commit: longRoot });
   });
 
-  it("keep a local name by its length, a NUL and every UTF-8 byte included", () => {
-    expect(standard.parseIdentity("local:Café\u0000x").value).toMatchObject({
-      kind: IdentityKind.Local,
-      name: "Café\u0000x",
-      forge: null,
-      number: 0n,
-    });
+  it("keep a local name with every UTF-8 byte", () => {
+    expect(standard.parseIdentity("local:Café").value).toMatchObject({ kind: IdentityKind.Local, name: "Café", commit: null });
   });
 
-  it("answer the standard's refusal for a text that is not one, or a number past 64 bits", () => {
+  it("answer the standard's refusal for a text that is not one, a forge number included", () => {
     expect(standard.parseIdentity("calendar")).toMatchObject({
       status: Status.Refused,
       value: undefined,
-      refusal: { code: StandardRefusalCode.InvalidValue, path: "" },
+      refusal: { code: StandardRefusalCode.InvalidValue, path: "", detail: expect.stringMatching(/^byte 0:/) },
     });
-    expect(standard.parseIdentity("forge:18446744073709551616").refusal?.code).toBe(StandardRefusalCode.Unrepresentable);
-    expect(standard.parseIdentity("forge:18446744073709551615").value?.number).toBe(18446744073709551615n);
+    expect(standard.parseIdentity("forge:123").refusal?.code).toBe(StandardRefusalCode.InvalidValue);
+    expect(standard.parseIdentity(`git:${root}0`).refusal?.detail).toMatch(/^byte 44:/);
+    expect(standard.parseIdentity("local:a\u0000b").refusal?.detail).toMatch(/^byte 7:/);
   });
 
-  it("are ordered by the standard: numbers as numbers, leading zeros ignored, local first", () => {
-    expect(standard.compareIdentities("forge:9", "forge:10").value).toBeLessThan(0);
-    expect(standard.compareIdentities("forge:007", "forge:7").value).toBe(0);
-    expect(standard.compareIdentities("forge:1", "local:a").value).toBeGreaterThan(0);
+  it("are ordered by the standard: local first, then the root's hex as text, then the segments", () => {
+    expect(standard.compareIdentities("local:z", `git:${root}`).value).toBe(-1);
+    expect(standard.compareIdentities(`git:${longRoot}`, `git:${root}`).value).toBe(1);
+    expect(standard.compareIdentities(`git:${root}`, `git:${root}/a`).value).toBe(-1);
+    expect(standard.compareIdentities(`git:${root}/a`, `git:${root}/a`).value).toBe(0);
   });
 
   it("refuse a comparison with either side not an identity, answering that side's refusal", () => {
-    expect(standard.compareIdentities("forge:1", "Forge:1")).toMatchObject({
+    expect(standard.compareIdentities(`git:${root}`, "Git:1")).toMatchObject({
       status: Status.Refused,
       value: undefined,
       refusal: { code: StandardRefusalCode.InvalidValue },
     });
-    expect(standard.compareIdentities("calendar", "forge:1").status).toBe(Status.Refused);
+    expect(standard.compareIdentities("calendar", `git:${root}`).status).toBe(Status.Refused);
   });
 });
 
