@@ -10,7 +10,7 @@ jobs:
     uses: intisy/workflows/.github/workflows/drift.yml@main
     with:
       kit_repository: weivel/conformance
-      kit_ref: 26f107cb225de17c7f8c87c840e70a6d3a807f56
+      kit_ref: c0fa305065737c9c237f7202460cf4c744ecd634
       role: typescript
       language: typescript
       checks: purity names parity layers
